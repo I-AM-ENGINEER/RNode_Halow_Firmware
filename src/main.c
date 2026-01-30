@@ -22,6 +22,7 @@
 #include "lib/net/skmonitor/skmonitor.h"
 #include "pairled.h"
 #include "syscfg.h"
+#include "lib/lmac/lmac_def.h"
 #ifdef MULTI_WAKEUP
 #include "lib/common/sleep_api.h"
 #include "hal/gpio.h"
@@ -217,86 +218,87 @@ __init static void sys_wifi_start_acs(void *ops)
     }
 }
 
-__init static void sys_wifi_init(void)
-{
-    struct lmac_init_param lparam;
-    struct ieee80211_initparam param;
+// __init static void sys_wifi_init(void)
+// {
+//     struct lmac_init_param lparam;
+//     struct ieee80211_initparam param;
 
-    skbpool_init(SKB_POOL_ADDR, (uint32)SKB_POOL_SIZE, 90, 0);
-    os_memset(&lparam, 0, sizeof(lparam));
-    lparam.rxbuf = WIFI_RX_BUFF_ADDR;
-    lparam.rxbuf_size = WIFI_RX_BUFF_SIZE;
-    lparam.tdma_buff = TDMA_BUFF_ADDR;
-    lparam.tdma_buff_size = TDMA_BUFF_SIZE;
+//     skbpool_init(SKB_POOL_ADDR, (uint32)SKB_POOL_SIZE, 90, 0);
+//     os_memset(&lparam, 0, sizeof(lparam));
+//     lparam.rxbuf = WIFI_RX_BUFF_ADDR;
+//     lparam.rxbuf_size = WIFI_RX_BUFF_SIZE;
+//     lparam.tdma_buff = TDMA_BUFF_ADDR;
+//     lparam.tdma_buff_size = TDMA_BUFF_SIZE;
 
-#ifdef MACBUS_USB
-    lparam.uart_tx_io = 1;//pa11
-#else
-    #ifdef UART_TX_PA31
-        lparam.uart_tx_io = 2;//pa31
-    #else
-        lparam.uart_tx_io = 0;//pa13
-    #endif
-#endif
-    //os_printf("uart_tx_io=%d in main\r\n",lparam.uart_tx_io);
+// #ifdef MACBUS_USB
+//     lparam.uart_tx_io = 1;//pa11
+// #else
+//     #ifdef UART_TX_PA31
+//         lparam.uart_tx_io = 2;//pa31
+//     #else
+//         lparam.uart_tx_io = 0;//pa13
+//     #endif
+// #endif
+//     //os_printf("uart_tx_io=%d in main\r\n",lparam.uart_tx_io);
 
-#ifdef DUAL_ANT_OPT
-    lparam.dual_ant = 1;//enable dual ant
-#else
-    lparam.dual_ant = 0;//disable dual ant
-#endif
+// #ifdef DUAL_ANT_OPT
+//     lparam.dual_ant = 1;//enable dual ant
+// #else
+//     lparam.dual_ant = 0;//disable dual ant
+// #endif
+    
+//     struct lmac_ops lmacops = lmac_ah_init(&lparam);
 
-    lmacops = lmac_ah_init(&lparam);
+//     struct ieee80211_initparam param;
+//     os_memset(&param, 0, sizeof(param));
+//     param.vif_maxcnt = 4;
+//     param.sta_maxcnt = sys_cfgs.sta_max ? sys_cfgs.sta_max : 8;
+//     param.bss_maxcnt = 32;
+//     param.bss_lifetime  = 300; //300 seconds
+//     param.evt_cb = sys_ieee80211_event_cb;
 
-    os_memset(&param, 0, sizeof(param));
-    param.vif_maxcnt = 4;
-    param.sta_maxcnt = sys_cfgs.sta_max ? sys_cfgs.sta_max : 8;
-    param.bss_maxcnt = 32;
-    param.bss_lifetime  = 300; //300 seconds
-    param.evt_cb = sys_ieee80211_event_cb;
+//     ieee80211_init(&param);
+//     ieee80211_support_txw830x(lmacops);
+//     wifi_mgr_init(FMAC_MAC_BUS, WIFIMGR_FRM_TYPE, DRV_AGGSIZE, lmacops, NULL);
 
-    ieee80211_init(&param);
-    ieee80211_support_txw830x(lmacops);
-    wifi_mgr_init(FMAC_MAC_BUS, WIFIMGR_FRM_TYPE, DRV_AGGSIZE, lmacops, NULL);
+//     ieee80211_deliver_init(128, 60);
 
-    ieee80211_deliver_init(128, 60);
+// #if WIFI_AP_SUPPORT
+//     sys_wifi_ap_init();
+// #endif
 
-#if WIFI_AP_SUPPORT
-    sys_wifi_ap_init();
-#endif
+// #if WIFI_STA_SUPPORT
+//     sys_wifi_sta_init();
+// #endif
 
-#if WIFI_STA_SUPPORT
-    sys_wifi_sta_init();
-#endif
+// #if WIFI_WNBAP_SUPPORT
+//     sys_wifi_wnbap_init();
+// #endif
 
-#if WIFI_WNBAP_SUPPORT
-    sys_wifi_wnbap_init();
-#endif
+// #if WIFI_WNBSTA_SUPPORT
+//     sys_wifi_wnbsta_init();
+// #endif
 
-#if WIFI_WNBSTA_SUPPORT
-    sys_wifi_wnbsta_init();
-#endif
+// #ifdef CONFIG_SLEEP
+// #if WIFI_PSALIVE_SUPPORT
+//     wifi_mgr_enable_psalive();
+// #endif
 
-#ifdef CONFIG_SLEEP
-#if WIFI_PSALIVE_SUPPORT
-    wifi_mgr_enable_psalive();
-#endif
+// #if WIFI_PSCONNECT_SUPPORT
+//     wifi_mgr_enable_psconnect();
+// #endif
+// #endif
 
-#if WIFI_PSCONNECT_SUPPORT
-    wifi_mgr_enable_psconnect();
-#endif
-#endif
+// #if WIFI_MGR_CMD
+//     wifi_mgrcmd_enable();
+// #endif
 
-#if WIFI_MGR_CMD
-    wifi_mgrcmd_enable();
-#endif
-
-#if WIFI_DHCPC_SUPPORT
-    wifi_mgr_enable_dhcpc();
-#endif
-    sys_wifi_start_acs(lmacops);
-    sys_wifi_start();
-}
+// #if WIFI_DHCPC_SUPPORT
+//     wifi_mgr_enable_dhcpc();
+// #endif
+//     sys_wifi_start_acs(lmacops);
+//     sys_wifi_start();
+// }
 
 __init static void sys_network_init(void)
 {
@@ -403,29 +405,159 @@ static int32 sys_main_loop(struct os_work *work)
 
     /* blink PA7 */
     pa7_val = !pa7_val;
-    gpio_set_val(PA_7, pa7_val);
+    //gpio_set_val(PA_7, pa7_val);
 
     /* run again after 1000 ms */
-    os_printf("1234\n");
+    //os_printf("1234\n");
     //uart_putc(uart, int8 value)
     //hgprintf("sys main loop\r\n");
-    os_run_work_delay(&main_wk, 1000);
+    os_run_work_delay(&main_wk, 100);
+
+
+    uint8 payload[64];
+    for (unsigned i = 0; i < sizeof(payload); i++) {
+        payload[i] = (uint8)i;
+    }
+    //sys_wifi_start_acs(lmacops);
+    //ah_ce_start()
+    //(void)lmac_raw_tx_once(ops, payload, sizeof(payload));
     return 0;
+}
+
+__init static void sys_wifi_init(void)
+{
+    struct lmac_init_param lparam;
+    struct ieee80211_initparam param;
+
+    sys_cfgs.wifi_mode = WIFI_MODE_AP;
+    skbpool_init(SKB_POOL_ADDR, (uint32)SKB_POOL_SIZE, 90, 0);
+    os_memset(&lparam, 0, sizeof(lparam));
+    lparam.rxbuf = WIFI_RX_BUFF_ADDR;
+    lparam.rxbuf_size = WIFI_RX_BUFF_SIZE;
+    lparam.tdma_buff = TDMA_BUFF_ADDR;
+    lparam.tdma_buff_size = TDMA_BUFF_SIZE;
+
+#ifdef DUAL_ANT_OPT
+    lparam.dual_ant = 1;//enable dual ant
+#else
+    lparam.dual_ant = 0;//disable dual ant
+#endif
+
+    lmacops = lmac_ah_init(&lparam); 
+    os_memset(&param, 0, sizeof(param));
+    param.vif_maxcnt = 4;
+    param.sta_maxcnt = SYS_STA_MAX;
+    param.bss_maxcnt = 4;
+    param.bss_lifetime = 300; //300 seconds
+    param.evt_cb = sys_ieee80211_event_cb;
+    ieee80211_init(&param);
+    ieee80211_support_txw830x(lmacops);
+
+    ieee80211_deliver_init(128, 60);
+    wificfg_set_beacon_int(500);
+
+    ieee80211_iface_create_ap(WIFI_MODE_AP, IEEE80211_BAND_S1GHZ);
+    ieee80211_pair_enable(WIFI_MODE_AP, WIFI_PAIR_MAGIC);
+    wificfg_flush(WIFI_MODE_AP);
+    //sys_wifi_ap_init();
+    //os_sleep(1);
+    //sys_wifi_sta_init();
+    //sys_wifi_wnbap_init();
+    //sys_wifi_wnbsta_init();
+
+//#if WIFI_PSALIVE_SUPPORT
+//    wifi_mgr_enable_psalive();
+//#endif
+    sys_wifi_start_acs(lmacops);
+    //sys_wifi_start();
+    
+    ieee80211_iface_start(WIFI_MODE_AP);
+    ieee80211_iface_start(WIFI_MODE_WNBAP);
+    //sys_wifi_
 }
 
 __init int main(void)
 {
     extern uint32 __sinit, __einit;
     mcu_watchdog_timeout(0);
+    
+    
+
     //sys_cfg_load();
     //syscfg_check();
 	
-	gpio_set_dir(PA_7, GPIO_DIR_OUTPUT);
-    gpio_set_val(PA_7, 0);
+	//gpio_set_dir(PA_7, GPIO_DIR_OUTPUT);
+    //gpio_set_val(PA_7, 0);
 	
     sys_event_init(32);
     sys_event_take(0xffffffff, sys_event_hdl, 0);
+    
+    sys_cfg_load();
+    //syscfg_set_default_val();
+    syscfg_check();
+    sys_cfgs.super_pwr_set = 1;
+    sys_wifi_init();
+    
+	OS_WORK_INIT(&main_wk, sys_main_loop, 0);
+    os_run_work_delay(&main_wk, 1000);
+    sysheap_collect_init(&sram_heap, (uint32)&__sinit, (uint32)&__einit);
+    os_printf("use default params.\r\n");
+    return 0;
+
+    //sys_check_wkreason(WKREASON_START_UP);
+
+    return 0;
+
+
+    
+
+    struct lmac_init_param lparam;
+
+    skbpool_init(SKB_POOL_ADDR, (uint32)SKB_POOL_SIZE, 90, 0);
+    os_memset(&lparam, 0, sizeof(lparam));
+    lparam.rxbuf = WIFI_RX_BUFF_ADDR;
+    lparam.rxbuf_size = WIFI_RX_BUFF_SIZE;
+    lparam.tdma_buff = TDMA_BUFF_ADDR;
+    lparam.tdma_buff_size = TDMA_BUFF_SIZE;
+
+    lparam.uart_tx_io = 0;//pa13
+    os_printf("uart_tx_io=%d in main\r\n",lparam.uart_tx_io);
+
+    //struct lmac_ops *
+    lmacops = (struct lmac_ops*)lmac_ah_init(&lparam);
+    if (lmacops == NULL) {
+        return 0;
+    }
+
+    lmac_radio_onoff(lmacops, 1);
+    lmac_set_pri_chan(lmacops, 3);
+    lmac_set_bss_bw(lmacops, 2);
+    lmac_set_tx_bw(lmacops, 2);
+    lmac_set_txpower(lmacops, 8);
+
+
+    struct ieee80211_initparam param;
+     os_memset(&param, 0, sizeof(param));
+     param.vif_maxcnt = 4;
+     param.sta_maxcnt = sys_cfgs.sta_max ? sys_cfgs.sta_max : 8;
+     param.bss_maxcnt = 32;
+     param.bss_lifetime  = 300; //300 seconds
+     param.evt_cb = sys_ieee80211_event_cb;
+
+    ieee80211_init(&param);
+    ieee80211_support_txw830x(lmacops);
+    wifi_mgr_init(FMAC_MAC_BUS, WIFIMGR_FRM_TYPE, DRV_AGGSIZE, lmacops, NULL);
+
+    ieee80211_deliver_init(128, 60);
+
+// #if WIFI_AP_SUPPORT
+
+    ieee80211_iface_create_ap(WIFI_MODE_AP, IEEE80211_BAND_S1GHZ);
+    ieee80211_pair_enable(WIFI_MODE_AP, WIFI_PAIR_MAGIC);
+    wificfg_flush(WIFI_MODE_AP);
+
     //sys_atcmd_init();
+    
     //sys_wifi_init();
     //sys_network_init();
     //sys_app_init();

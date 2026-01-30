@@ -1,0 +1,115 @@
+version: "4.1"
+name: TXW8301-PHY
+type: ANY-GCC
+deviceName: null
+packDir: null
+srcDirs:
+  - src
+  - sdk
+  - csky
+virtualFolder:
+  name: <virtual_root>
+  files: []
+  folders: []
+dependenceList: []
+outDir: build
+miscInfo:
+  uid: 69ff28a23469b2fb34eef1d456ce8202
+targets:
+  Debug:
+    cppPreprocessAttrs:
+      defineList: []
+      incList:
+        - csky/configs
+        - csky/csi_core/include
+        - csky/csi_driver/include
+        - csky/csi_kernel/include
+        - csky/csi_kernel/rhino/arch/include
+        - csky/csi_kernel/rhino/common
+        - csky/csi_kernel/rhino/core/include
+        - csky/csi_kernel/rhino/driver
+        - csky/csi_kernel/rhino/pwrmgmt
+        - csky/libs/include
+        - sdk/chip/txw4002ack803
+        - sdk/include
+        - sdk/include/chip
+        - sdk/include/chip/txw4002ack803
+        - sdk/include/lib/net/lwip
+        - sdk/include/lib/ota
+        - sdk/include/lib/net/lwip/include
+        - sdk/lib/lmac/mars
+        - sdk/lib/net/lwip/src/apps/altcp_tls
+        - sdk/lib/net/lwip/src/apps/http
+        - sdk/lib/net/lwip/src/apps/http/makefsdata
+        - sdk/lib/net/lwip/src/apps/snmp
+        - sdk/lib/umac/umac4
+        - sdk/lib/umac/umac4/include
+        - sdk/lib/umac/umac4/lib
+        - sdk/lib/umac/umac4/wnb/include
+        - sdk/lib/umac/umac4/wpa
+        - sdk/lib/umac/umac4/wpa_auth
+        - sdk/lib/crypto/mbedtls/include
+        - sdk/lib/crypto/openssl/include
+        - sdk/lib/crypto/openssl/crypto
+        - inc
+        - inc/config
+      libList:
+        - libs
+    excludeList:
+      - libs/libatcmd
+      - libs/libcommon
+      - libs/libcore
+      - libs/liblmac
+      - libs/libnetutils
+      - libs/libosal
+      - libs/libwifi
+      - sdk/include
+      - csky/configs
+      - csky/csi_core
+      - csky/csi_driver
+      - csky/csi_kernel/rhino/arch/include
+      - csky/csi_kernel/rhino/core/include
+      - sdk/lib/crypto
+      - sdk/lib/usb_app
+      - sdk/lib/posix
+      - sdk/lib/net/libcurl
+    toolchain: ANY_GCC
+    toolchainConfigMap:
+      ANY_GCC:
+        linkerScriptPath: gcc_csky.ld
+        options:
+          version: 2
+          afterBuildTasks: []
+          asm-compiler:
+            ASM_FLAGS: -D__NO_BOARD_INIT -DTXW4002ACK803
+          beforeBuildTasks: []
+          c/cpp-compiler:
+            C_FLAGS: -ffunction-sections -fdata-sections -D__NO_BOARD_INIT -DTXW4002ACK803 -D__CK803__-DSKBPOOL_ENABLE -DMPOOL_ALLOC -DCONFIG_UMAC4
+            language-c: c11
+            language-cpp: gnu++11
+            one-elf-section-per-data: true
+            one-elf-section-per-function: true
+            optimization: level-size
+            signed-char: true
+            warnings: unspecified
+          global:
+            output-debug-info: enable
+          linker:
+            $disableOutputTask: true
+            LD_FLAGS: -Wl,-zmax-page-size=1024 -Wl,-Map=project.map -Wl,--no-warn-mismatch
+            LIB_FLAGS: -L libs -lcore -lnetutils -lcommon -losal -latcmd -llmac -lwifi -lm
+            linker-type: gcc
+            output-format: elf
+            print-mem-usage: true
+            remove-unused-input-sections: true
+    uploadConfigMap:
+      JLink:
+        baseAddr: ""
+        bin: ""
+        cpuInfo:
+          cpuName: "null"
+          vendor: "null"
+        otherCmds: ""
+        proType: 1
+        speed: 8000
+    uploader: JLink

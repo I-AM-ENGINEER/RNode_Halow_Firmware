@@ -112,8 +112,56 @@ sysevt_hdl_res sys_event_hdl(uint32 event_id, uint32 data, uint32 priv)
     return SYSEVT_CONTINUE;
 }
 
+
+static void dump_u32(const char *tag, uint32 v)
+{
+    os_printf("%s=0x%08x (%u)\r\n", tag, (unsigned)v, (unsigned)v);
+}
+
+static void hex_dump32(const char *tag, const void *p, uint32 len)
+{
+    const uint8 *b = (const uint8 *)p;
+    uint32 i;
+
+    if (p == NULL || len == 0) {
+        os_printf("%s: (null/empty)\r\n", tag);
+        return;
+    }
+
+    if (len > 128) {
+        len = 128;
+    }
+
+    os_printf("%s: p=%p len=%u\r\n", tag, p, (unsigned)len);
+
+    for (i = 0; i < len; i++) {
+        if ((i % 16) == 0) {
+            os_printf("%04u: ", (unsigned)i);
+        }
+        os_printf("%02x ", b[i]);
+        if ((i % 16) == 15 || i == (len - 1)) {
+            os_printf("\r\n");
+        }
+    }
+}
+
+static const char *evt_name(uint16 evt)
+{
+    switch (evt) {
+        case 22: return "ADD_EXTRA_IE";
+        case 29: return "TX_BITRATE";
+        case 32: return "TX_FRAME";
+        case 33: return "RX_CUSTMGMT";
+        case 37: return "TX_STATUS";
+        default: return "?";
+    }
+}
+
 int32 sys_ieee80211_event_cb(uint8 ifidx, uint16 evt, uint32 param1, uint32 param2)
 {
+    os_printf("EVT if=%u evt=%u(%s) p1=0x%08x p2=0x%08x\r\n",
+          ifidx, evt, evt_name(evt), (unsigned)param1, (unsigned)param2);
+
     int32 ret = 0;
 
 #if SYS_SAVE_PAIRSTA
@@ -175,6 +223,16 @@ int32 sys_ieee80211_event_cb(uint8 ifidx, uint16 evt, uint32 param1, uint32 para
             os_printf("channel change: %d -> %d\r\n", param1, param2);
             sys_cfgs.channel = param2;
             break;
+            case IEEE80211_EVENT_ADD_EXTRA_IE: {
+                os_printf("ADD_EXTRA_IE: skb=%p ctx=%p\r\n", (void *)param1, (void *)param2);
+            
+                if (param1 >= 0x20000000 && param1 < 0x200C0000) {
+                    hex_dump32("skb(head)", (void *)param1, 64);
+                }
+                if (param2 >= 0x20000000 && param2 < 0x200C0000) {
+                    hex_dump32("ctx(head)", (void *)param2, 64);
+                }
+            } break;
         default:
             break;
     }

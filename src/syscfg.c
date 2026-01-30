@@ -163,11 +163,11 @@ void syscfg_set_default_val(void)
         sys_cfgs.chan_cnt = 2;
         sys_cfgs.bss_bw   = 2;
     } else { // 915M case
-        sys_cfgs.chan_list[0] = 9080;
+        sys_cfgs.chan_list[0] = 8680;
         sys_cfgs.chan_list[1] = 9160;
         sys_cfgs.chan_list[2] = 9240;
-        sys_cfgs.chan_cnt = 3;
-        sys_cfgs.bss_bw   = 8;
+        sys_cfgs.chan_cnt = 1;
+        sys_cfgs.bss_bw   = 2;
     }
 }
 
@@ -256,7 +256,8 @@ int32 wificfg_flush(uint8 ifidx)
     lmac_set_auto_chan_switch(lmacops, !sys_cfgs.auto_chsw);
     lmac_set_wakeup_io(lmacops, sys_cfgs.wkup_io, sys_cfgs.wkio_edge);
     lmac_set_super_pwr(lmacops, sys_cfgs.super_pwr_set?sys_cfgs.super_pwr:1);
-    lmac_set_pa_pwr_ctrl(lmacops, !sys_cfgs.pa_pwrctrl_dis);
+    //return 0;
+    lmac_set_pa_pwr_ctrl(lmacops, !sys_cfgs.pa_pwrctrl_dis); // THIS LINE BROKE DEBUG!!!!
     lmac_set_vdd13(lmacops, sys_cfgs.dcdc13);
     lmac_set_ack_timeout_extra(lmacops, sys_cfgs.ack_tmo);
     if (sys_cfgs.dual_ant) {

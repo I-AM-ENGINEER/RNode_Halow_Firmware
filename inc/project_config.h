@@ -1,5 +1,7 @@
-#ifndef __SYS_PROJECT_CONFIG_H__
-#define __SYS_PROJECT_CONFIG_H__
+#ifndef __SYS_PROJECT_CONFIG_H__
+
+#define __SYS_PROJECT_CONFIG_H__
+
 #define MACBUS_SDIO
 //#define MACBUS_USB
 //#define MACBUS_UART
@@ -35,5 +37,7 @@
                                  //对于sdio和usb等接口，可以通过驱动打开，就不用开这个宏；
 
 
-
-#endif
+
+
+#endif
+

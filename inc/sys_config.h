@@ -82,7 +82,7 @@
 #endif
 
 #ifndef SYS_WIFI_MODE
-#define SYS_WIFI_MODE WIFI_MODE_STA
+#define SYS_WIFI_MODE WIFI_MODE_AP
 #endif
 
 #ifndef LED_INIT_BLINK
@@ -154,19 +154,19 @@
 #endif
 
 #ifndef SYS_APP_WNBOTA
-#define SYS_APP_WNBOTA 1
+#define SYS_APP_WNBOTA 0
 #endif
 
 #ifndef WNB_PAIRKEY_IO
-#define WNB_PAIRKEY_IO PB_1
+#define WNB_PAIRKEY_IO PA_9
 #endif
 
 #ifndef WNB_RSSI_IO1
-#define WNB_RSSI_IO1   PA_14
+#define WNB_RSSI_IO1   PA_7
 #endif
 
 #ifndef WNB_RSSI_IO2
-#define WNB_RSSI_IO2   PA_15
+#define WNB_RSSI_IO2   PA_6
 #endif
 
 #ifndef WIFI_SSID_PREFIX
