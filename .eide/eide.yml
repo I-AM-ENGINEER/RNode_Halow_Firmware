@@ -69,10 +69,11 @@ targets:
       - csky/csi_driver
       - csky/csi_kernel/rhino/arch/include
       - csky/csi_kernel/rhino/core/include
+      - sdk/lib/net/libcurl
+      - src/atcmd.c
+      - sdk/lib/posix
       - sdk/lib/crypto
       - sdk/lib/usb_app
-      - sdk/lib/posix
-      - sdk/lib/net/libcurl
     toolchain: ANY_GCC
     toolchainConfigMap:
       ANY_GCC:

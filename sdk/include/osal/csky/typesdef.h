@@ -21,13 +21,7 @@ typedef uint16_t   uint16;
 typedef uint32_t   uint32;
 typedef uint64_t   uint64;
 
-#ifndef _SSIZE_T_DECLARED
-#ifndef __ssize_t_defined
-#ifndef _SSIZE_T_
 typedef int32_t    ssize_t;
-#endif
-#endif
-#endif
 
 typedef unsigned long ulong;
 

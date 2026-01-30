@@ -191,7 +191,8 @@ __init void malloc_init(void)
 }
 
 
-__init void pre_main(void){
+__init void pre_main(void)
+{
     assert_holdup = ASSERT_HOLDUP;
     malloc_init();
     csi_kernel_init();
