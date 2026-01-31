@@ -137,6 +137,7 @@ static void lmac_only_post_init (struct lmac_ops *ops){
     lmac_set_psconnect_period(ops, sys_cfgs.psconnect_period);
     lmac_set_ap_psmode_en(ops, sys_cfgs.ap_psmode);
     lmac_set_standby(ops, sys_cfgs.standby_channel-1, sys_cfgs.standby_period_ms*1000);
+    lmac_set_dbg_levle(ops, 0);
     //lmac_set_rxg_offest(wnb->ops, wnb->cfg->rxg_offest);
     lmac_set_cca_for_ce(ops, sys_cfgs.cca_for_ce);
     //gpio_set_val(DSLEEP_STATE_IND, sys_cfgs.wkio_mode);

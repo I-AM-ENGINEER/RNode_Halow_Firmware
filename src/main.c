@@ -253,19 +253,25 @@ __init static void sys_wifi_start_acs(void *ops)
 //     ieee80211_iface_start(ifidx);
 // }
 
-static void lmac_rx_handler(const struct hgic_rx_info *info, const uint8 *data, uint32 len)
-{
-    /* здесь ты получаешь “сырой” payload (как приходит из LMAC) */
+static void lmac_rx_handler(struct lmac_ops *ops, struct hgic_rx_info *info, uint8 *data, int32 len){
     (void)info;
-    (void)data;
-    (void)len;
 
-    /* пример: просто логнуть первые байты */
-    dump_hex("RX", (uint8 *)data, (len > 64) ? 64 : len, 1);
+    _os_printf("\r\n");
+    os_printf("RX len=%u: ", len);
+    for (uint32 i = 0; i < len; i++) {
+        uint8 c = data[i];
+        if (c >= 32 && c <= 126) {
+            _os_printf("%c", c);
+        } else {
+            _os_printf(".");
+        }
+    }
+    _os_printf("\r\n");
+
+    //dump_hex("RXHEX", (uint8 *)data, (len > 64) ? 64 : len, 1);
 }
 
-__init static void sys_wifi_init (void)
-{
+__init static void sys_wifi_init (void){
     struct lmac_init_param lparam;
 
     /* пул skb нужен для TX/RX skb */
@@ -301,8 +307,7 @@ __init static void sys_wifi_init (void)
     //lmac_set_txpower(lmacops, 20); /* выставляем мощность TX, например 20 dBm */
 }
 
-static void sys_dbginfo_print(void)
-{
+static void sys_dbginfo_print(void){
     static uint8 _print_buf[512];
     static int8 print_interval = 0;
     if (print_interval++ >= 5) {
@@ -325,19 +330,22 @@ static void sys_dbginfo_print(void)
 
 static int32 sys_main_loop(struct os_work *work){
     while(1){
+        static int val = 0;
         static uint8 pa7_val = 0;
         //sys_dbginfo_print();
         pa7_val = !pa7_val;
         gpio_set_val(PA_7, pa7_val);
         
         //lmac_send_ant_pkt();
-        //lmac_raw_tx((const uint8_t *)"Hello, LMAC!", 12);
+        char tmp[32];
+        val++;
+        //sprintf(tmp, "Hello, LMAC! %d", val);
+        //lmac_raw_tx((const uint8_t *)tmp, strlen(tmp));
         os_sleep_ms(100);
     }
 }
 
-__init int main(void)
-{
+__init int main(void){
     extern uint32 __sinit, __einit;
     mcu_watchdog_timeout(0);
     //sys_cfg_load();

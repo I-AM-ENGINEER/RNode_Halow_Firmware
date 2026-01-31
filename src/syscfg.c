@@ -167,9 +167,9 @@ void syscfg_set_default_val(void)
         sys_cfgs.chan_cnt = 2;
         sys_cfgs.bss_bw   = 2;
     } else { // 915M case
-        sys_cfgs.chan_list[0] = 8670;
+        sys_cfgs.chan_list[0] = 8665    ;
         sys_cfgs.chan_cnt = 1;
-        sys_cfgs.bss_bw   = 2;
+        sys_cfgs.bss_bw   = 1;
     }
 }
 
