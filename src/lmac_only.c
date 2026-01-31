@@ -38,12 +38,6 @@
  * declaration lives in lib/skb/skbpool.h but we avoid including
  * it here to keep dependencies low. */
 extern struct sys_config sys_cfgs;
-extern int32 skbpool_init(uint32 addr, uint32 size, uint32 max, uint8 flags);
-
-/* Optional: initialise additional collection routines if your port
- * requires them.  See lib/skb/skbpool.h for details. */
-extern int32 skbpool_collect_init(void);
-
 /* -------------------------------------------------------------------- */
 /* Global state
  *
@@ -182,28 +176,33 @@ int32_t lmac_only_init(uint32_t rxbuf, uint32_t rxbuf_size,
 
 
 
-int32_t lmac_raw_tx(const uint8_t *buf, int32_t len)
-{
+int32_t lmac_raw_tx(const uint8_t *buf, int32_t len){
+    // Dont ask, why this magic string is needed, without it i got trash on receive
+    static const char magic[] = "Hello, LMAC!";
+
     if (!g_lmac_ops || !buf || len <= 0) {
         return -1;
     }
-    /* Compute the total number of bytes required to hold the packet
-     * including any headroom/tailroom the LMAC needs. */
-    uint32_t need = (uint32_t)g_lmac_ops->headroom + (uint32_t)len + (uint32_t)g_lmac_ops->tailroom;
+
+    const uint32_t magic_len = (uint32_t)(sizeof(magic) - 1);
+
+    uint32_t hr = (uint32_t)g_lmac_ops->headroom;
+    uint32_t tr = (uint32_t)g_lmac_ops->tailroom;
+
+    uint32_t need = hr + magic_len + (uint32_t)len + tr;
+
     struct sk_buff *skb = alloc_tx_skb(need);
-    if (!skb) {
+    if (skb == NULL) {
         return -2;
     }
-    /* Reserve the requested headroom so that the data pointer is
-     * aligned properly for the LMAC. */
-    skb_reserve(skb, g_lmac_ops->headroom);
-    /* Copy the user payload into the sk_buff. */
+
+    skb_reserve(skb, (int)hr);
+
+    memcpy(skb_put(skb, (int)magic_len), magic, magic_len);
     memcpy(skb_put(skb, len), buf, (size_t)len);
-    /* Mark the skb as outgoing.  The tx flag is used internally by
-     * liblmac to distinguish TX from RX buffers. */
-    skb->tx = 1;
-    /* Queue the packet.  lmac_tx() returns 0 on success.  It will
-     * eventually call back into our lmac_only_tx_status() which is
-     * responsible for freeing the skb. */
+
+    skb->priority = 0;
+    skb->tx       = 1;
+
     return lmac_tx(g_lmac_ops, skb);
 }
