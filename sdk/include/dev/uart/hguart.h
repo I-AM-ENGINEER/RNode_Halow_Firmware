@@ -98,7 +98,7 @@ enum hguart_intr_status {
     HGUART_INTR_CHAR_TIMEOUT   = 0xC
 } ;
 
-#define HGUART_DEFAULT_BAUDRATE             115200    /* baud rate is set 115200*/
+#define HGUART_DEFAULT_BAUDRATE             2000000    /* baud rate is set 115200*/
 #define HGUART_DEFAULT_DATABITS            ((0x3UL<<0))/* data bit is set 8bit   */
 #define HGUART_DEFAULT_STOPBITS            ((0x0UL<<2))/* stop bit is set 1bit   */
 #define HGUART_DEFAULT_PARITY              ((0x0UL<<3))/* Parity None            */
