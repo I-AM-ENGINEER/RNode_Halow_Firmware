@@ -223,10 +223,10 @@ __init void device_init(void)
 
 //cfg print
 #ifdef MACBUS_USB
-    uart_open((struct uart_device *)&uart0, 115200);
+    uart_open((struct uart_device *)&uart0, HGUART_DEFAULT_BAUDRATE);
     console_handle = &uart0;
 #else
-    uart_open((struct uart_device *)&uart1, 115200);
+    uart_open((struct uart_device *)&uart1, HGUART_DEFAULT_BAUDRATE);
     console_handle = &uart1;
 #endif
 }
