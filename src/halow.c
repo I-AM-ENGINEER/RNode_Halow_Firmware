@@ -8,9 +8,56 @@
 #include "lib/skb/skb.h"
 #include "lib/skb/skbuff.h"
 #include "osal/string.h"
-#include "syscfg.h"
 
-extern struct sys_config sys_cfgs;
+/* ===== Wi-Fi HaLow fixed config ===== */
+
+/* Channel / RF */
+#define HALOW_FREQ_KHZ          8665        /* sys_cfgs.chan_list[0] */
+#define HALOW_BSS_BW            1           /* 1 MHz */
+
+/* PHY / rate */
+#define HALOW_TX_MCS            LMAC_RATE_S1G_1_NSS_MCS0
+
+/* Power */
+#define HALOW_TX_POWER          8
+#define HALOW_PA_PWRCTRL_EN     1
+#define HALOW_VDD13_MODE        0
+
+/* Antenna */
+#define HALOW_DUAL_ANT_EN       0
+#define HALOW_ANT_AUTO_EN       0
+#define HALOW_ANT_SEL           0
+
+/* Aggregation */
+#define HALOW_TX_AGGCNT         1
+#define HALOW_RX_AGGCNT         1
+
+/* Power save / sleep */
+#define HALOW_PS_MODE           DSLEEP_MODE_NONE
+#define HALOW_WAIT_PSMODE       DSLEEP_WAIT_MODE_PS_CONNECT
+#define HALOW_PSCONNECT_PERIOD  60
+
+/* Standby */
+#define HALOW_STANDBY_CH        1           /* channel index starts from 1 */
+#define HALOW_STANDBY_PERIOD_MS 5000
+
+/* ACK / retry */
+#define HALOW_ACK_TMO_EXTRA     0
+#define HALOW_RETRY_FRM_MAX     0
+#define HALOW_RETRY_RTS_MAX     0
+#define HALOW_RETRY_FB_CNT      0
+#define HALOW_RTS_THRESH        0xFFFF
+
+/* CCA */
+#define HALOW_CCA_FOR_CE        0
+
+/* Wakeup */
+#define HALOW_WAKEUP_IO         0
+#define HALOW_WAKEUP_EDGE       0
+
+/* Debug */
+#define HALOW_DBG_LEVEL         0
+
 
 /* ===== internal state ===== */
 
@@ -63,45 +110,71 @@ static int32_t halow_lmac_tx_status(struct lmac_ops *ops,
 }
 
 /* ===== LMAC post-init ===== */
+static void halow_post_init(struct lmac_ops *ops)
+{
+    static uint8 g_mac[6] = {
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+    };
 
-static void halow_post_init(struct lmac_ops *ops){
-    static uint8 g_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    ops->ioctl(ops, LMAC_IOCTL_SET_MAC_ADDR, (uint32)(uintptr_t)g_mac, 0);
-    ops->ioctl(ops, LMAC_IOCTL_SET_ANT_DUAL_EN, 0, 0);
-    ops->ioctl(ops, LMAC_IOCTL_SET_ANT_SEL, 0, 0);
+    /* ---- basic bring-up ---- */
+    ops->ioctl(ops, LMAC_IOCTL_SET_MAC_ADDR,
+               (uint32)(uintptr_t)g_mac, 0);
+
+    ops->ioctl(ops, LMAC_IOCTL_SET_ANT_DUAL_EN,
+               HALOW_DUAL_ANT_EN, 0);
+
+    ops->ioctl(ops, LMAC_IOCTL_SET_ANT_SEL,
+               HALOW_ANT_SEL, 0);
+
     ops->ioctl(ops, LMAC_IOCTL_SET_RADIO_ONOFF, 1, 0);
-    
-    lmac_set_freq(ops, sys_cfgs.chan_list[0]);
-    lmac_set_bss_bw(ops, sys_cfgs.bss_bw);
-    lmac_set_tx_mcs(ops, sys_cfgs.tx_mcs);
-    lmac_set_fix_tx_rate(ops, sys_cfgs.tx_mcs);
-    lmac_set_fallback_mcs(ops, sys_cfgs.tx_mcs);
-    lmac_set_mcast_txmcs(ops, sys_cfgs.tx_mcs);
-    lmac_set_txpower(ops, sys_cfgs.txpower);
-    lmac_set_aggcnt(ops, 1);
-    lmac_set_rx_aggcnt(ops, 1);
-    lmac_set_auto_chan_switch(ops, !sys_cfgs.auto_chsw);
-    lmac_set_wakeup_io(ops, sys_cfgs.wkup_io, sys_cfgs.wkio_edge);
-    lmac_set_super_pwr(ops, sys_cfgs.super_pwr_set ? sys_cfgs.super_pwr : 1);
-    lmac_set_pa_pwr_ctrl(ops, !sys_cfgs.pa_pwrctrl_dis);
-    lmac_set_vdd13(ops, sys_cfgs.dcdc13);
-    lmac_set_ack_timeout_extra(ops, sys_cfgs.ack_tmo);
 
-    if (sys_cfgs.dual_ant) {
-        lmac_set_ant_auto_en(ops, !sys_cfgs.ant_auto_dis);
-        lmac_set_ant_sel(ops, sys_cfgs.ant_sel);
-    }
+    /* ---- RF / channel ---- */
+    lmac_set_freq(ops, HALOW_FREQ_KHZ);
+    lmac_set_bss_bw(ops, HALOW_BSS_BW);
 
-    lmac_set_ps_mode(ops, DSLEEP_MODE_NONE);
-    lmac_set_wait_psmode(ops, DSLEEP_WAIT_MODE_PS_CONNECT);
-    lmac_set_psconnect_period(ops, sys_cfgs.psconnect_period);
-    lmac_set_ap_psmode_en(ops, sys_cfgs.ap_psmode);
-    lmac_set_standby(ops, sys_cfgs.standby_channel - 1, sys_cfgs.standby_period_ms * 1000);
-    lmac_set_dbg_levle(ops, 0);
-    lmac_set_cca_for_ce(ops, sys_cfgs.cca_for_ce);
-    lmac_set_retry_cnt(ops, 0, 0);
-    lmac_set_retry_fallback_cnt(ops, 0);
-    lmac_set_rts(ops, 0xFFFF);
+    /* ---- PHY rate control ---- */
+    lmac_set_tx_mcs(ops, HALOW_TX_MCS);
+    lmac_set_fix_tx_rate(ops, HALOW_TX_MCS);
+    lmac_set_fallback_mcs(ops, HALOW_TX_MCS);
+    lmac_set_mcast_txmcs(ops, HALOW_TX_MCS);
+
+    /* ---- power ---- */
+    lmac_set_txpower(ops, HALOW_TX_POWER);
+    lmac_set_pa_pwr_ctrl(ops, HALOW_PA_PWRCTRL_EN);
+    lmac_set_vdd13(ops, HALOW_VDD13_MODE);
+
+    /* ---- aggregation ---- */
+    lmac_set_aggcnt(ops, HALOW_TX_AGGCNT);
+    lmac_set_rx_aggcnt(ops, HALOW_RX_AGGCNT);
+
+    /* ---- channel switching ---- */
+    lmac_set_auto_chan_switch(ops, 0);
+
+    /* ---- wakeup ---- */
+    lmac_set_wakeup_io(ops, HALOW_WAKEUP_IO, HALOW_WAKEUP_EDGE);
+
+    /* ---- power save ---- */
+    lmac_set_ps_mode(ops, HALOW_PS_MODE);
+    lmac_set_wait_psmode(ops, HALOW_WAIT_PSMODE);
+    lmac_set_psconnect_period(ops, HALOW_PSCONNECT_PERIOD);
+    lmac_set_ap_psmode_en(ops, 0);
+
+    /* ---- standby ---- */
+    lmac_set_standby(ops,
+                     HALOW_STANDBY_CH - 1,
+                     HALOW_STANDBY_PERIOD_MS * 1000);
+
+    /* ---- CCA / retry / RTS ---- */
+    lmac_set_cca_for_ce(ops, HALOW_CCA_FOR_CE);
+    lmac_set_retry_cnt(ops,
+                       HALOW_RETRY_FRM_MAX,
+                       HALOW_RETRY_RTS_MAX);
+    lmac_set_retry_fallback_cnt(ops, HALOW_RETRY_FB_CNT);
+    lmac_set_rts(ops, HALOW_RTS_THRESH);
+
+    /* ---- misc ---- */
+    lmac_set_ack_timeout_extra(ops, HALOW_ACK_TMO_EXTRA);
+    lmac_set_dbg_levle(ops, HALOW_DBG_LEVEL);
 }
 
 /* ===== public API ===== */

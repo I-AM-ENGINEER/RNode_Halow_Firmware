@@ -167,7 +167,7 @@ void syscfg_set_default_val()
     os_strcpy(sys_cfgs.devname, WNB_DEV_DOMAIN);
     os_snprintf((char *)sys_cfgs.ssid, SSID_MAX_LEN, "%s%02X%02X%02X", WIFI_SSID_PREFIX, sys_cfgs.mac[3], sys_cfgs.mac[4], sys_cfgs.mac[5]);
     os_strcpy(sys_cfgs.passwd, "12345678");
-    wpa_passphrase(sys_cfgs.ssid, sys_cfgs.passwd, sys_cfgs.psk);
+    //wpa_passphrase(sys_cfgs.ssid, sys_cfgs.passwd, sys_cfgs.psk);
     os_strcpy(sys_cfgs.region_code, "US");
 
     if (module_efuse_info.module_type == MODULE_TYPE_750M) {
