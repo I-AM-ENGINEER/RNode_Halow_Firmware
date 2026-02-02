@@ -78,6 +78,8 @@ targets:
       - src/events.c
       - src/pairsta.c
       - sdk/lib/common/atcmd.c
+      - src/wakeup.c
+      - sdk/lib/common/tcptest.c
     toolchain: ANY_GCC
     toolchainConfigMap:
       ANY_GCC:

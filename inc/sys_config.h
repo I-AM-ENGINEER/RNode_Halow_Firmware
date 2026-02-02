@@ -13,6 +13,8 @@
 #define RXSUBFRAME_EN       1
 #define RXSUBFRAME_PERIOD   (5)
 
+
+#define CONFIG_SLEEP
 //#define SYS_IRQ_STAT
 
 #define SYS_FACTORY_PARAM_SIZE 2048

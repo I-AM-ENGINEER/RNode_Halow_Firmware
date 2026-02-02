@@ -20,7 +20,6 @@
 #include "lwip/tcpip.h"
 #include "netif/ethernetif.h"
 #include "lib/net/skmonitor/skmonitor.h"
-#include "pairled.h"
 #include "syscfg.h"
 #include "lib/lmac/lmac_def.h"
 #include "halow.h"
