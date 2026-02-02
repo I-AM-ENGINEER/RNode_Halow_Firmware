@@ -1,4 +1,5 @@
 *.cdkws
+.cdk
 .cache
 __workspace_pack__
 Obj
