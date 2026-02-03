@@ -13,7 +13,7 @@
 #define RXSUBFRAME_EN     1
 #define RXSUBFRAME_PERIOD (5)
 
-#define CONFIG_SLEEP
+#define IP_SOF_BROADCAST 1
 // #define SYS_IRQ_STAT
 
 #define SYS_FACTORY_PARAM_SIZE 2048
@@ -21,7 +21,7 @@
 // #define SYS_CACHE_ENABLE                1
 
 #ifndef TDMA_BUFF_SIZE
-#define TDMA_BUFF_SIZE (0)
+#define TDMA_BUFF_SIZE (100 * 1024)
 #endif
 
 #ifndef SYS_STA_MAX

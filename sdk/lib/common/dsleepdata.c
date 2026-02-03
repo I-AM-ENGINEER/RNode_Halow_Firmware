@@ -3,7 +3,7 @@
 #include "osal/string.h"
 #include "lib/common/dsleepdata.h"
 
-#ifdef CONFIG_SLEEP
+//#ifdef CONFIG_SLEEP
 
 struct system_sleepdata {
     uint32 magic1;
@@ -91,4 +91,4 @@ void *sys_sleepdata_get(uint8 id)
     return NULL;
 }
 
-#endif
+//#endif

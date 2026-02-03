@@ -201,9 +201,9 @@ __init void pre_main(void)
 #ifdef CONFIG_SLEEP
     sys_sleepcb_init();
 #endif
-#ifdef CONFIG_SLEEP
+//#ifdef CONFIG_SLEEP
     sys_sleepdata_init();
-#endif
+//#endif
     VERSION_SHOW();
     module_version_show();
     lvd_detect();
