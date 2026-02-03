@@ -35,6 +35,9 @@ static struct os_work main_wk;
 extern uint32_t srampool_start;
 extern uint32_t srampool_end;
 
+__attribute__((used))
+struct system_status sys_status;
+
 extern void lmac_transceive_statics(uint8 en);
 
 static void halow_rx_handler(struct hgic_rx_info *info,
@@ -88,7 +91,7 @@ static int32 sys_main_loop(struct os_work *work) {
     gpio_set_val(PA_7, pa7_val);
 
     int32_t len = os_snprintf(buf, sizeof(buf), "SEQ=%lu", (unsigned long)seq++);
-    halow_tx((const uint8_t *)buf, len);
+    //halow_tx((const uint8_t *)buf, len);
 
     os_run_work_delay(&main_wk, 300);
     return 0;
@@ -138,8 +141,8 @@ __init int main(void) {
     sys_event_take(0xffffffff, sys_event_hdl, 0);
 
     skbpool_init(SKB_POOL_ADDR, (uint32)SKB_POOL_SIZE, 90, 0);
-    halow_init(WIFI_RX_BUFF_ADDR, WIFI_RX_BUFF_SIZE, TDMA_BUFF_ADDR, TDMA_BUFF_SIZE);
-    halow_set_rx_cb(halow_rx_handler);
+    //halow_init(WIFI_RX_BUFF_ADDR, WIFI_RX_BUFF_SIZE, TDMA_BUFF_ADDR, TDMA_BUFF_SIZE);
+    //halow_set_rx_cb(halow_rx_handler);
 
     gpio_set_dir(PA_7, GPIO_DIR_OUTPUT);
     gpio_set_val(PA_7, 0);

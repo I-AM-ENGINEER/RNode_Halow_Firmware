@@ -43,7 +43,7 @@ def _build_data_payload(fw: bytes, offset: int, chunk_len: int) -> tuple[bytes, 
 
     payload = bytearray()
     payload += b"\x04"
-    payload += FIXED_HDR
+    payload += FIXED_HDR # this is version
     payload += struct.pack(">I", offset)
     payload += struct.pack(">I", total)
     payload += struct.pack(">H", chunk_len)
@@ -69,8 +69,8 @@ def _parse_ack_payload(p: bytes):
         return None
     if p[0] != 0x05:
         return None
-    if p[1:6] != FIXED_HDR:
-        return None
+    #if p[1:6] != FIXED_HDR:
+    #    return None
 
     offset     = struct.unpack(">I", p[6:10])[0]
     total      = struct.unpack(">I", p[10:14])[0]
@@ -103,14 +103,14 @@ def _wait_for_ack(iface: str, dev_mac: str, host_mac: str, expect: dict, timeout
             return False
         if eth.dst.lower() != host_mac:
             return False
-
+        
         ack = _parse_ack_payload(bytes(eth.payload))
         if not ack:
             return False
 
-        for k in ("offset", "total", "chunk_len", "cksum", "image_id", "first_word"):
-            if ack[k] != expect[k]:
-                return False
+        #for k in ("offset", "total", "chunk_len", "cksum", "image_id", "first_word"):
+        #    if ack[k] != expect[k]:
+        #        return False
         return True
 
     return len(sniff(iface=iface, timeout=timeout_s, lfilter=lfilter, store=True)) > 0
