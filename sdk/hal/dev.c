@@ -37,6 +37,7 @@ struct dev_obj *dev_get(int32 dev_id)
 
 __init int32 dev_register(uint32 dev_id, struct dev_obj *device)
 {
+    hgprintf("Register DEV ID: %u", dev_id);
     struct dev_obj *dev = dev_get(dev_id);
     if (dev) {
         return -EEXIST;

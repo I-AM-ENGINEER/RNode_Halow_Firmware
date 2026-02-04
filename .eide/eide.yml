@@ -5,8 +5,8 @@ deviceName: null
 packDir: null
 srcDirs:
   - src
-  - sdk
   - csky
+  - sdk
 virtualFolder:
   name: <virtual_root>
   files: []
@@ -71,9 +71,13 @@ targets:
       - csky/csi_kernel/rhino/core/include
       - sdk/lib/net/libcurl
       - src/atcmd.c
-      - sdk/lib/posix
       - sdk/lib/crypto
       - sdk/lib/usb_app
+      - src/deep_sleep_placeholder.c
+      - <virtual_root>/libcore.S
+      - src/events.c
+      - src/pairsta.c
+      - sdk/lib/common/atcmd.c
     toolchain: ANY_GCC
     toolchainConfigMap:
       ANY_GCC:
@@ -84,11 +88,11 @@ targets:
             - name: Create bin
               abortAfterFailed: false
               command: ${workspaceFolder}/pack/csky-elfabiv2-objcopy.exe -O binary ${OutDir}/${ProjectName}.elf ${OutDir}/${ProjectName}.bin
-              disable: true
+              disable: false
             - name: Compress bin
               abortAfterFailed: false
               command: ${workspaceFolder}/pack/prepare_firmware.py ${OutDir}/${ProjectName}.bin
-              disable: true
+              disable: false
           asm-compiler:
             ASM_FLAGS: -mcpu=ck803 -g -pipe -D__NO_BOARD_INIT -DTXW4002ACK803
           beforeBuildTasks: []
@@ -105,8 +109,8 @@ targets:
             output-debug-info: enable
           linker:
             $disableOutputTask: true
-            LD_FLAGS: -mcpu=ck803 -nostartfiles -Wl,--gc-sections -Wl,-zmax-page-size=1024 -Wl,-Map=project.map -Wl,--ckmap=txw4002a.map
-            LIB_FLAGS: -L libs -lcore -lnetutils -lcommon -losal -latcmd -llmac -lwifi -lm
+            LD_FLAGS: -mcpu=ck803 -nostartfiles -Wl,--gc-sections -Wl,-zmax-page-size=1024 -Wl,-Map=project.map -Wl,--ckmap=txw4002a.map -Wl,--wrap=lwip_netif_hook_inputdata
+            LIB_FLAGS: -L libs -lcore -lnetutils -lcommon -losal -llmac -lm
             linker-type: gcc
             output-format: elf
             print-mem-usage: true

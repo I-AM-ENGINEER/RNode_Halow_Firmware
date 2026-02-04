@@ -1,0 +1,9 @@
+*.cdkws
+.cdk
+.cache
+__workspace_pack__
+Obj
+*.mk
+*.bat
+Lst
+*.map

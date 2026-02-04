@@ -7,7 +7,12 @@ import struct
 from pathlib import Path
 
 
-INI_NAME = "makecode.ini"  # <- фиксированное имя ini рядом со скриптом
+INI_NAME = ""#"makecode.ini"  # фиксированное имя ini рядом со скриптом (если есть)
+
+# Минимальный валидный param-блок (как в factory BIN):
+# В 0x200 лежит u16 LE длина, дальше данные. Для твоего param.bin: 04 00 2B 1A.
+DEFAULT_PARAM = bytes.fromhex("04 00 2B 1A")
+DEFAULT_PARAM_OFFSET = 0x200
 
 
 def _u8(x: int) -> int:
@@ -38,7 +43,7 @@ def parse_int(s: str) -> int:
 
 def hgic_crc32(data: bytes) -> int:
     """
-    CRC-32 как в твоём C-коде:
+    CRC-32 как в HGIC:
       init 0xFFFFFFFF, reflected, poly 0xEDB88320, final ~crc
     """
     crc = 0xFFFFFFFF
@@ -55,8 +60,8 @@ def hgic_crc32(data: bytes) -> int:
 
 def hgic_crc16_modbus(data: bytes) -> int:
     """
-    CRC-16/MODBUS как в C:
-      poly=0xA001 (reverse 0x8005), init=0xFFFF, refin/refout=true, xorout=0x0000
+    CRC-16/MODBUS как в HGIC:
+      poly=0xA001, init=0xFFFF, refin/refout=true, xorout=0x0000
     """
     crc = 0xFFFF
     for b in data:
@@ -93,31 +98,21 @@ def load_ini(ini_path: Path) -> tuple[dict, dict]:
     if last_err is not None:
         raise SystemExit(f"Cannot decode INI file: {ini_path}")
 
-    if "COMMON" not in cfg or "SPI" not in cfg:
-        raise SystemExit("INI must contain [COMMON] and [SPI].")
+    if "COMMON" not in cfg:
+        raise SystemExit("INI must contain [COMMON].")
 
-    return dict(cfg["COMMON"]), dict(cfg["SPI"])
+    common = dict(cfg["COMMON"])
+    spi = dict(cfg["SPI"]) if "SPI" in cfg else {}
+    return common, spi
 
 
-def build_boot_header(spi: dict, fw: bytes) -> bytes:
-    boot_flag = parse_int(spi.get("Flag", "5A69"))
-    version = parse_int(spi.get("Version", "0"))
-    size = 0x1C  # тогда size+4 = 0x20 (весь хедер)
-
-    boot_to_sram_addr = parse_int(spi.get("CodeLoadToSramAddr", "20001000"))
-    run_sram_addr = parse_int(spi.get("CodeExeAddr", "20001000"))
-    boot_code_offset_addr = parse_int(spi.get("CodeAddrOffset", "2000"))
-    boot_from_flash_len = len(fw)
-
-    driver_strength = parse_int(spi.get("DriverStrength", "0")) & 0x3
-    spi_clk_mhz = parse_int(spi.get("SPI_CLK_MHZ", "0")) & 0x3FFF
-    boot_baud_mhz_driver_strength = (spi_clk_mhz | (driver_strength << 14)) & 0xFFFF
-
-    pll_src_mhz = parse_int(spi.get("PLL_SRC_MHZ", "0")) & 0xFF
+def _boot_mode_value(spi: dict) -> int:
+    pll_src_mhz = parse_int(spi.get("PLL_SRC_MHZ", "1A")) & 0xFF
     pll_en = 1 if parse_int(spi.get("PLL_EN", "0")) else 0
-    debug = 1 if parse_int(spi.get("DebugInfoEn", "0")) else 0  # <-- фикс
+    debug = 1 if parse_int(spi.get("DebugInfoEn", "0")) else 0
     aes_en = 1 if parse_int(spi.get("AesEnable", "0")) else 0
-    crc_en = 1 if parse_int(spi.get("CodeCRC16", "0")) else 0
+    # В factory BIN crc_en = 1 (бит 11), поэтому по умолчанию включаем.
+    crc_en = 1 if parse_int(spi.get("CodeCRC16", "1")) else 0
 
     mode = (
         (pll_src_mhz & 0xFF)
@@ -126,12 +121,32 @@ def build_boot_header(spi: dict, fw: bytes) -> bytes:
         | ((aes_en & 1) << 10)
         | ((crc_en & 1) << 11)
     ) & 0xFFFF
+    return mode
 
-    boot_data_crc = hgic_crc16_modbus(fw) if crc_en else 0
 
-    flash_blk_size = 0
+def build_boot_header(spi: dict, code: bytes, code_off: int) -> bytes:
+    boot_flag = parse_int(spi.get("Flag", "5A69"))
+    version = parse_int(spi.get("Version", "0"))
+    size = 0x1C  # BOOT header total = size+4 = 0x20
+
+    boot_to_sram_addr = parse_int(spi.get("CodeLoadToSramAddr", "20001000"))
+    run_sram_addr = parse_int(spi.get("CodeExeAddr", "20001000"))
+    boot_code_offset_addr = code_off
+    boot_from_flash_len = len(code)
+
+    driver_strength = parse_int(spi.get("DriverStrength", "0")) & 0x3
+    spi_clk = parse_int(spi.get("SPI_CLK_MHZ", "10")) & 0x3FFF
+    boot_baud_mhz_driver_strength = (spi_clk | (driver_strength << 14)) & 0xFFFF
+
+    mode = _boot_mode_value(spi)
+    crc_en = 1 if (mode & (1 << 11)) else 0
+    boot_data_crc = hgic_crc16_modbus(code) if crc_en else 0
+
+    # flash_blk_size: units 512B when version==0, else 64KB.
+    unit = 0x200 if version == 0 else 0x10000
+    flash_blk_size = (boot_code_offset_addr // unit) & 0xFFFF
+
     reserved = 0
-    head_crc16 = 0  # сначала 0
 
     # pack with head_crc16=0
     boot_hdr0 = struct.pack(
@@ -153,17 +168,26 @@ def build_boot_header(spi: dict, fw: bytes) -> bytes:
     if len(boot_hdr0) != 0x20:
         raise RuntimeError("BOOT header size mismatch")
 
-    # head_crc16 по (size+4) байтам
-    crc_len = size + 4
-    head_crc16 = hgic_crc16_modbus(boot_hdr0[:crc_len])
-
-    # final header
+    # В factory BIN: head_crc16 = CRC16(header[:0x1E]); CRC16(header_with_crc) == 0.
+    head_crc16 = hgic_crc16_modbus(boot_hdr0[:-2])
     return boot_hdr0[:-2] + struct.pack("<H", _u16(head_crc16))
 
 
-
-def build_spi_info_header(spi: dict) -> bytes:
+def build_spi_info_header(spi: dict, *, template_raw: bytes | None = None) -> bytes:
     func_code = 0x01
+
+    if template_raw is not None:
+        # Берём ровно то, что было в factory BIN (read_cfg + spec), пересчитываем CRC.
+        if len(template_raw) < 4:
+            raise SystemExit("Bad template SPI header")
+        if template_raw[0] != 0x01:
+            raise SystemExit("Template SPI header func_code != 0x01")
+        size = template_raw[1]
+        total = size + 2
+        raw = template_raw[:total]
+        hdr_wo_crc = raw[:-2]
+        header_crc16 = hgic_crc16_modbus(hdr_wo_crc)
+        return hdr_wo_crc + struct.pack("<H", _u16(header_crc16))
 
     read_cmd = parse_int(spi.get("ReadCmd", "03")) & 0xFF
     cmd_dummy = parse_int(spi.get("ReadCmdDummy", "0")) & 0xF
@@ -205,30 +229,38 @@ def build_spi_info_header(spi: dict) -> bytes:
                 out += bytes.fromhex(hexs)
         spec[: min(64, len(out))] = out[:64]
 
-    # size = полный размер SPI_INFO, включая CRC16
-    size = 1 + 1 + len(read_cfg) + len(spec)
+    # size field excludes first 2 bytes, includes CRC16:
+    # total = size+2 = 2 + 6 + 64 + 2 = 74 -> size=72 (0x48)
+    size = len(read_cfg) + len(spec) + 2
 
     hdr_wo_crc = struct.pack("<BB", func_code, _u8(size)) + read_cfg + bytes(spec)
     header_crc16 = hgic_crc16_modbus(hdr_wo_crc)
-
     return hdr_wo_crc + struct.pack("<H", _u16(header_crc16))
 
 
-def build_fw_info_header(common: dict, code_crc32: int) -> bytes:
+def build_fw_info_header(
+    common: dict,
+    *,
+    code_crc32: int,
+    param_crc16: int,
+    template_vals: tuple[int, int, int, int, int] | None = None,
+) -> bytes:
+    # struct hgic_spiflash_header_firmware_info:
+    # total = 25, size field = total-2 = 23 (0x17)
     func_code = 0x02
-    size = 1 + 1 + 4 + 4 + 4 + 2 + 1 + 4 + 2  # = 24
+    size = 23
 
-    sdk_version = 1
-    svn_version = 0x44F4
-    date = 0
-    chip_id = parse_int(common.get("CHIP_ID", "0")) & 0xFFFF
-    cpu_id = parse_int(common.get("CPU_ID", "0")) & 0xFF
+    if template_vals is not None:
+        sdk_version, svn_version, date, chip_id, cpu_id = template_vals
+    else:
+        sdk_version = parse_int(common.get("SDK_VERSION", "1")) & 0xFFFFFFFF
+        svn_version = parse_int(common.get("SVN_VERSION", "44F4")) & 0xFFFFFFFF
+        date = parse_int(common.get("DATE", "0")) & 0xFFFFFFFF
+        chip_id = parse_int(common.get("CHIP_ID", "4002")) & 0xFFFF
+        cpu_id = parse_int(common.get("CPU_ID", "1")) & 0xFF
 
-    param_crc16 = 0
-    crc16 = 0
-
-    return struct.pack(
-        "<BBIIIHBIHH",
+    hdr_wo_crc = struct.pack(
+        "<BBIIIHBIH",
         _u8(func_code),
         _u8(size),
         _u32(sdk_version),
@@ -238,23 +270,93 @@ def build_fw_info_header(common: dict, code_crc32: int) -> bytes:
         _u8(cpu_id),
         _u32(code_crc32),
         _u16(param_crc16),
-        _u16(crc16),
     )
+    crc16 = hgic_crc16_modbus(hdr_wo_crc)
+    return hdr_wo_crc + struct.pack("<H", _u16(crc16))
+
+
+def _parse_template_headers(template: bytes) -> dict:
+    if len(template) < 0x100:
+        raise SystemExit("Template too small")
+
+    boot = template[:0x20]
+    if boot[:2] != b"\x69\x5A":
+        raise SystemExit("Template BOOT flag mismatch")
+    if hgic_crc16_modbus(boot) != 0:
+        raise SystemExit("Template BOOT CRC16 invalid")
+
+    b = struct.unpack("<HBBIIIIHHHHHH", boot)
+    boot_vals = {
+        "boot_flag": b[0],
+        "version": b[1],
+        "size": b[2],
+        "boot_to_sram_addr": b[3],
+        "run_sram_addr": b[4],
+        "code_off": b[5],
+        "code_len": b[6],
+        "boot_data_crc": b[7],
+        "flash_blk_size": b[8],
+        "baud_strength": b[9],
+        "mode": b[10],
+    }
+
+    spi_off = 0x20
+    if template[spi_off] != 0x01:
+        raise SystemExit("Template SPI func_code != 0x01")
+    spi_size = template[spi_off + 1]
+    spi_total = spi_size + 2
+    spi = template[spi_off : spi_off + spi_total]
+    if hgic_crc16_modbus(spi) != 0:
+        raise SystemExit("Template SPI CRC16 invalid")
+
+    fw_off = spi_off + spi_total
+    if template[fw_off] != 0x02:
+        raise SystemExit("Template FW func_code != 0x02")
+    fw_size = template[fw_off + 1]
+    fw_total = fw_size + 2
+    fw = template[fw_off : fw_off + fw_total]
+    if hgic_crc16_modbus(fw) != 0:
+        raise SystemExit("Template FW CRC16 invalid")
+
+    f = struct.unpack("<BBIIIHBIHH", fw)
+    fw_vals = {
+        "sdk_version": f[2],
+        "svn_version": f[3],
+        "date": f[4],
+        "chip_id": f[5],
+        "cpu_id": f[6],
+        "code_crc32": f[7],
+        "param_crc16": f[8],
+    }
+
+    return {
+        "boot": boot_vals,
+        "spi_raw": spi,
+        "fw": fw_vals,
+        "hdr_total": fw_off + fw_total,
+    }
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(description="Pack HGIC/TXW firmware: headers @0x0000, code @CodeAddrOffset.")
-    ap.add_argument("input_bin", type=Path, help="Input firmware .bin (the code)")
+    ap = argparse.ArgumentParser(description="Pack HGIC/TXW firmware for SPI boot: headers @0x0000, param @0x200, code @CodeAddrOffset.")
+    ap.add_argument("input_bin", type=Path, help="Input firmware .bin (ELF linker output / code only)")
     ap.add_argument("-o", "--output", type=Path, default=None, help="Output packed bin (default: <input>.packed.bin)")
-    ap.add_argument("--pad-byte", default="FF", help="Padding byte to reach code offset (default: FF)")
+    ap.add_argument("--template", type=Path, default=None, help="Optional factory BIN to copy fixed fields (sdk/date/read_cfg/etc).")
+    ap.add_argument("--template-param", action="store_true", help="If template is set, copy param block from template instead of DEFAULT_PARAM.")
+    ap.add_argument("--code-off", default=None, help="Override code offset (hex, e.g. 2000). Otherwise from template/INI.")
+    ap.add_argument("--pad-byte", default="00", help="Padding byte before code (default: 00)")
+    ap.add_argument("--calc-crc32", action="store_true", help="Fill code_crc32 in FW header (default: 0 like factory).")
+    ap.add_argument("--param-offset", default=f"{DEFAULT_PARAM_OFFSET:X}", help="Param offset (hex, default: 200)")
+    ap.add_argument("--param-hex", default=None, help="Override param block bytes as hex (e.g. '04 00 2B 1A')")
     args = ap.parse_args()
 
     script_dir = Path(__file__).resolve().parent
     ini_path = script_dir / INI_NAME
-    if not ini_path.is_file():
-        raise SystemExit(f"INI not found рядом со скриптом: {ini_path}")
 
-    common, spi = load_ini(ini_path)
+    common: dict = {}
+    spi: dict = {}
+    if ini_path.is_file():
+        common, spi = load_ini(ini_path)
 
     fw_path = args.input_bin
     if not fw_path.is_file():
@@ -267,34 +369,121 @@ def main() -> int:
         pad_byte_str = pad_byte_str[2:]
     pad_byte = int(pad_byte_str, 16) & 0xFF
 
-    fw = fw_path.read_bytes()
+    code = fw_path.read_bytes()
 
-    code_crc32 = hgic_crc32(fw)
+    template = None
+    t = None
+    if args.template is not None:
+        template = args.template.read_bytes()
+        t = _parse_template_headers(template)
 
-    headers = (
-        build_boot_header(spi, fw)
-        + build_spi_info_header(spi)
-        + build_fw_info_header(common, code_crc32)
-    )
+    param_offset = parse_int(args.param_offset)
+    if param_offset <= 0:
+        raise SystemExit("bad --param-offset")
 
-    code_off = parse_int(spi.get("CodeAddrOffset", "2000"))
+    if args.param_hex is not None:
+        param = bytes.fromhex(args.param_hex)
+    elif t is not None and args.template_param:
+        # param_len берём из первых 2 байт param блока.
+        code_off_tmp = t["boot"]["code_off"]
+        if len(template) < param_offset + 2:
+            raise SystemExit("Template too small for param")
+        param_len = struct.unpack_from("<H", template, param_offset)[0]
+        if param_len == 0 or param_len > (code_off_tmp - param_offset):
+            raise SystemExit("Bad template param_len")
+        param = template[param_offset : param_offset + param_len]
+    else:
+        param = DEFAULT_PARAM
+
+    if len(param) < 2:
+        raise SystemExit("param too small")
+    param_len = struct.unpack_from("<H", param, 0)[0]
+    if param_len != len(param):
+        raise SystemExit(f"param_len mismatch: hdr={param_len} actual={len(param)}")
+
+    param_crc16 = hgic_crc16_modbus(param)
+    code_crc32 = hgic_crc32(code) if args.calc_crc32 else 0
+
+    # code offset
+    if args.code_off is not None:
+        code_off = parse_int(args.code_off)
+    elif t is not None:
+        code_off = int(t["boot"]["code_off"])
+    else:
+        code_off = parse_int(spi.get("CodeAddrOffset", "2000"))
     if code_off <= 0:
-        raise SystemExit("SPI.CodeAddrOffset must be > 0")
+        raise SystemExit("CodeAddrOffset must be > 0")
 
+    # headers
+    if t is not None:
+        # копируем фиксированные поля из template
+        spi_raw = t["spi_raw"]
+        spi_hdr = build_spi_info_header({}, template_raw=spi_raw)
+
+        spi_vals = {
+            "Flag": f"{t['boot']['boot_flag']:X}",
+            "Version": f"{t['boot']['version']:X}",
+            "CodeLoadToSramAddr": f"{t['boot']['boot_to_sram_addr']:X}",
+            "CodeExeAddr": f"{t['boot']['run_sram_addr']:X}",
+            "PLL_SRC_MHZ": f"{t['boot']['mode'] & 0xFF:X}",
+            "PLL_EN": "1" if (t['boot']['mode'] & (1<<8)) else "0",
+            "DebugInfoEn": "1" if (t['boot']['mode'] & (1<<9)) else "0",
+            "AesEnable": "1" if (t['boot']['mode'] & (1<<10)) else "0",
+            "CodeCRC16": "1" if (t['boot']['mode'] & (1<<11)) else "0",
+            # baud/strength и offset
+            "SPI_CLK_MHZ": f"{t['boot']['baud_strength'] & 0x3FFF:X}",
+            "DriverStrength": f"{(t['boot']['baud_strength'] >> 14) & 0x3:X}",
+        }
+        boot_hdr = build_boot_header(spi_vals, code, code_off)
+
+        fw_tpl = t["fw"]
+        fw_hdr = build_fw_info_header(
+            {},
+            code_crc32=code_crc32 if args.calc_crc32 else fw_tpl["code_crc32"],
+            param_crc16=param_crc16,
+            template_vals=(
+                int(fw_tpl["sdk_version"]),
+                int(fw_tpl["svn_version"]),
+                int(fw_tpl["date"]),
+                int(fw_tpl["chip_id"]),
+                int(fw_tpl["cpu_id"]),
+            ),
+        )
+    else:
+        boot_hdr = build_boot_header(spi, code, code_off)
+        spi_hdr = build_spi_info_header(spi)
+        fw_hdr = build_fw_info_header(common, code_crc32=code_crc32, param_crc16=param_crc16)
+
+    headers = boot_hdr + spi_hdr + fw_hdr
     if len(headers) > code_off:
         raise SystemExit(f"Headers too large ({len(headers)}) to fit before 0x{code_off:X}")
 
-    out = bytearray()
-    out += headers
-    out += bytes([pad_byte]) * (code_off - len(out))
-    out += fw
+    # output: area up to code_off
+    # - без template: забиваем pad_byte (обычно 0x00)
+    # - с template: копируем "преамбулу" целиком (у некоторых BIN там есть доп. данные)
+    if template is not None:
+        if len(template) < code_off:
+            raise SystemExit("Template too small for code_off")
+        out = bytearray(template[:code_off])
+    else:
+        out = bytearray([pad_byte]) * code_off
+
+    out[0:len(headers)] = headers
+    if param_offset + len(param) > code_off:
+        raise SystemExit("param overlaps code area")
+    out[param_offset : param_offset + len(param)] = param
+    out += code
 
     out_path.write_bytes(out)
 
-    print(f"INI    : {ini_path}")
-    print(f"Input  : {fw_path} ({len(fw)} bytes)")
-    print(f"CRC32  : 0x{code_crc32:08X}")
+    if ini_path.is_file():
+        print(f"INI    : {ini_path}")
+    if args.template is not None:
+        print(f"Template: {args.template}")
+    print(f"Input  : {fw_path} ({len(code)} bytes)")
     print(f"Offset : 0x{code_off:08X}")
+    print(f"Param  : off=0x{param_offset:04X} len={len(param)} crc16=0x{param_crc16:04X}")
+    print(f"CRC32  : 0x{code_crc32:08X}")
     print(f"Output : {out_path} ({len(out)} bytes)")
     return 0
 

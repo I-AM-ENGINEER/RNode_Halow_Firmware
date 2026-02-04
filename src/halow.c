@@ -62,12 +62,12 @@
 /* ===== internal state ===== */
 
 static struct lmac_ops *g_ops = NULL;
-static halow_rx_cb      g_rx_cb;
-static uint16_t         g_seq;
+static halow_rx_cb g_rx_cb;
+static uint16_t g_seq;
 
 /* ===== helpers ===== */
 
-static inline void mac_bcast(uint8_t mac[6]){
+static inline void mac_bcast(uint8_t mac[6]) {
     memset(mac, 0xff, 6);
 }
 
@@ -76,7 +76,7 @@ static inline void mac_bcast(uint8_t mac[6]){
 static int32_t halow_lmac_rx(struct lmac_ops *ops,
                              struct hgic_rx_info *info,
                              uint8_t *data,
-                             int32_t len){
+                             int32_t len) {
     (void)ops;
 
     if (!data || len < (int32_t)sizeof(struct ieee80211_hdr)) {
@@ -90,7 +90,7 @@ static int32_t halow_lmac_rx(struct lmac_ops *ops,
     }
 
     const uint8_t *payload = data + sizeof(*hdr);
-    int32_t payload_len = len - (int32_t)sizeof(*hdr);
+    int32_t payload_len    = len - (int32_t)sizeof(*hdr);
 
     if (payload_len <= 0 || !g_rx_cb) {
         return 0;
@@ -101,7 +101,7 @@ static int32_t halow_lmac_rx(struct lmac_ops *ops,
 }
 
 static int32_t halow_lmac_tx_status(struct lmac_ops *ops,
-                                   struct sk_buff *skb){
+                                    struct sk_buff *skb) {
     (void)ops;
     if (skb) {
         kfree_skb(skb);
@@ -180,7 +180,7 @@ static void halow_post_init(struct lmac_ops *ops)
 /* ===== public API ===== */
 
 bool halow_init(uint32_t rxbuf, uint32_t rxbuf_size,
-                uint32_t tdma_buf, uint32_t tdma_buf_size){
+                uint32_t tdma_buf, uint32_t tdma_buf_size) {
     struct lmac_init_param p;
 
     memset(&p, 0, sizeof(p));
@@ -211,11 +211,11 @@ bool halow_init(uint32_t rxbuf, uint32_t rxbuf_size,
     return true;
 }
 
-void halow_set_rx_cb(halow_rx_cb cb){
+void halow_set_rx_cb(halow_rx_cb cb) {
     g_rx_cb = cb;
 }
 
-bool halow_tx(const uint8_t *data, int32_t len){
+int32_t halow_tx(const uint8_t *data, uint32_t len) {
     if (!g_ops || !data || len <= 0) {
         return false;
     }
@@ -231,8 +231,8 @@ bool halow_tx(const uint8_t *data, int32_t len){
     g_seq++;
     hdr.seq_ctrl = (uint16_t)((g_seq & 0x0fff) << 4);
 
-    uint32_t hr = (uint32_t)g_ops->headroom;
-    uint32_t tr = (uint32_t)g_ops->tailroom;
+    uint32_t hr   = (uint32_t)g_ops->headroom;
+    uint32_t tr   = (uint32_t)g_ops->tailroom;
     uint32_t need = hr + sizeof(hdr) + (uint32_t)len + tr;
 
     struct sk_buff *skb = alloc_tx_skb(need);
@@ -247,5 +247,5 @@ bool halow_tx(const uint8_t *data, int32_t len){
     skb->priority = 0;
     skb->tx       = 1;
 
-    return (lmac_tx(g_ops, skb) == 0);
+    return lmac_tx(g_ops, skb);
 }

@@ -99,16 +99,16 @@ SECTIONS
 		__modver_end = .;
 		
         . = ALIGN(0x4) ;
-  __CTOR_LIST__ = . ;
-  LONG((__CTOR_END__ - __CTOR_LIST__) / 4 - 2)
-  KEEP(*(SORT(.ctors)))
-  LONG(0)
-  __CTOR_END__ = . ;
-  __DTOR_LIST__ = . ;
-  LONG((__DTOR_END__ - __DTOR_LIST__) / 4 - 2)
-  KEEP(*(SORT(.dtors)))
-  LONG(0)
-  __DTOR_END__ = . ;
+  KEEP (*crtbegin.o(.ctors))
+  KEEP (*crtbegin?.o(.ctors))
+  KEEP (*(EXCLUDE_FILE (*crtend.o *crtend?.o ) .ctors))
+  KEEP (*(SORT(.ctors.*)))
+  KEEP (*(.ctors))
+  KEEP (*crtbegin.o(.dtors))
+  KEEP (*crtbegin?.o(.dtors))
+  KEEP (*(EXCLUDE_FILE (*crtend.o *crtend?.o ) .dtors))
+  KEEP (*(SORT(.dtors.*)))
+  KEEP (*(.dtors))
   . = ALIGN(0x4) ;
  } > REGION_RODATA
  .init : AT(LOADADDR(.rodata) + SIZEOF(.rodata)){

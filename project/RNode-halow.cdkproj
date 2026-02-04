@@ -1,0 +1,1126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Project Name="RNode-Halow" Version="v1.4" Language="C">
+  <Description>CPU: ck803
+Chip: txw4002a
+Board: txw4002a
+  </Description>
+  <Dependencies Name="Debug"/>
+  <File Name="main.c">
+    <FileOption/>
+  </File>
+  <VirtualDirectory Name="csky">
+    <VirtualDirectory Name="configs">
+      <File Name="../csky/configs/csi_config.h">
+        <FileOption/>
+      </File>
+    </VirtualDirectory>
+    <VirtualDirectory Name="csi_core">
+      <VirtualDirectory Name="include">
+        <File Name="../csky/csi_core/include/csi_core.h">
+          <FileOption/>
+        </File>
+        <File Name="../csky/csi_core/include/csi_gcc.h">
+          <FileOption/>
+        </File>
+        <File Name="../csky/csi_core/include/core_803.h">
+          <FileOption/>
+        </File>
+      </VirtualDirectory>
+    </VirtualDirectory>
+    <VirtualDirectory Name="csi_kernel">
+      <VirtualDirectory Name="include">
+        <File Name="../csky/csi_kernel/include/csi_kernel.h">
+          <FileOption/>
+        </File>
+      </VirtualDirectory>
+      <VirtualDirectory Name="rhino">
+        <VirtualDirectory Name="adapter">
+          <File Name="../csky/csi_kernel/rhino/adapter/csi_rhino.c">
+            <FileOption/>
+          </File>
+        </VirtualDirectory>
+        <VirtualDirectory Name="arch">
+          <VirtualDirectory Name="csky">
+            <File Name="../csky/csi_kernel/rhino/arch/csky/cpu_impl.c">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/arch/csky/csky_sched.c">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/arch/csky/ck803/port_c.c">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/arch/csky/ck803/port_s.S">
+              <FileOption/>
+            </File>
+          </VirtualDirectory>
+          <VirtualDirectory Name="include">
+            <File Name="../csky/csi_kernel/rhino/arch/include/k_config.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/arch/include/k_types.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/arch/include/port.h">
+              <FileOption/>
+            </File>
+          </VirtualDirectory>
+        </VirtualDirectory>
+        <VirtualDirectory Name="common">
+          <File Name="../csky/csi_kernel/rhino/common/k_atomic.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/common/k_atomic.h">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/common/k_cpuset.h">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/common/k_ffs.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/common/k_ffs.h">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/common/k_fifo.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/common/k_trace.c">
+            <FileOption/>
+          </File>
+        </VirtualDirectory>
+        <VirtualDirectory Name="core">
+          <VirtualDirectory Name="include">
+            <File Name="../csky/csi_kernel/rhino/core/include/k_api.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_bitmap.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_buf_queue.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_critical.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_default_config.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_endian.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_err.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_event.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_fifo.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_hook.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_internal.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_list.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_mm.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_mm_blk.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_mm_debug.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_mm_region.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_mutex.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_obj.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_queue.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_ringbuf.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_sched.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_sem.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_soc.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_stats.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_sys.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_task.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_task_sem.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_time.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_timer.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_trace.h">
+              <FileOption/>
+            </File>
+            <File Name="../csky/csi_kernel/rhino/core/include/k_workqueue.h">
+              <FileOption/>
+            </File>
+          </VirtualDirectory>
+          <File Name="../csky/csi_kernel/rhino/core/k_buf_queue.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_dyn_mem_proc.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_err.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_event.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_idle.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_mm.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_mm_blk.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_mm_debug.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_mutex.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_obj.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_pend.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_queue.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_ringbuf.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_sched.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_sem.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_stats.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_sys.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_task.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_task_sem.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_tick.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_time.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_timer.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/core/k_workqueue.c">
+            <FileOption/>
+          </File>
+        </VirtualDirectory>
+        <VirtualDirectory Name="driver">
+          <File Name="../csky/csi_kernel/rhino/driver/coretim.h">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/driver/hook_impl.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/driver/systick.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/driver/yoc_impl.c">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/driver/hook_weak.c">
+            <FileOption/>
+          </File>
+        </VirtualDirectory>
+        <VirtualDirectory Name="pwrmgmt">
+          <File Name="../csky/csi_kernel/rhino/pwrmgmt/cpu_pwr_api.h">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/pwrmgmt/cpu_pwr_config.h">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/pwrmgmt/cpu_pwr_hal_lib.h">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/pwrmgmt/cpu_pwr_lib.h">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/pwrmgmt/cpu_tickless.h">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/pwrmgmt/dl_list.h">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/pwrmgmt/pwr_debug.h">
+            <FileOption/>
+          </File>
+          <File Name="../csky/csi_kernel/rhino/pwrmgmt/pwr_state.h">
+            <FileOption/>
+          </File>
+        </VirtualDirectory>
+      </VirtualDirectory>
+    </VirtualDirectory>
+    <VirtualDirectory Name="hgic">
+      <File Name="../csky/hgic/usart.c">
+        <FileOption/>
+      </File>
+      <File Name="../csky/hgic/malloc.c">
+        <FileOption/>
+      </File>
+      <File Name="../csky/hgic/assert.c">
+        <FileOption/>
+      </File>
+    </VirtualDirectory>
+    <VirtualDirectory Name="libs">
+      <VirtualDirectory Name="libc">
+        <File Name="../csky/libs/libc/malloc.c">
+          <FileOption/>
+        </File>
+        <File Name="../csky/libs/libc/minilibc_port.c">
+          <FileOption/>
+        </File>
+      </VirtualDirectory>
+    </VirtualDirectory>
+  </VirtualDirectory>
+  <VirtualDirectory Name="sdk">
+    <VirtualDirectory Name="chip">
+      <VirtualDirectory Name="txw4002ack803">
+        <File Name="../sdk/chip/txw4002ack803/isr.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/chip/txw4002ack803/pin_function.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/chip/txw4002ack803/system.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/chip/txw4002ack803/trap_c.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/chip/txw4002ack803/vectors.S">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/chip/txw4002ack803/ticker_api.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/chip/txw4002ack803/txw4002a.svc">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/chip/txw4002ack803/dmac_perip_id.c">
+          <FileOption/>
+        </File>
+      </VirtualDirectory>
+    </VirtualDirectory>
+    <VirtualDirectory Name="driver">
+      <VirtualDirectory Name="dma">
+        <File Name="../sdk/driver/dma/dw_dmac.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/driver/dma/hg_m2m_dma.c">
+          <FileOption/>
+        </File>
+      </VirtualDirectory>
+      <VirtualDirectory Name="gpio">
+        <File Name="../sdk/driver/gpio/hggpio_v2.c">
+          <FileOption/>
+        </File>
+      </VirtualDirectory>
+      <VirtualDirectory Name="spi">
+        <File Name="../sdk/driver/spi/hgspi_dw.c">
+          <FileOption/>
+        </File>
+      </VirtualDirectory>
+      <VirtualDirectory Name="timer">
+        <File Name="../sdk/driver/timer/hgtimer_v2.c">
+          <FileOption/>
+        </File>
+      </VirtualDirectory>
+      <VirtualDirectory Name="uart">
+        <File Name="../sdk/driver/uart/hguart.c">
+          <FileOption/>
+        </File>
+      </VirtualDirectory>
+      <VirtualDirectory Name="crc">
+        <File Name="../sdk/driver/crc/hg_crc.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/driver/crc/hg_crc_hw.h">
+          <FileOption/>
+        </File>
+      </VirtualDirectory>
+      <VirtualDirectory Name="sysaes">
+        <File Name="../sdk/driver/sysaes/hg_sysaes.c">
+          <FileOption/>
+        </File>
+      </VirtualDirectory>
+    </VirtualDirectory>
+    <VirtualDirectory Name="lib">
+      <VirtualDirectory Name="heap">
+        <File Name="../sdk/lib/heap/alloc.c">
+          <FileOption/>
+        </File>
+      </VirtualDirectory>
+      <VirtualDirectory Name="common">
+        <File Name="../sdk/lib/common/common.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/common/string.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/common/us_ticker.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/common/atcmd.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/common/tcptest.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/common/dsleepdata.c">
+          <FileOption/>
+        </File>
+      </VirtualDirectory>
+      <VirtualDirectory Name="bus">
+        <VirtualDirectory Name="spi">
+          <VirtualDirectory Name="spi_nor">
+            <File Name="../sdk/lib/bus/spi/spi_nor/spi_nor_bus.c">
+              <FileOption/>
+            </File>
+          </VirtualDirectory>
+        </VirtualDirectory>
+        <VirtualDirectory Name="macbus">
+          <File Name="../sdk/lib/bus/macbus/gmac_bus.c">
+            <FileOption/>
+          </File>
+          <File Name="../sdk/lib/bus/macbus/macbus.c">
+            <FileOption/>
+          </File>
+        </VirtualDirectory>
+      </VirtualDirectory>
+      <VirtualDirectory Name="misc"/>
+      <VirtualDirectory Name="net">
+        <VirtualDirectory Name="lwip">
+          <VirtualDirectory Name="arch">
+            <File Name="../sdk/lib/net/lwip/arch/sys_arch.c">
+              <FileOption/>
+            </File>
+          </VirtualDirectory>
+          <VirtualDirectory Name="src">
+            <VirtualDirectory Name="api">
+              <File Name="../sdk/lib/net/lwip/src/api/api_lib.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/api/api_msg.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/api/err.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/api/if_api.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/api/netbuf.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/api/netdb.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/api/netifapi.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/api/sockets.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/api/tcpip.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/api/ping.c">
+                <FileOption/>
+              </File>
+            </VirtualDirectory>
+            <VirtualDirectory Name="core">
+              <File Name="../sdk/lib/net/lwip/src/core/altcp.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/core/altcp_alloc.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/core/altcp_tcp.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/core/def.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/core/dns.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/core/inet_chksum.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/core/init.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/core/ip.c">
+                <FileOption/>
+              </File>
+              <VirtualDirectory Name="ipv4">
+                <File Name="../sdk/lib/net/lwip/src/core/ipv4/autoip.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/core/ipv4/dhcp.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/core/ipv4/etharp.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/core/ipv4/icmp.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/core/ipv4/igmp.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/core/ipv4/ip4.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/core/ipv4/ip4_addr.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/core/ipv4/ip4_frag.c">
+                  <FileOption/>
+                </File>
+              </VirtualDirectory>
+              <VirtualDirectory Name="ipv6">
+                <File Name="../sdk/lib/net/lwip/src/core/ipv6/dhcp6.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/core/ipv6/ethip6.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/core/ipv6/icmp6.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/core/ipv6/inet6.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/core/ipv6/ip6.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/core/ipv6/ip6_addr.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/core/ipv6/ip6_frag.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/core/ipv6/mld6.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/core/ipv6/nd6.c">
+                  <FileOption/>
+                </File>
+              </VirtualDirectory>
+              <File Name="../sdk/lib/net/lwip/src/core/mem.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/core/memp.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/core/netif.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/core/pbuf.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/core/raw.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/core/stats.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/core/sys.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/core/tcp.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/core/tcp_in.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/core/tcp_out.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/core/timeouts.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/core/udp.c">
+                <FileOption/>
+              </File>
+            </VirtualDirectory>
+            <VirtualDirectory Name="netif">
+              <File Name="../sdk/lib/net/lwip/src/netif/bridgeif.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/netif/bridgeif_fdb.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/netif/ethernet.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/netif/ethernetif.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/netif/lowpan6.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/netif/lowpan6_ble.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/netif/lowpan6_common.c">
+                <FileOption/>
+              </File>
+              <VirtualDirectory Name="ppp">
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/auth.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/ccp.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/chap-md5.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/chap-new.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/chap_ms.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/demand.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/eap.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/ecp.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/eui64.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/fsm.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/ipcp.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/ipv6cp.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/lcp.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/magic.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/mppe.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/multilink.c">
+                  <FileOption/>
+                </File>
+                <VirtualDirectory Name="polarssl">
+                  <File Name="../sdk/lib/net/lwip/src/netif/ppp/polarssl/arc4.c">
+                    <FileOption/>
+                  </File>
+                  <File Name="../sdk/lib/net/lwip/src/netif/ppp/polarssl/des.c">
+                    <FileOption/>
+                  </File>
+                  <File Name="../sdk/lib/net/lwip/src/netif/ppp/polarssl/md4.c">
+                    <FileOption/>
+                  </File>
+                  <File Name="../sdk/lib/net/lwip/src/netif/ppp/polarssl/md5.c">
+                    <FileOption/>
+                  </File>
+                  <File Name="../sdk/lib/net/lwip/src/netif/ppp/polarssl/sha1.c">
+                    <FileOption/>
+                  </File>
+                </VirtualDirectory>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/ppp.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/pppapi.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/pppcrypt.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/pppoe.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/pppol2tp.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/pppos.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/upap.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/utils.c">
+                  <FileOption/>
+                </File>
+                <File Name="../sdk/lib/net/lwip/src/netif/ppp/vj.c">
+                  <FileOption/>
+                </File>
+              </VirtualDirectory>
+              <File Name="../sdk/lib/net/lwip/src/netif/slipif.c">
+                <FileOption/>
+              </File>
+              <File Name="../sdk/lib/net/lwip/src/netif/zepif.c">
+                <FileOption/>
+              </File>
+            </VirtualDirectory>
+          </VirtualDirectory>
+          <VirtualDirectory Name="apps">
+            <VirtualDirectory Name="lwiperf">
+              <File Name="../sdk/lib/net/lwip/src/apps/lwiperf/lwiperf.c">
+                <FileOption/>
+              </File>
+            </VirtualDirectory>
+          </VirtualDirectory>
+        </VirtualDirectory>
+        <VirtualDirectory Name="skmonitor">
+          <File Name="../sdk/lib/net/skmonitor/skmonitor.c">
+            <FileOption/>
+          </File>
+        </VirtualDirectory>
+        <VirtualDirectory Name="wifi">
+          <File Name="../sdk/lib/net/wifi/wifi_cfg.c">
+            <FileOption/>
+          </File>
+        </VirtualDirectory>
+        <VirtualDirectory Name="ethphy">
+          <File Name="../sdk/lib/net/ethphy/eth_mdio_bus.c">
+            <FileOption/>
+          </File>
+          <File Name="../sdk/lib/net/ethphy/eth_phy.c">
+            <FileOption/>
+          </File>
+          <File Name="../sdk/lib/net/ethphy/eth_phy_device.c">
+            <FileOption/>
+          </File>
+          <File Name="../sdk/lib/net/ethphy/mii.h">
+            <FileOption/>
+          </File>
+          <VirtualDirectory Name="phy">
+            <File Name="../sdk/lib/net/ethphy/phy/auto_phy.c">
+              <FileOption/>
+            </File>
+            <File Name="../sdk/lib/net/ethphy/phy/ip101g.c">
+              <FileOption/>
+            </File>
+            <File Name="../sdk/lib/net/ethphy/phy/rtl8201f.c">
+              <FileOption/>
+            </File>
+            <File Name="../sdk/lib/net/ethphy/phy/sz18201.c">
+              <FileOption/>
+            </File>
+          </VirtualDirectory>
+        </VirtualDirectory>
+      </VirtualDirectory>
+      <VirtualDirectory Name="posix">
+        <File Name="../sdk/lib/posix/mqueue.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/posix/posix_test.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/posix/pthread.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/posix/pthread_attr.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/posix/pthread_barrier.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/posix/pthread_cond.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/posix/pthread_mutex.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/posix/pthread_rwlock.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/posix/pthread_tls.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/posix/sched.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/posix/semaphore.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/posix/sockets.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/posix/stdio.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/posix/timer.c">
+          <FileOption/>
+        </File>
+      </VirtualDirectory>
+    </VirtualDirectory>
+    <VirtualDirectory Name="hal">
+      <File Name="../sdk/hal/gpio.c">
+        <FileOption/>
+      </File>
+      <File Name="../sdk/hal/timer.c">
+        <FileOption/>
+      </File>
+      <File Name="../sdk/hal/uart.c">
+        <FileOption/>
+      </File>
+      <File Name="../sdk/hal/sdio_slave.c">
+        <FileOption/>
+      </File>
+      <File Name="../sdk/hal/spi.c">
+        <FileOption/>
+      </File>
+      <File Name="../sdk/hal/sysaes.c">
+        <FileOption/>
+      </File>
+      <File Name="../sdk/hal/usb_device.c">
+        <FileOption/>
+      </File>
+      <File Name="../sdk/hal/dma.c">
+        <FileOption/>
+      </File>
+      <File Name="../sdk/hal/dev.c">
+        <FileOption/>
+      </File>
+      <File Name="../sdk/hal/spi_nor.c">
+        <FileOption/>
+      </File>
+      <File Name="../sdk/hal/netdev.c">
+        <FileOption/>
+      </File>
+    </VirtualDirectory>
+  </VirtualDirectory>
+  <MonitorProgress>
+    <DebugLaunch>50</DebugLaunch>
+    <FlashOperate>25</FlashOperate>
+  </MonitorProgress>
+  <Dependencies Name="BuildSet"/>
+  <VendorInfo>
+    <VendorName>NULL</VendorName>
+  </VendorInfo>
+  <ToolsConfig>
+    <Compiler>
+      <Name>CKV2ElfMinilib</Name>
+      <Version>latest</Version>
+    </Compiler>
+  </ToolsConfig>
+  <VirtualDirectory Name="src">
+    <File Name="../src/device.c">
+      <FileOption/>
+    </File>
+    <File Name="../src/halow.c">
+      <FileOption/>
+    </File>
+    <File Name="../src/main.c">
+      <FileOption/>
+    </File>
+    <File Name="../src/syscfg.c">
+      <FileOption/>
+    </File>
+    <File Name="../src/kiss_task.c">
+      <FileOption/>
+    </File>
+    <File Name="../src/kiss-tnc.c">
+      <FileOption/>
+    </File>
+    <File Name="../src/ota.c">
+      <FileOption/>
+    </File>
+  </VirtualDirectory>
+  <DebugSessions>
+    <watchExpressions>psalive:1;sdata:1;__sleep_data_start:1;__sleep_data_stop:1</watchExpressions>
+    <memoryExpressions>0x20081954;;;</memoryExpressions>
+    <statistics>;;MHZ;;MHZ;;up</statistics>
+    <peripheralTabs>
+      <Tab disFormat="Hex">SYSCTRL</Tab>
+      <Tab disFormat="Hex">GMAC</Tab>
+    </peripheralTabs>
+    <WatchDisplayFormat>1</WatchDisplayFormat>
+    <LocalDisplayFormat>1</LocalDisplayFormat>
+    <debugLayout/>
+    <memoryTabColSizeExpressions>100:4;100:8;100:8;100:8;</memoryTabColSizeExpressions>
+    <QuickWatchDisplayFormat>1</QuickWatchDisplayFormat>
+  </DebugSessions>
+  <BuildConfigs>
+    <BuildConfig Name="BuildSet">
+      <Target>
+        <ROMBank Selected="1">
+          <ROM1>
+            <InUse>no</InUse>
+            <Start/>
+            <Size/>
+          </ROM1>
+          <ROM2>
+            <InUse>no</InUse>
+            <Start/>
+            <Size/>
+          </ROM2>
+          <ROM3>
+            <InUse>no</InUse>
+            <Start/>
+            <Size/>
+          </ROM3>
+          <ROM4>
+            <InUse>no</InUse>
+            <Start/>
+            <Size/>
+          </ROM4>
+          <ROM5>
+            <InUse>no</InUse>
+            <Start/>
+            <Size/>
+          </ROM5>
+        </ROMBank>
+        <RAMBank>
+          <RAM1>
+            <InUse>no</InUse>
+            <Start/>
+            <Size/>
+            <Init>yes</Init>
+          </RAM1>
+          <RAM2>
+            <InUse>no</InUse>
+            <Start/>
+            <Size/>
+            <Init>yes</Init>
+          </RAM2>
+          <RAM3>
+            <InUse>no</InUse>
+            <Start/>
+            <Size/>
+            <Init>yes</Init>
+          </RAM3>
+          <RAM4>
+            <InUse>no</InUse>
+            <Start/>
+            <Size/>
+            <Init>yes</Init>
+          </RAM4>
+          <RAM5>
+            <InUse>no</InUse>
+            <Start/>
+            <Size/>
+            <Init>yes</Init>
+          </RAM5>
+        </RAMBank>
+        <CPU>ck803</CPU>
+        <UseMiniLib>yes</UseMiniLib>
+        <Endian>little</Endian>
+        <UseHardFloat>no</UseHardFloat>
+        <UseEnhancedLRW>no</UseEnhancedLRW>
+        <UseContinueBuild>no</UseContinueBuild>
+        <ToolchainID/>
+        <ToolchainVersion/>
+        <UseSemiHost>no</UseSemiHost>
+      </Target>
+      <Output>
+        <OutputName>$(ProjectName)</OutputName>
+        <Type>Executable</Type>
+        <CreateHexFile>yes</CreateHexFile>
+        <CreateBinFile>yes</CreateBinFile>
+        <Preprocessor>no</Preprocessor>
+        <Disassmeble>yes</Disassmeble>
+        <CallGraph>no</CallGraph>
+        <Map>yes</Map>
+      </Output>
+      <User>
+        <BeforeCompile>
+          <RunUserProg>no</RunUserProg>
+          <UserProgName>$(ProjectPath)/precompile.sh $&lt;</UserProgName>
+          <IsBatchScript>no</IsBatchScript>
+        </BeforeCompile>
+        <BeforeMake>
+          <RunUserProg>no</RunUserProg>
+          <UserProgName>$(ProjectPath)/prebuild.sh $&lt;</UserProgName>
+          <IsBatchScript>no</IsBatchScript>
+        </BeforeMake>
+        <AfterMake>
+          <RunUserProg>yes</RunUserProg>
+          <UserProgName>$(ProjectPath)/BuildBIN.sh</UserProgName>
+          <IsBatchScript>no</IsBatchScript>
+        </AfterMake>
+        <Tools/>
+      </User>
+      <Compiler>
+        <Define>__NO_BOARD_INIT TXW4002ACK803 SKBPOOL_ENABLE MPOOL_ALLOC CONFIG_UMAC4</Define>
+        <Undefine/>
+        <Optim>Optimize size (-Os)</Optim>
+        <DebugLevel>Default (-g)</DebugLevel>
+        <IncludePath>$(ProjectPath);$(ProjectPath)/../csky/configs;$(ProjectPath)/../csky/csi_core/include;$(ProjectPath)/../csky/csi_driver/include;$(ProjectPath)/../csky/csi_kernel/include;$(ProjectPath)/../csky/csi_kernel/rhino/arch/include;$(ProjectPath)/../csky/csi_kernel/rhino/common;$(ProjectPath)/../csky/csi_kernel/rhino/core/include;$(ProjectPath)/../csky/csi_kernel/rhino/driver;$(ProjectPath)/../csky/csi_kernel/rhino/pwrmgmt;$(ProjectPath)/../csky/libs/include;$(ProjectPath)/../inc;$(ProjectPath)/../sdk/chip/txw4002ack803;$(ProjectPath)/../sdk/driver/emac;$(ProjectPath)/../sdk/include;$(ProjectPath)/../sdk/include/chip;$(ProjectPath)/../sdk/include/chip/txw4002ack803;$(ProjectPath)/../sdk/include/lib/net/lwip;$(ProjectPath)/../sdk/include/lib/net/lwip/include;$(ProjectPath)/../sdk/lib/lmac/mars;$(ProjectPath)/../sdk/lib/net/ethphy;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/altcp_tls;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/http;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/http/makefsdata;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/snmp;$(ProjectPath)/../sdk/lib/umac/umac4/;$(ProjectPath)/../sdk/lib/umac/umac4/include;$(ProjectPath)/../sdk/lib/umac/umac4/lib;$(ProjectPath)/../sdk/lib/umac/umac4/wnb/include;$(ProjectPath)/../sdk/lib/umac/umac4/wpa;$(ProjectPath)/../sdk/lib/umac/umac4/wpa_auth;$(ProjectPath)/../src</IncludePath>
+        <OtherFlags>-ffunction-sections -fdata-sections -Wno-comment -Wno-unused-function -Wno-unused-but-set-variable -mno-required-printf</OtherFlags>
+        <Verbose>no</Verbose>
+        <Ansi>no</Ansi>
+        <Syntax>no</Syntax>
+        <Pedantic>no</Pedantic>
+        <PedanticErr>no</PedanticErr>
+        <InhibitWarn>no</InhibitWarn>
+        <AllWarn>yes</AllWarn>
+        <WarnErr>no</WarnErr>
+        <OneElfS>no</OneElfS>
+        <OneElfSPerData>no</OneElfSPerData>
+        <Fstrict>no</Fstrict>
+      </Compiler>
+      <Asm>
+        <Define>__NO_BOARD_INIT TXW4002ACK803</Define>
+        <Undefine/>
+        <IncludePath>$(ProjectPath);$(ProjectPath)/../csky/configs;$(ProjectPath)/../csky/csi_core/include;$(ProjectPath)/../csky/csi_driver/include;$(ProjectPath)/../csky/csi_kernel/include;$(ProjectPath)/../csky/csi_kernel/rhino/arch/include;$(ProjectPath)/../csky/csi_kernel/rhino/common;$(ProjectPath)/../csky/csi_kernel/rhino/core/include;$(ProjectPath)/../csky/csi_kernel/rhino/driver;$(ProjectPath)/../csky/csi_kernel/rhino/pwrmgmt;$(ProjectPath)/../csky/libs/include;$(ProjectPath)/../sdk/driver/emac;$(ProjectPath)/../sdk/include;$(ProjectPath)/../sdk/include/chip;$(ProjectPath)/../sdk/include/chip/txw4002ack803;$(ProjectPath)/../sdk/lib/net/ethphy;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/altcp_tls;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/http;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/http/makefsdata;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/snmp;$(ProjectPath)/../sdk/lib/umac/umac4/include;$(ProjectPath)/../sdk/lib/umac/umac4/lib;$(ProjectPath)/../sdk/lib/umac/umac4/wnb/include;$(ProjectPath)/../sdk/lib/umac/umac4/wpa;$(ProjectPath)/../sdk/lib/umac/umac4/wpa_auth;$(ProjectPath)/../inc</IncludePath>
+        <OtherFlags/>
+        <DebugLevel>gdwarf2</DebugLevel>
+      </Asm>
+      <Linker>
+        <Garbage>yes</Garbage>
+        <Garbage2>yes</Garbage2>
+        <LDFile>$(ProjectPath)\..\gcc_csky.ld</LDFile>
+        <LibName>m;;core;netutils;common;osal;lmac</LibName>
+        <LibPath>$(ProjectPath)/../libs</LibPath>
+        <OtherFlags>-Wl,-zmax-page-size=1024  -Wl,-Map=project.map -Wl,--wrap=lwip_netif_hook_inputdata</OtherFlags>
+        <AutoLDFile>no</AutoLDFile>
+        <LinkType/>
+        <IncludeAllLibs>no</IncludeAllLibs>
+        <LinkSpecsType>none</LinkSpecsType>
+        <LinkUseNewlibNano>no</LinkUseNewlibNano>
+        <LinkUseMinilibc>no</LinkUseMinilibc>
+      </Linker>
+      <Debug>
+        <LoadApplicationAtStartup>yes</LoadApplicationAtStartup>
+        <Connector>ICE</Connector>
+        <StopAt>no</StopAt>
+        <StopAtText>main</StopAtText>
+        <InitFile>$(ProjectPath)/gdb.init</InitFile>
+        <PreInit/>
+        <AfterLoadFile/>
+        <AutoRun>no</AutoRun>
+        <ResetType>Hard Reset</ResetType>
+        <SoftResetVal>0</SoftResetVal>
+        <ResetAfterLoad>no</ResetAfterLoad>
+        <AfterResetFile/>
+        <Dumpcore>no</Dumpcore>
+        <DumpcoreText>$(ProjectPath)/$(ProjectName).cdkcore</DumpcoreText>
+        <SVCFile/>
+        <ConfigICE>
+          <IP>localhost</IP>
+          <PORT>1025</PORT>
+          <CPUNumber>0</CPUNumber>
+          <Clock>12000</Clock>
+          <Delay>10</Delay>
+          <NResetDelay>100</NResetDelay>
+          <WaitReset>50</WaitReset>
+          <DDC>yes</DDC>
+          <TRST>no</TRST>
+          <PreReset>no</PreReset>
+          <DebugPrint>no</DebugPrint>
+          <Connect>Normal</Connect>
+          <ResetType>Soft Reset</ResetType>
+          <SoftResetVal>abcd0048</SoftResetVal>
+          <RTOSType>Bare Metal</RTOSType>
+          <DownloadToFlash>no</DownloadToFlash>
+          <ResetAfterConnect>yes</ResetAfterConnect>
+          <GDBName/>
+          <GDBServerType>Local</GDBServerType>
+          <OtherFlags/>
+          <ICEEnablePCSampling>no</ICEEnablePCSampling>
+          <ICESamplingFreq>1000</ICESamplingFreq>
+          <RemoteICEEnablePCSampling>no</RemoteICEEnablePCSampling>
+          <RemoteICESamplingPort>1026</RemoteICESamplingPort>
+          <Version>latest</Version>
+          <SupportRemoteICEAsyncDebug>no</SupportRemoteICEAsyncDebug>
+        </ConfigICE>
+        <ConfigSIM>
+          <SIMTarget>soccfg/userconfig/huge-ic/txw4002.xml</SIMTarget>
+          <OtherFlags/>
+          <NoGraphic>yes</NoGraphic>
+          <Log>no</Log>
+          <SimTrace>no</SimTrace>
+          <Version>latest</Version>
+        </ConfigSIM>
+        <ConfigOpenOCD>
+          <OpenOCDExecutablePath/>
+          <OpenOCDLocally>yes</OpenOCDLocally>
+          <OpenOCDTelnetPortEnable>no</OpenOCDTelnetPortEnable>
+          <OpenOCDTelnetPort>4444</OpenOCDTelnetPort>
+          <OpenOCDTclPortEnable>no</OpenOCDTclPortEnable>
+          <OpenOCDTclPort>6666</OpenOCDTclPort>
+          <OpenOCDConfigOptions/>
+          <OpenOCDTimeout>5000</OpenOCDTimeout>
+          <OpenOCDRemoteIP>localhost</OpenOCDRemoteIP>
+          <OpenOCDRemotePort>3333</OpenOCDRemotePort>
+          <PluginID>openocd-sifive</PluginID>
+          <Version>latest</Version>
+        </ConfigOpenOCD>
+      </Debug>
+      <Flash>
+        <InitFile>"$(ProjectPath)/utilities/flashinit"</InitFile>
+        <PreInit/>
+        <Erase>Erase Sectors</Erase>
+        <Algorithms Path=""/>
+        <Program>yes</Program>
+        <Verify>no</Verify>
+        <ResetAndRun>no</ResetAndRun>
+        <ResetType>Soft Reset</ResetType>
+        <SoftResetVal/>
+        <FlashIndex>no</FlashIndex>
+        <FlashIndexVal>0</FlashIndexVal>
+        <External>yes</External>
+        <Command>$(ProjectPath)/CSKYFlashProgramerConsole.bat</Command>
+        <Arguments>$(CDKPath) CSKYFlashProgramerCfg</Arguments>
+      </Flash>
+    </BuildConfig>
+  </BuildConfigs>
+</Project>
