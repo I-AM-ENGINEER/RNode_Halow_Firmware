@@ -12,51 +12,52 @@
 /* ===== Wi-Fi HaLow fixed config ===== */
 
 /* Channel / RF */
-#define HALOW_FREQ_KHZ 8665 /* sys_cfgs.chan_list[0] */
-#define HALOW_BSS_BW   1    /* 1 MHz */
+#define HALOW_FREQ_KHZ          8665        /* sys_cfgs.chan_list[0] */
+#define HALOW_BSS_BW            1           /* 1 MHz */
 
 /* PHY / rate */
-#define HALOW_TX_MCS LMAC_RATE_S1G_1_NSS_MCS0
+#define HALOW_TX_MCS            LMAC_RATE_S1G_1_NSS_MCS0
 
 /* Power */
-#define HALOW_TX_POWER      20
-#define HALOW_PA_PWRCTRL_EN 1
-#define HALOW_VDD13_MODE    0
+#define HALOW_TX_POWER          TX_POWER
+#define HALOW_PA_PWRCTRL_EN     (!DSLEEP_PAPWRCTL_DIS)
+#define HALOW_VDD13_MODE        DC_DC_1_3V
 
 /* Antenna */
-#define HALOW_DUAL_ANT_EN 0
-#define HALOW_ANT_AUTO_EN 0
-#define HALOW_ANT_SEL     0
+#define HALOW_DUAL_ANT_EN       0
+#define HALOW_ANT_AUTO_EN       0
+#define HALOW_ANT_SEL           0
 
 /* Aggregation */
-#define HALOW_TX_AGGCNT 1
-#define HALOW_RX_AGGCNT 1
+#define HALOW_TX_AGGCNT         1
+#define HALOW_RX_AGGCNT         1
 
 /* Power save / sleep */
-#define HALOW_PS_MODE          DSLEEP_MODE_NONE
-#define HALOW_WAIT_PSMODE      DSLEEP_WAIT_MODE_PS_CONNECT
-#define HALOW_PSCONNECT_PERIOD 60
+#define HALOW_PS_MODE           DSLEEP_MODE_NONE
+#define HALOW_WAIT_PSMODE       DSLEEP_WAIT_MODE_PS_CONNECT
+#define HALOW_PSCONNECT_PERIOD  60
 
 /* Standby */
-#define HALOW_STANDBY_CH        1 /* channel index starts from 1 */
+#define HALOW_STANDBY_CH        1           /* channel index starts from 1 */
 #define HALOW_STANDBY_PERIOD_MS 5000
 
 /* ACK / retry */
-#define HALOW_ACK_TMO_EXTRA 0
-#define HALOW_RETRY_FRM_MAX 0
-#define HALOW_RETRY_RTS_MAX 0
-#define HALOW_RETRY_FB_CNT  0
-#define HALOW_RTS_THRESH    0xFFFF
+#define HALOW_ACK_TMO_EXTRA     0
+#define HALOW_RETRY_FRM_MAX     0
+#define HALOW_RETRY_RTS_MAX     0
+#define HALOW_RETRY_FB_CNT      0
+#define HALOW_RTS_THRESH        0xFFFF
 
 /* CCA */
-#define HALOW_CCA_FOR_CE 0
+#define HALOW_CCA_FOR_CE        0
 
 /* Wakeup */
-#define HALOW_WAKEUP_IO   0
-#define HALOW_WAKEUP_EDGE 0
+#define HALOW_WAKEUP_IO         0
+#define HALOW_WAKEUP_EDGE       0
 
 /* Debug */
-#define HALOW_DBG_LEVEL 0
+#define HALOW_DBG_LEVEL         0
+
 
 /* ===== internal state ===== */
 
@@ -109,9 +110,11 @@ static int32_t halow_lmac_tx_status(struct lmac_ops *ops,
 }
 
 /* ===== LMAC post-init ===== */
-static void halow_post_init(struct lmac_ops *ops) {
+static void halow_post_init(struct lmac_ops *ops)
+{
     static uint8 g_mac[6] = {
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
+    };
 
     /* ---- basic bring-up ---- */
     ops->ioctl(ops, LMAC_IOCTL_SET_MAC_ADDR,
