@@ -106,11 +106,10 @@ targets:
             signed-char: true
             warnings: unspecified
           global:
-            misc-control: -DLWIP_DEBUG
             output-debug-info: enable
           linker:
             $disableOutputTask: true
-            LD_FLAGS: -mcpu=ck803 -nostartfiles -Wl,--gc-sections -Wl,-zmax-page-size=1024 -Wl,-Map=project.map -Wl,--ckmap=txw4002a.map
+            LD_FLAGS: -mcpu=ck803 -nostartfiles -Wl,--gc-sections -Wl,-zmax-page-size=1024 -Wl,-Map=project.map -Wl,--ckmap=txw4002a.map -Wl,--wrap=lwip_netif_hook_inputdata
             LIB_FLAGS: -L libs -lcore -lnetutils -lcommon -losal -llmac -lm
             linker-type: gcc
             output-format: elf
