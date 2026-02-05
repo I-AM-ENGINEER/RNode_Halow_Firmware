@@ -120,13 +120,13 @@ static void halow_post_init(struct lmac_ops *ops)
     ops->ioctl(ops, LMAC_IOCTL_SET_MAC_ADDR,
                (uint32)(uintptr_t)g_mac, 0);
 
-    ops->ioctl(ops, LMAC_IOCTL_SET_ANT_DUAL_EN,
-               HALOW_DUAL_ANT_EN, 0);
+    //ops->ioctl(ops, LMAC_IOCTL_SET_ANT_DUAL_EN,
+    //           HALOW_DUAL_ANT_EN, 0);
 
-    ops->ioctl(ops, LMAC_IOCTL_SET_ANT_SEL,
-               HALOW_ANT_SEL, 0);
+    //ops->ioctl(ops, LMAC_IOCTL_SET_ANT_SEL,
+    //           HALOW_ANT_SEL, 0);
 
-    ops->ioctl(ops, LMAC_IOCTL_SET_RADIO_ONOFF, 1, 0);
+    //ops->ioctl(ops, LMAC_IOCTL_SET_RADIO_ONOFF, 1, 0);
 
     /* ---- RF / channel ---- */
     lmac_set_freq(ops, HALOW_FREQ_KHZ);
@@ -137,11 +137,10 @@ static void halow_post_init(struct lmac_ops *ops)
     lmac_set_fix_tx_rate(ops, HALOW_TX_MCS);
     lmac_set_fallback_mcs(ops, HALOW_TX_MCS);
     lmac_set_mcast_txmcs(ops, HALOW_TX_MCS);
-
+	
     /* ---- power ---- */
     lmac_set_txpower(ops, HALOW_TX_POWER);
-    lmac_set_pa_pwr_ctrl(ops, HALOW_PA_PWRCTRL_EN);
-    lmac_set_vdd13(ops, HALOW_VDD13_MODE);
+    //lmac_set_pa_pwr_ctrl(ops, HALOW_PA_PWRCTRL_EN);
 
     /* ---- aggregation ---- */
     lmac_set_aggcnt(ops, HALOW_TX_AGGCNT);
