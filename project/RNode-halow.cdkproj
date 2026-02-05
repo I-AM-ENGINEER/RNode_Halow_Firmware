@@ -866,7 +866,29 @@ Board: txw4002a
       <FileOption/>
     </File>
     <File Name="../src/halow.c">
-      <FileOption/>
+      <FileOption>
+        <BuildConfig Name="BuildSet">
+          <Compiler>
+            <Define>__NO_BOARD_INIT TXW4002ACK803 SKBPOOL_ENABLE MPOOL_ALLOC CONFIG_UMAC4</Define>
+            <Undefine/>
+            <Optim>None (-O0)</Optim>
+            <DebugLevel>Default (-g)</DebugLevel>
+            <IncludePath>$(ProjectPath);$(ProjectPath)/../csky/configs;$(ProjectPath)/../csky/csi_core/include;$(ProjectPath)/../csky/csi_driver/include;$(ProjectPath)/../csky/csi_kernel/include;$(ProjectPath)/../csky/csi_kernel/rhino/arch/include;$(ProjectPath)/../csky/csi_kernel/rhino/common;$(ProjectPath)/../csky/csi_kernel/rhino/core/include;$(ProjectPath)/../csky/csi_kernel/rhino/driver;$(ProjectPath)/../csky/csi_kernel/rhino/pwrmgmt;$(ProjectPath)/../csky/libs/include;$(ProjectPath)/../inc;$(ProjectPath)/../sdk/chip/txw4002ack803;$(ProjectPath)/../sdk/driver/emac;$(ProjectPath)/../sdk/include;$(ProjectPath)/../sdk/include/chip;$(ProjectPath)/../sdk/include/chip/txw4002ack803;$(ProjectPath)/../sdk/include/lib/net/lwip;$(ProjectPath)/../sdk/include/lib/net/lwip/include;$(ProjectPath)/../sdk/lib/lmac/mars;$(ProjectPath)/../sdk/lib/net/ethphy;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/altcp_tls;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/http;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/http/makefsdata;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/snmp;$(ProjectPath)/../sdk/lib/umac/umac4/;$(ProjectPath)/../sdk/lib/umac/umac4/include;$(ProjectPath)/../sdk/lib/umac/umac4/lib;$(ProjectPath)/../sdk/lib/umac/umac4/wnb/include;$(ProjectPath)/../sdk/lib/umac/umac4/wpa;$(ProjectPath)/../sdk/lib/umac/umac4/wpa_auth;$(ProjectPath)/../src</IncludePath>
+            <OtherFlags>-ffunction-sections -fdata-sections -Wno-comment -Wno-unused-function -Wno-unused-but-set-variable -mno-required-printf</OtherFlags>
+            <Verbose>no</Verbose>
+            <Ansi>no</Ansi>
+            <Syntax>no</Syntax>
+            <Pedantic>no</Pedantic>
+            <PedanticErr>no</PedanticErr>
+            <InhibitWarn>no</InhibitWarn>
+            <AllWarn>yes</AllWarn>
+            <WarnErr>no</WarnErr>
+            <OneElfS>no</OneElfS>
+            <OneElfSPerData>no</OneElfSPerData>
+            <Fstrict>no</Fstrict>
+          </Compiler>
+        </BuildConfig>
+      </FileOption>
     </File>
     <File Name="../src/main.c">
       <FileOption/>
@@ -885,8 +907,8 @@ Board: txw4002a
     </File>
   </VirtualDirectory>
   <DebugSessions>
-    <watchExpressions>psalive:1;sdata:1;__sleep_data_start:1;__sleep_data_stop:1</watchExpressions>
-    <memoryExpressions>0x20081954;;;</memoryExpressions>
+    <watchExpressions>psalive:1;sdata:1;__sleep_data_start:1;__sleep_data_stop:1;g_rx_cb:1;g_ops:1</watchExpressions>
+    <memoryExpressions>0x2002f604;;;</memoryExpressions>
     <statistics>;;MHZ;;MHZ;;up</statistics>
     <peripheralTabs>
       <Tab disFormat="Hex">SYSCTRL</Tab>
@@ -1030,7 +1052,7 @@ Board: txw4002a
         <LDFile>$(ProjectPath)\..\gcc_csky.ld</LDFile>
         <LibName>m;;core;netutils;common;osal;lmac</LibName>
         <LibPath>$(ProjectPath)/../libs</LibPath>
-        <OtherFlags>-Wl,-zmax-page-size=1024  -Wl,-Map=project.map -Wl,--wrap=lwip_netif_hook_inputdata</OtherFlags>
+        <OtherFlags>-Wl,-zmax-page-size=1024  -Wl,-Map=project.map -Wl,--wrap=lwip_netif_hook_inputdata -Wl,--wrap=lmac_send_bss_announcement</OtherFlags>
         <AutoLDFile>no</AutoLDFile>
         <LinkType/>
         <IncludeAllLibs>no</IncludeAllLibs>

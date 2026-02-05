@@ -145,6 +145,8 @@ static void halow_post_init(struct lmac_ops *ops)
 	
     /* ---- power ---- */
     lmac_set_txpower(ops, HALOW_TX_POWER);
+    //SUPER POWER (200 mA device consumption, 20-22 dBm expected)
+    lmac_set_super_pwr(ops, 1);
     //lmac_set_pa_pwr_ctrl(ops, HALOW_PA_PWRCTRL_EN);
 
     /* ---- aggregation ---- */
