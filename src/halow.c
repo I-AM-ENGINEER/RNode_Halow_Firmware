@@ -65,6 +65,11 @@ static struct lmac_ops *g_ops = NULL;
 static halow_rx_cb g_rx_cb;
 static uint16_t g_seq;
 
+// Disable broadcast
+int32_t __wrap_lmac_send_bss_announcement(void){
+    return 0;
+}
+
 /* ===== helpers ===== */
 
 static inline void mac_bcast(uint8_t mac[6]) {
