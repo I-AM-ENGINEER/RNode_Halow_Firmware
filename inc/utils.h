@@ -1,3 +1,7 @@
-#include <sdtint.h>
+#ifndef __UTILS_H_
+#define __UTILS_H_
 
-static inline uint64_t os_time_ms(void);
+inline int64_t get_time_ms(void);
+inline int64_t get_time_us(void);
+
+#endif // __UTILS_H_
