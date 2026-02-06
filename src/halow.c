@@ -227,7 +227,7 @@ void halow_get_tx_vacanted_bytes(uint32_t bytes){
             g_tx_vacated_bytes -= bytes;
             return;
         }
-        os_sema_down(&g_tx_vacated_sem, OS_MUTEX_WAIT_FOREVER);
+        os_sema_down(&g_tx_vacated_sem, osWaitForever);
     }
 }
 
