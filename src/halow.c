@@ -7,6 +7,7 @@
 #include "lib/lmac/hgic.h"
 #include "lib/skb/skb.h"
 #include "lib/skb/skbuff.h"
+#include "osal/semaphore.h"
 #include "osal/string.h"
 
 /* ===== Wi-Fi HaLow fixed config ===== */
@@ -57,7 +58,7 @@
 
 /* Debug */
 #define HALOW_DBG_LEVEL         0
-
+#define TX_BUFFER_SIZE          (4*1024)
 
 /* ===== internal state ===== */
 
@@ -65,18 +66,17 @@ static struct lmac_ops *g_ops = NULL;
 static halow_rx_cb g_rx_cb;
 static uint16_t g_seq;
 
+static uint32_t g_tx_vacated_bytes = TX_BUFFER_SIZE;
+static struct os_semaphore g_tx_vacated_sem;
+
 // Disable broadcast
 int32_t __wrap_lmac_send_bss_announcement(void){
     return 0;
 }
 
-/* ===== helpers ===== */
-
 static inline void mac_bcast(uint8_t mac[6]) {
     memset(mac, 0xff, 6);
 }
-
-/* ===== RX/TX hooks ===== */
 
 static int32_t halow_lmac_rx(struct lmac_ops *ops,
                              struct hgic_rx_info *info,
@@ -105,10 +105,11 @@ static int32_t halow_lmac_rx(struct lmac_ops *ops,
     return 0;
 }
 
-static int32_t halow_lmac_tx_status(struct lmac_ops *ops,
-                                    struct sk_buff *skb) {
+static int32_t halow_lmac_tx_status_callback(struct lmac_ops *ops, struct sk_buff *skb) {
     (void)ops;
     if (skb) {
+        g_tx_vacated_bytes += skb->len;
+        os_sema_up(&g_tx_vacated_sem);
         kfree_skb(skb);
     }
     return 0;
@@ -183,12 +184,11 @@ static void halow_post_init(struct lmac_ops *ops)
     lmac_set_dbg_levle(ops, HALOW_DBG_LEVEL);
 }
 
-/* ===== public API ===== */
-
 bool halow_init(uint32_t rxbuf, uint32_t rxbuf_size,
                 uint32_t tdma_buf, uint32_t tdma_buf_size) {
     struct lmac_init_param p;
 
+    os_sema_init(&g_tx_vacated_sem, 0);
     memset(&p, 0, sizeof(p));
     p.rxbuf          = rxbuf;
     p.rxbuf_size     = rxbuf_size;
@@ -201,7 +201,7 @@ bool halow_init(uint32_t rxbuf, uint32_t rxbuf_size,
     }
 
     g_ops->rx        = halow_lmac_rx;
-    g_ops->tx_status = halow_lmac_tx_status;
+    g_ops->tx_status = halow_lmac_tx_status_callback;
 
     lmac_set_promisc_mode(g_ops, 1);
 
@@ -221,9 +221,28 @@ void halow_set_rx_cb(halow_rx_cb cb) {
     g_rx_cb = cb;
 }
 
+void halow_get_tx_vacanted_bytes(uint32_t bytes){
+    while(1) {
+        if (g_tx_vacated_bytes >= bytes) {
+            g_tx_vacated_bytes -= bytes;
+            return;
+        }
+        os_sema_down(&g_tx_vacated_sem, OS_MUTEX_WAIT_FOREVER);
+    }
+}
+
 int32_t halow_tx(const uint8_t *data, uint32_t len) {
-    if (!g_ops || !data || len <= 0) {
-        return false;
+    if(g_ops == NULL){
+        return -1;
+    }
+    if(data == NULL){
+        return -2;
+    }
+    if(len == 0){
+        return -3;
+    }
+    if(len > TX_BUFFER_SIZE){
+        return -4;
     }
 
     struct ieee80211_hdr hdr;
@@ -243,7 +262,7 @@ int32_t halow_tx(const uint8_t *data, uint32_t len) {
 
     struct sk_buff *skb = alloc_tx_skb(need);
     if (!skb) {
-        return false;
+        return -5;
     }
 
     skb_reserve(skb, (int)hr);
@@ -252,6 +271,6 @@ int32_t halow_tx(const uint8_t *data, uint32_t len) {
 
     skb->priority = 0;
     skb->tx       = 1;
-
+    halow_get_tx_vacanted_bytes(skb->len);
     return lmac_tx(g_ops, skb);
 }

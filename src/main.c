@@ -50,7 +50,6 @@ static void halow_rx_handler(struct hgic_rx_info *info,
         return;
     }
     kiss_radio_rx(data, len);
-    _os_printf("\r\n");
 }
 
 __init static void sys_network_init(void) {

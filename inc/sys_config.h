@@ -70,7 +70,7 @@
 #endif
 
 #ifndef DEFAULT_SYS_CLK
-#define DEFAULT_SYS_CLK 96000000UL // options: 32M/48M/72M/144M, and 16*N from 64M to 128M
+#define DEFAULT_SYS_CLK 144000000UL // options: 32M/48M/72M/144M, and 16*N from 64M to 128M
 #endif
 
 #ifndef ATCMD_UARTDEV
