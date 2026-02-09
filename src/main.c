@@ -28,6 +28,7 @@
 #include <lib/fal/fal.h>
 #include <lib/flashdb/flashdb.h>
 #include "littelfs_port.h"
+#include "configdb.h"
 #ifdef MULTI_WAKEUP
 #include "lib/common/sleep_api.h"
 #include "hal/gpio.h"
@@ -37,7 +38,6 @@
 // #include "atcmd.c"
 
 static struct os_work main_wk;
-static struct fdb_kvdb g_cfg_db;
 extern uint32_t srampool_start;
 extern uint32_t srampool_end;
 uint8 g_mac[6];
@@ -138,39 +138,18 @@ void assert_printf(char *msg, int line, char *file){
     for (;;) {}
 }
 
+
 static void boot_counter_update(void){
-    uint32_t cnt = 0;
-
-    struct fdb_blob blob;
-    memset(&blob, 0, sizeof(blob));
-    blob.buf  = &cnt;
-    blob.size = sizeof(cnt);
-    size_t rd = fdb_kv_get_blob(&g_cfg_db, "sys.boot_cnt", &blob);
-    if (rd != sizeof(cnt)) {
-        cnt = 0;
+    configdb_param_int32_t pwr_on_cnt_param;
+    if(configdb_get_param_i32("pwr_on_cnt", &pwr_on_cnt_param) != 0){
+        pwr_on_cnt_param.val = 0;
+        pwr_on_cnt_param.def_val = 0;
+        pwr_on_cnt_param.min_val = 0;
+        pwr_on_cnt_param.max_val = INT32_MAX;
     }
-
-    cnt++;
-
-    memset(&blob, 0, sizeof(blob));
-    blob.buf  = &cnt;
-    blob.size = sizeof(cnt);
-
-    (void)fdb_kv_set_blob(&g_cfg_db, "sys.boot_cnt", &blob);
-
-    printf("Boot counter = %lu\n", (unsigned long)cnt);
-}
-
-void storage_init(void){
-    int rc = fal_init();
-    if (rc <= 0) {
-        return;
-    }
-
-    fdb_err_t err = fdb_kvdb_init(&g_cfg_db, "cfg", "fdb_kvdb1", NULL, 0);
-    if (err != FDB_NO_ERR) {
-        return;
-    }
+    pwr_on_cnt_param.val++;
+    configdb_set_param_i32("pwr_on_cnt", &pwr_on_cnt_param);
+    printf("Boot counter = %d\n", pwr_on_cnt_param.val);
 }
 
 __init int main(void) {
@@ -180,7 +159,7 @@ __init int main(void) {
     gpio_set_dir(PA_7, GPIO_DIR_OUTPUT);
     gpio_set_val(PA_7, 0);
 
-    storage_init();
+    configdb_init();
     littlefs_init();
     boot_counter_update();
     sys_event_init(32);
