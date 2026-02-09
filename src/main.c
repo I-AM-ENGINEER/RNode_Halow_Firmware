@@ -27,6 +27,7 @@
 #include "hal/spi_nor.h"
 #include <lib/fal/fal.h>
 #include <lib/flashdb/flashdb.h>
+#include "littelfs_port.h"
 #ifdef MULTI_WAKEUP
 #include "lib/common/sleep_api.h"
 #include "hal/gpio.h"
@@ -192,6 +193,7 @@ __init int main(void) {
     syscfg_save();
 
     storage_init();
+    littlefs_init();
     boot_counter_update();
     sys_event_init(32);
     sys_event_take(0xffffffff, sys_event_hdl, 0);
