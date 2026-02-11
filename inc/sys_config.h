@@ -5,6 +5,7 @@
 
 #define IP_SOF_BROADCAST 1
 #define LWIP_NETIF_HOSTNAME        1
+#define TCPIP_THREAD_STACKSIZE      2048
 #define HALOW_MTU               (512)
 //#define TCP_MSS                 (HALOW_MTU)              // Smaller packets -> less latency
 #define CFG_SERVER_PORT         (8002)

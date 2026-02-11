@@ -15,3 +15,5 @@
 *.eide-template
 *.map
 __pycache__
+mongoose/www
+mongoose/_extract_tmp

@@ -55,7 +55,7 @@ extern struct spi_nor_flash flash0;
 #define LFS_BLOCK_CYCLES        1000
 #endif
 
-static lfs_t g_lfs;
+lfs_t g_lfs;
 static struct lfs_config g_lfs_cfg;
 static const struct fal_partition *g_part;
 
@@ -188,3 +188,6 @@ int32_t littlefs_init(void){
     }
     return 0;
 }
+
+
+

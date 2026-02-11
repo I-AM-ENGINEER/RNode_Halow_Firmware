@@ -166,8 +166,9 @@ __init int main(void) {
     halow_set_rx_cb(halow_rx_handler);
     sys_network_init();
     config_page_init();
+    tftp_server_init();
     tcp_server_init(tcp_to_halow_send);
-    OS_WORK_INIT(&main_wk, sys_main_loop, 0);
+    OS_WORK_INIT(&main_wk, sys_main_loop,0);
     os_run_work_delay(&main_wk, 1000);
     sysheap_collect_init(&sram_heap, (uint32)&__sinit, (uint32)&__einit); // delete init code from heap
     return 0;
