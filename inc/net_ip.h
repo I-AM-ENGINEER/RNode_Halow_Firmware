@@ -19,5 +19,7 @@ int32_t net_ip_init(void);
 void net_ip_config_load(net_ip_config_t *cfg);
 void net_ip_config_save(const net_ip_config_t *cfg);
 void net_ip_config_apply(const net_ip_config_t *cfg);
+void net_ip_config_set_default(net_ip_config_t *cfg);
+void net_ip_config_fill_runtime_addrs(net_ip_config_t *cfg);
 
 #endif // __NET_IP__

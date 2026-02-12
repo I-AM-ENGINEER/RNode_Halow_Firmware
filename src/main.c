@@ -30,6 +30,7 @@
 #include "configdb.h"
 #include "tftp_server.h"
 #include "config_page.h"
+#include "net_ip.h"
 #include "ota.h"
 #ifdef MULTI_WAKEUP
 #include "lib/common/sleep_api.h"
@@ -155,9 +156,9 @@ __init int main(void) {
 
     gpio_set_dir(PA_7, GPIO_DIR_OUTPUT);
     gpio_set_val(PA_7, 0);
-
     configdb_init();
     littlefs_init();
+    //ota_reset_to_default();
     boot_counter_update();
     sys_event_init(32);
     sys_event_take(0xffffffff, sys_event_hdl, 0);
@@ -168,6 +169,7 @@ __init int main(void) {
     sys_network_init();
     config_page_init();
     tftp_server_init();
+    net_ip_init();
     tcp_server_init(tcp_to_halow_send);
     OS_WORK_INIT(&main_wk, sys_main_loop,0);
     os_run_work_delay(&main_wk, 1000);

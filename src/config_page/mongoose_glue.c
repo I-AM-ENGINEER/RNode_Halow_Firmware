@@ -50,8 +50,10 @@ void glue_get_api_net_cfg(struct api_net_cfg *data){
 
     net_ip_config_load(&cfg);
 
-    data->dhcp = (cfg.mode == NET_IP_MODE_DHCP) ? true : false;
-
+    data->dhcp = (cfg.mode == NET_IP_MODE_DHCP);
+    if(cfg.mode == NET_IP_MODE_DHCP){
+        net_ip_config_fill_runtime_addrs(&cfg);
+    }
     ip4addr_ntoa_r(&cfg.ip,   data->ip_address, sizeof(data->ip_address));
     ip4addr_ntoa_r(&cfg.gw,   data->gw_address, sizeof(data->gw_address));
     ip4addr_ntoa_r(&cfg.mask, data->netmask,    sizeof(data->netmask));
@@ -63,7 +65,7 @@ void glue_set_api_net_cfg(struct api_net_cfg *data){
     if (data == NULL) {
         return;
     }
-
+    net_ip_config_set_default(&cfg);
     cfg.mode = data->dhcp ? NET_IP_MODE_DHCP : NET_IP_MODE_STATIC;
 
     if (cfg.mode == NET_IP_MODE_STATIC) {

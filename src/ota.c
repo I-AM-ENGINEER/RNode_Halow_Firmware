@@ -15,6 +15,7 @@
 
 #include "lib/ota/libota.h"
 #include "lib/ota/fw.h"
+#include "lib/fal/fal.h"
 #include "basic_include.h"
 
 extern uint8 g_mac[6];
@@ -164,4 +165,19 @@ int32_t __wrap_lwip_netif_hook_inputdata(struct netif* nif, uint8_t* data, uint3
         return 0;
     }
     return __real_lwip_netif_hook_inputdata(nif, data, len);
+}
+
+int ota_reset_to_default( void ){
+    const struct fal_partition *p;
+
+    p = fal_partition_find("fdb_kvdb1");
+    if (p == NULL) {
+        return -1;
+    }
+
+    if (fal_partition_erase(p, 0, p->len) < 0) {
+        return -2;
+    }
+
+    return 0;
 }

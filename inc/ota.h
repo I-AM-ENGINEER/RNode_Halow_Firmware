@@ -24,4 +24,6 @@ struct system_status {
     } dhcpc_result;
 };
 
+int32_t ota_reset_to_default(void);
+
 #endif // __OTA_H__

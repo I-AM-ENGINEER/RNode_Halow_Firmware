@@ -172,15 +172,27 @@ void halow_config_save(const halow_config_t *cfg){
     configdb_set_i16(HALOW_CONFIG_CENTRAL_FREQ_NAME, (int16_t*)&cfg->central_freq);
 }
 
+static void halow_config_set_default(halow_config_t *cfg){
+    if (cfg == NULL) {
+        return;
+    }
+
+    cfg->bandwidth      = HALOW_CONFIG_BANDWIDTH_DEF;
+    cfg->rf_super_power = HALOW_CONFIG_SPOWER_EN_DEF ? 1 : 0;
+    cfg->rf_power       = HALOW_CONFIG_POWER_DEF;
+    cfg->mcs            = HALOW_CONFIG_MCS_DEF;
+    cfg->central_freq   = HALOW_CONFIG_CENTRAL_FREQ_DEF;
+}
+
 void halow_config_load(halow_config_t *cfg){
     if (cfg == NULL) { 
         return; 
     }
-    configdb_get_set_i8(HALOW_CONFIG_BANDWIDTH_NAME, (int8_t*)&cfg->bandwidth);
-    configdb_get_set_i8(HALOW_CONFIG_SPOWER_EN_NAME, (int8_t*)&cfg->rf_super_power);
-    configdb_get_set_i8(HALOW_CONFIG_POWER_NAME, (int8_t*)&cfg->rf_power);
-    configdb_get_set_i8(HALOW_CONFIG_MCS_NAME, (int8_t*)&cfg->mcs);
-    configdb_get_set_i16(HALOW_CONFIG_CENTRAL_FREQ_NAME, (int16_t*)&cfg->central_freq);
+    configdb_get_i8(HALOW_CONFIG_BANDWIDTH_NAME, (int8_t*)&cfg->bandwidth);
+    configdb_get_i8(HALOW_CONFIG_SPOWER_EN_NAME, (int8_t*)&cfg->rf_super_power);
+    configdb_get_i8(HALOW_CONFIG_POWER_NAME, (int8_t*)&cfg->rf_power);
+    configdb_get_i8(HALOW_CONFIG_MCS_NAME, (int8_t*)&cfg->mcs);
+    configdb_get_i16(HALOW_CONFIG_CENTRAL_FREQ_NAME, (int16_t*)&cfg->central_freq);
 }
 
 void halow_config_apply(const halow_config_t *cfg){
@@ -211,7 +223,7 @@ void halow_config_apply(const halow_config_t *cfg){
     
 }
 
-static void halow_config_set_default(void){
+static void halow_modem_set_default(void){
     static uint8 g_mac[6] = {
         0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
     };
@@ -298,11 +310,13 @@ bool halow_init(uint32_t rxbuf, uint32_t rxbuf_size,
     if (lmac_open(g_ops) != 0) {
         return false;
     }
-    halow_config_set_default();
+    halow_modem_set_default();
     halow_config_t config;
+    halow_config_set_default(&config);
     halow_config_load(&config);
-    halow_config_apply(&config);
+    halow_cfg_sanitize(&config);
     halow_config_save(&config); // Incorrect values should be removed from DB
+    halow_config_apply(&config);
     halow_lbt_init();
     return true;
 }
