@@ -29,7 +29,7 @@
 #include "littelfs_port.h"
 #include "configdb.h"
 #include "tftp_server.h"
-#include "config_page.h"
+#include "config_page/config_page.h"
 #include "net_ip.h"
 #include "ota.h"
 #ifdef MULTI_WAKEUP
@@ -170,6 +170,7 @@ __init int main(void) {
     config_page_init();
     tftp_server_init();
     net_ip_init();
+    statistics_init();
     tcp_server_init(tcp_to_halow_send);
     OS_WORK_INIT(&main_wk, sys_main_loop,0);
     os_run_work_delay(&main_wk, 1000);

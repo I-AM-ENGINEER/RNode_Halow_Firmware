@@ -10677,12 +10677,13 @@ static void setsockopts(struct mg_connection *c) {
   (void) c;
 #else
   int on = 1;
+  int off = 0;
 #if !defined(SOL_TCP)
 #define SOL_TCP IPPROTO_TCP
 #endif
   if (setsockopt(FD(c), SOL_TCP, TCP_NODELAY, (char *) &on, sizeof(on)) != 0)
     (void) 0;
-  if (setsockopt(FD(c), SOL_SOCKET, SO_KEEPALIVE, (char *) &on, sizeof(on)) !=
+  if (setsockopt(FD(c), SOL_SOCKET, SO_KEEPALIVE, (char *) &off, sizeof(on)) !=
       0)
     (void) 0;
 #endif

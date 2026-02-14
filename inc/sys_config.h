@@ -10,7 +10,10 @@
 #define DEFAULT_TCP_RECVMBOX_SIZE    32
 #define DEFAULT_ACCEPTMBOX_SIZE      8
 #define MEMP_NUM_TCP_PCB         16
-#define MEMP_NUM_TCP_PCB_LISTEN  4   
+#define MEMP_NUM_TCP_PCB_LISTEN  16
+#define DEFAULT_RAW_RECVMBOX_SIZE 8
+#define MEMP_NUM_NETBUF 8
+#define LWIP_SO_RCVTIMEO 1
 
 // #define TCP_MSS                 (HALOW_MTU)              // Smaller packets -> less latency
 
@@ -78,8 +81,11 @@
 
 
 
-#define CFGP_TASK_PRIO    0
-#define CFGP_TASK_STACK   (20*1024)
+#define CONFIG_PAGE_TASK_PRIO    3
+#define CONFIG_PAGE_TASK_STACK   (10*1024)
+
+#define STATISTICS_TASK_PRIO    (2)
+#define STATISTICS_TASK_STACK   (2*1024)
 
 // #define ANT_CTRL_PIN PB_1 // 网桥用PB1来做双天线选择
 
