@@ -91,16 +91,15 @@ int32_t configdb_set_i32(const char* key, int32_t* paramp){
         return -1;
     }
 
-    fdb_kvdb_t dbp = configdb_grab();
-    if(dbp == NULL){
-        return -2;
-    }
-
     res = configdb_get_i32(key, &current_param);
     if ((res == 0) && (current_param == *paramp)) {
         return 0;
     }
 
+    fdb_kvdb_t dbp = configdb_grab();
+    if(dbp == NULL){
+        return -2;
+    }
     
     blob.buf = (void*)paramp;
     blob.size = sizeof(int32_t);
