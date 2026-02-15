@@ -14,6 +14,11 @@
 #define DEFAULT_RAW_RECVMBOX_SIZE 8
 #define MEMP_NUM_NETBUF 8
 #define LWIP_SO_RCVTIMEO 1
+#define LWIP_DEBUG                  1
+#define MEM_SIZE (32*1024)
+#define PBUF_POOL_SIZE  32   // было 16 → 32/64
+//#define LWIP_DBG_MIN_LEVEL          LWIP_DBG_LEVEL_ALL
+//#define LWIP_DBG_TYPES_ON           LWIP_DBG_ON
 
 // #define TCP_MSS                 (HALOW_MTU)              // Smaller packets -> less latency
 
@@ -23,8 +28,6 @@
 // #define TCP_SND_QUEUELEN        4
 
 #define SYS_FACTORY_PARAM_SIZE 2048
-
-// #define SYS_CACHE_ENABLE                1
 
 #ifndef TDMA_BUFF_SIZE
 #define TDMA_BUFF_SIZE (20 * 1024)
