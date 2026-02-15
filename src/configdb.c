@@ -85,6 +85,8 @@ int32_t configdb_init(void){
 
 int32_t configdb_set_i32(const char* key, int32_t* paramp){
     struct fdb_blob blob;
+    int32_t current_param;
+    int32_t res;
     if(paramp == NULL){
         return -1;
     }
@@ -93,11 +95,17 @@ int32_t configdb_set_i32(const char* key, int32_t* paramp){
     if(dbp == NULL){
         return -2;
     }
+
+    res = configdb_get_i32(key, &current_param);
+    if ((res == 0) && (current_param == *paramp)) {
+        return 0;
+    }
+
     
     blob.buf = (void*)paramp;
     blob.size = sizeof(int32_t);
 
-    int32_t res = (int32_t)fdb_kv_set_blob(dbp, key, &blob);
+    res = (int32_t)fdb_kv_set_blob(dbp, key, &blob);
     configdb_release();
     configdb_debug_i32("SET_I32", key, *paramp, res);
     if(res != 0){
