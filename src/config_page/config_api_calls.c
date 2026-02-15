@@ -12,6 +12,7 @@
 #include "config_page/config_api_dispatch.h"
 
 #include "halow.h"
+#include "halow_lbt.h"
 #include "net_ip.h"
 #include "tcp_server.h"
 #include "utils.h"
@@ -378,37 +379,90 @@ int32_t web_api_tcp_server_cfg_post( const cJSON *in, cJSON *out ){
 /* /api/lbt_cfg (placeholders)                                                */
 /* -------------------------------------------------------------------------- */
 
-static bool s_lbt_enable = false;
-static int  s_lbt_max_airtime_perc = 100;
+// /api/lbt (config)
+// Keys:
+//  en    - LBT enable (bool)
+//  sw    - short window samples (u16)
+//  lw    - long window samples (u16)
+//  lp    - lowest percent for long window (u8)
+//  roff  - relative offset dBm (i8)
+//  abusy - absolute busy dBm (i8)
+//  txgr  - TX grace us (u16)
+//  txmax - max continuous TX ms (u16)
+//  bmin  - backoff min us (u16)
+//  bmax  - backoff max us (u16)
+//  uen   - util enable (bool)
+//  umax  - util max % (u8)
+//  uwin  - util window ms (u32)
+//  uburst- util burst ms (u16)
 
 int32_t web_api_lbt_cfg_get( const cJSON *in, cJSON *out ){
+    halow_lbt_config_t cfg;
+
     (void)in;
 
     if (out == NULL) {
         return WEB_API_RC_BAD_REQUEST;
     }
 
-    (void)cJSON_AddBoolToObject(out, "enable", s_lbt_enable ? 1 : 0);
-    (void)cJSON_AddNumberToObject(out, "max_airtime_perc", (double)s_lbt_max_airtime_perc);
+    halow_lbt_config_load(&cfg);
+
+    (void)cJSON_AddBoolToObject(out,   "en",    (cfg.lbt_enabled != 0) ? 1 : 0);
+
+    (void)cJSON_AddNumberToObject(out, "sw",    (double)cfg.noise_short_window_samples);
+    (void)cJSON_AddNumberToObject(out, "lw",    (double)cfg.noise_long_window_samples);
+    (void)cJSON_AddNumberToObject(out, "lp",    (double)cfg.noise_long_low_percent);
+
+    (void)cJSON_AddNumberToObject(out, "roff",  (double)cfg.noise_relative_offset_dbm);
+    (void)cJSON_AddNumberToObject(out, "abusy", (double)cfg.noise_absolute_busy_dbm);
+
+    (void)cJSON_AddNumberToObject(out, "txgr",  (double)cfg.tx_skip_check_time_us);
+    (void)cJSON_AddNumberToObject(out, "txmax", (double)cfg.tx_max_continuous_time_ms);
+
+    (void)cJSON_AddNumberToObject(out, "bmin",  (double)cfg.backoff_random_min_us);
+    (void)cJSON_AddNumberToObject(out, "bmax",  (double)cfg.backoff_random_max_us);
+
+    (void)cJSON_AddBoolToObject(out,   "uen",   (cfg.util_enabled != 0) ? 1 : 0);
+    (void)cJSON_AddNumberToObject(out, "umax",  (double)cfg.util_max_percent);
+    (void)cJSON_AddNumberToObject(out, "uwin",  (double)cfg.util_refill_window_ms);
+    (void)cJSON_AddNumberToObject(out, "uburst",(double)cfg.util_bucket_capacity_ms);
+
     return WEB_API_RC_OK;
 }
 
 int32_t web_api_lbt_cfg_post( const cJSON *in, cJSON *out ){
+    halow_lbt_config_t cfg;
     bool b;
-    int i;
+    int v;
 
     if (in == NULL || !cJSON_IsObject(in) || out == NULL) {
         return api_err(out, WEB_API_RC_BAD_REQUEST, "bad json");
     }
 
-    if (json_get_bool(in, "enable", &b)) {
-        s_lbt_enable = b;
-    }
-    if (json_get_int(in, "max_airtime_perc", &i)) {
-        if (i >= 0 && i <= 100) {
-            s_lbt_max_airtime_perc = i;
-        }
-    }
+    halow_lbt_config_load(&cfg);
+
+    if (json_get_bool(in, "en", &b))    { cfg.lbt_enabled  = b ? 1 : 0; }
+
+    if (json_get_int(in, "sw", &v))    { if (v >= 1 && v <= 65535) cfg.noise_short_window_samples = (uint16_t)v; }
+    if (json_get_int(in, "lw", &v))    { if (v >= 1 && v <= 65535) cfg.noise_long_window_samples  = (uint16_t)v; }
+    if (json_get_int(in, "lp", &v))    { if (v >= 0 && v <= 100)   cfg.noise_long_low_percent     = (uint8_t)v;  }
+
+    if (json_get_int(in, "roff", &v))  { if (v >= -128 && v <= 127) cfg.noise_relative_offset_dbm = (int8_t)v; }
+    if (json_get_int(in, "abusy", &v)) { if (v >= -128 && v <= 127) cfg.noise_absolute_busy_dbm   = (int8_t)v; }
+
+    if (json_get_int(in, "txgr", &v))  { if (v >= 0 && v <= 65535) cfg.tx_skip_check_time_us       = (uint16_t)v; }
+    if (json_get_int(in, "txmax", &v)) { if (v >= 0 && v <= 65535) cfg.tx_max_continuous_time_ms   = (uint16_t)v; }
+
+    if (json_get_int(in, "bmin", &v))  { if (v >= 0 && v <= 65535) cfg.backoff_random_min_us       = (uint16_t)v; }
+    if (json_get_int(in, "bmax", &v))  { if (v >= 0 && v <= 65535) cfg.backoff_random_max_us       = (uint16_t)v; }
+
+    if (json_get_bool(in, "uen", &b))  { cfg.util_enabled = b ? 1 : 0; }
+    if (json_get_int(in, "umax", &v))  { if (v >= 0 && v <= 100)   cfg.util_max_percent           = (uint8_t)v;  }
+    if (json_get_int(in, "uwin", &v))  { if (v >= 1)               cfg.util_refill_window_ms      = (uint32_t)v; }
+    if (json_get_int(in, "uburst",&v)) { if (v >= 0 && v <= 65535) cfg.util_bucket_capacity_ms    = (uint16_t)v; }
+
+    halow_lbt_config_apply(&cfg);
+    halow_lbt_config_save(&cfg);
 
     web_api_notify_change();
     return web_api_lbt_cfg_get(NULL, out);
@@ -419,13 +473,16 @@ int32_t web_api_lbt_cfg_post( const cJSON *in, cJSON *out ){
 /* -------------------------------------------------------------------------- */
 
 int32_t web_api_dev_stat_get( const cJSON *in, cJSON *out ){
+    char uptime[32];
+
     (void)in;
 
     if (out == NULL) {
         return WEB_API_RC_BAD_REQUEST;
     }
 
-    (void)cJSON_AddStringToObject(out, "todo", "dev_stat not implemented");
+    statistics_uptime_get(uptime, sizeof(uptime));
+    (void)cJSON_AddStringToObject(out, "uptime", uptime);
     return WEB_API_RC_OK;
 }
 
@@ -477,10 +534,17 @@ int32_t web_api_radio_stat_get( const cJSON *in, cJSON *out ){
     snprintf(buf, sizeof(buf), "%.2f kbit/s", v);
     (void)cJSON_AddStringToObject(out, "tx_speed", buf);
 
-    /* -------- placeholders -------- */
-    (void)cJSON_AddNumberToObject(out, "airtime_1h", 42);
-    (void)cJSON_AddNumberToObject(out, "ch_util",    42);
-    (void)cJSON_AddNumberToObject(out, "bg_pwr_dbm", 42);
+    (void)snprintf(buf, sizeof(buf), "WIP");
+    (void)cJSON_AddStringToObject(out, "airtime", buf);
+
+    (void)snprintf(buf, sizeof(buf), "%.1f %%", (double)(st.ch_util*100.0f));
+    (void)cJSON_AddStringToObject(out, "ch_util", buf);
+
+    (void)snprintf(buf, sizeof(buf), "%.1f dBm", (double)st.bkgnd_noise_dbm);
+    (void)cJSON_AddStringToObject(out, "bg_pwr_dbm", buf);
+    
+    (void)snprintf(buf, sizeof(buf), "%.1f dBm", (double)st.bkgnd_noise_dbm_now);
+    (void)cJSON_AddStringToObject(out, "bg_pwr_now_dbm", buf);
 
     return WEB_API_RC_OK;
 }

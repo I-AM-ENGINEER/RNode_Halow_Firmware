@@ -94,13 +94,23 @@ int64_t get_time_ms(void){
     return (os_jiffies() * NANOSECONDS_PER_TICK) / 1000000ULL;
 }
 
-// MUST BE REWORKED!!! DO NOT RETURN US
-int64_t get_time_us(void){
-    struct timespec ts;
+int64_t get_time_us( void ){
+    int64_t j1;
+    int64_t j2;
+    uint32_t val;
+    uint32_t load;
+    uint32_t sub;
 
-    /* лучше монотонные часы для замеров */
-    clock_gettime(CLOCK_MONOTONIC, &ts);
+    load = (uint32_t)(CORET->LOAD & CORET_LOAD_RELOAD_Msk);
 
-    return ((uint64_t)ts.tv_sec * 1000000ULL) +
-           ((uint64_t)ts.tv_nsec / 1000ULL);
+    do {
+        j1  = os_jiffies();
+        val = (uint32_t)(CORET->VAL & CORET_VAL_CURRENT_Msk);
+        j2  = os_jiffies();
+    } while (j1 != j2);
+
+    sub = (load + 1U) - val;
+    
+    return (j1 * (MICROSECONDS_PER_SECOND / OS_HZ)) +
+           (int64_t)(sub / 192U);
 }

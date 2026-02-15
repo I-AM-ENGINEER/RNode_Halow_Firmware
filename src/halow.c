@@ -115,7 +115,7 @@ static int32_t halow_lmac_tx_status_callback(struct lmac_ops *ops, struct sk_buf
         g_tx_vacated_bytes += skb->len;
         os_sema_up(&g_tx_vacated_sem);
         kfree_skb(skb);
-        halow_lbt_tx_complete_update();
+        //halow_lbt_tx_complete_update();
     }
     return 0;
 }

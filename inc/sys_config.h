@@ -74,6 +74,21 @@
 #define HALOW_CONFIG_MCS_DEF          (0)
 #define HALOW_CONFIG_SPOWER_EN_DEF    (false)
 
+#define HALOW_LBT_CONFIG_EN_DEF                 (true)
+#define HALOW_LBT_CONFIG_NSWS_DEF               (256)
+#define HALOW_LBT_CONFIG_NLWS_DEF               (256)
+#define HALOW_LBT_CONFIG_NLLP_DEF               (20)
+#define HALOW_LBT_CONFIG_NRO_DEF                (10)
+#define HALOW_LBT_CONFIG_NAB_DEF                (-75)
+#define HALOW_LBT_CONFIG_TX_SKIP_US_DEF         (2000)
+#define HALOW_LBT_CONFIG_TX_MAX_MS_DEF          (100)
+#define HALOW_LBT_CONFIG_BO_MIN_US_DEF          (3000)
+#define HALOW_LBT_CONFIG_BO_MAX_US_DEF          (10000)
+#define HALOW_LBT_CONFIG_UTIL_EN_DEF            (true)
+#define HALOW_LBT_CONFIG_UTIL_MAX_DEF           (50)
+#define HALOW_LBT_CONFIG_UTIL_REFILL_MS_DEF     (1000)
+#define HALOW_LBT_CONFIG_UTIL_BUCKET_MS_DEF     (200)
+
 #define TCP_SERVER_PORT               (8001)
 #define TCP_SERVER_MTU                (TCP_MSS)
 
@@ -84,11 +99,14 @@
 
 
 
-#define CONFIG_PAGE_TASK_PRIO    3
+#define CONFIG_PAGE_TASK_PRIO    (3)
 #define CONFIG_PAGE_TASK_STACK   (10*1024)
 
 #define STATISTICS_TASK_PRIO    (2)
 #define STATISTICS_TASK_STACK   (2*1024)
+
+#define HALOW_LBT_LISTEN_TASK_PRIO    (OS_TASK_PRIORITY_IDLE)
+#define HALOW_LBT_LISTEN_TASK_STACK   (2*1024)
 
 // #define ANT_CTRL_PIN PB_1 // 网桥用PB1来做双天线选择
 

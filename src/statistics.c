@@ -1,5 +1,6 @@
 #include "basic_include.h"
 #include "statistics.h"
+#include "halow_lbt.h"
 #include <string.h>
 #include <time.h>
 
@@ -8,7 +9,7 @@
 #ifdef STATISTICS_DEBUG
 #define stat_debug(fmt, ...)  os_printf("[STAT] " fmt "\r\n", ##__VA_ARGS__)
 #else
-#define tcps_debug(fmt, ...)  do { } while (0)
+#define stat_debug(fmt, ...)  do { } while (0)
 #endif
 
 volatile statistics_radio_t g_stat_radio;
@@ -104,6 +105,10 @@ static void statistics_task(void *arg){
         rx_bytes_previous = rx_bytes_now;
         tx_bytes_previous = tx_bytes_now;
         
+        g_stat_radio.bkgnd_noise_dbm = halow_lbt_background_long_dbm_get();
+        g_stat_radio.bkgnd_noise_dbm_now = halow_lbt_background_short_dbm_get();
+        g_stat_radio.airtime = halow_lbt_airtime_get();
+        g_stat_radio.ch_util = halow_lbt_ch_util_get();
         os_sleep(1);
     }
 }
