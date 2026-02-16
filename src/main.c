@@ -47,8 +47,8 @@ extern uint32_t srampool_start;
 extern uint32_t srampool_end;
 uint8 g_mac[6];
 
-__attribute__((used))
-struct system_status sys_status;
+//__attribute__((used))
+//struct system_status sys_status;
 
 //extern void lmac_transceive_statics(uint8 en);
 
@@ -149,13 +149,13 @@ void assert_printf(char *msg, int line, char *file){
     for (;;) {}
 }
 
-// Shitty solution for web page auto update
 static void heartbeat_task_fn( void *arg ){
     (void)arg;
 
     while (1) {
-        os_sleep_ms(1000);
-        web_api_notify_change();
+        //bool ok = ota_wipe_unpack();
+        //os_printf("ota_unpack_run: %s", ok ? "OK" : "FAIL");
+        os_sleep_ms(20000);
     }
 }
 
@@ -170,8 +170,8 @@ static void heartbeat_task_start( void ){
         return;
     }
 
-    (void)os_task_set_stacksize(&ui_task, 1024);
-    (void)os_task_set_priority(&ui_task, 5);
+    (void)os_task_set_stacksize(&ui_task, 10*1024);
+    (void)os_task_set_priority(&ui_task, 40);
     (void)os_task_run(&ui_task);
 }
 

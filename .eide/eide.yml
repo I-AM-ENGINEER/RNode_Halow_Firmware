@@ -53,6 +53,9 @@ targets:
         - sdk/lib/crypto/openssl/crypto
         - inc
         - inc/config
+        - sdk/lib/microReticulum/ArduinoJson/Include
+        - sdk/lib/microReticulum/microReticulum/src
+        - sdk/lib/microReticulum/Crypro
       libList:
         - libs
     excludeList:
@@ -78,6 +81,13 @@ targets:
       - src/events.c
       - src/pairsta.c
       - sdk/lib/common/atcmd.c
+      - sdk/lib/net/mongoose
+      - sdk/lib/microReticulum/microReticulum/variants
+      - sdk/lib/microReticulum/microReticulum/test
+      - sdk/lib/microReticulum/microReticulum/lib
+      - sdk/lib/microReticulum/microReticulum/examples
+      - sdk/lib/microReticulum/microReticulum/boards
+      - sdk/lib/microReticulum/Crypro/examples
     toolchain: ANY_GCC
     toolchainConfigMap:
       ANY_GCC:
@@ -97,9 +107,10 @@ targets:
             ASM_FLAGS: -mcpu=ck803 -g -pipe -D__NO_BOARD_INIT -DTXW4002ACK803
           beforeBuildTasks: []
           c/cpp-compiler:
+            CXX_FLAGS: -D_GLIBCXX_USE_C99_STDIO
             C_FLAGS: -mcpu=ck803 -Os -g -Wall -ffunction-sections -fdata-sections -Wno-comment -Wno-unused-function -Wno-unused-but-set-variable -mno-required-printf -pipe -D__NO_BOARD_INIT -DTXW4002ACK803 -DSKBPOOL_ENABLE -DMPOOL_ALLOC -DCONFIG_UMAC4
             language-c: c11
-            language-cpp: gnu++11
+            language-cpp: c++11
             one-elf-section-per-data: true
             one-elf-section-per-function: true
             optimization: level-debug
@@ -109,7 +120,7 @@ targets:
             output-debug-info: enable
           linker:
             $disableOutputTask: true
-            LD_FLAGS: -mcpu=ck803 -nostartfiles -Wl,--gc-sections -Wl,-zmax-page-size=1024 -Wl,-Map=project.map -Wl,--ckmap=txw4002a.map -Wl,--wrap=lwip_netif_hook_inputdata -Wl,--wrap=lmac_send_bss_announcement
+            LD_FLAGS: -mcpu=ck803 -nostartfiles -Wl,--gc-sections -Wl,-zmax-page-size=1024 -Wl,-Map=project.map -Wl,--ckmap=txw4002a.map -Wl,--wrap=lwip_netif_hook_inputdata
             LIB_FLAGS: -L libs -lcore -lnetutils -lcommon -losal -llmac -lm
             linker-type: gcc
             output-format: elf

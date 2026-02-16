@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Device Configurator</title>
+    <!--
+      Simple offline-friendly UI for configuring an embedded radio device.
+      The application does not rely on external CDNs or frameworks – all
+      styles and scripts are bundled locally.  Navigation is tab‑based
+      and the individual panels map directly to the device’s various
+      subsystems.  On load the page requests the full configuration
+      via a GET to `/api/get_all`, and every second it updates the
+      statistics shown on the dashboard via `/api/get_stat`.  After
+      saving a subsection the UI refreshes itself by calling the same
+      `get_all` endpoint.
+    -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <nav class="tabs">
+        <button data-tab="dashboard" class="active">Dashboard</button>
+        <button data-tab="settings">Device Settings</button>
+        <button data-tab="firmware">Firmware Update</button>
+    </nav>
+
+    <main>
+        <!-- Dashboard tab -->
+        <section id="dashboard" class="tab-content active">
+            <h2>Radio Statistics</h2>
+            <table class="stats-table">
+                <tbody>
+                <tr><th>RX bytes</th><td id="stat_rx_bytes">--</td></tr>
+                <tr><th>TX bytes</th><td id="stat_tx_bytes">--</td></tr>
+                <tr><th>RX packets</th><td id="stat_rx_packets">--</td></tr>
+                <tr><th>TX packets</th><td id="stat_tx_packets">--</td></tr>
+                <tr><th>RX speed</th><td id="stat_rx_speed">--</td></tr>
+                <tr><th>TX speed</th><td id="stat_tx_speed">--</td></tr>
+                <tr><th>Airtime</th><td id="stat_airtime">--</td></tr>
+                <tr><th>Channel utilisation</th><td id="stat_ch_util">--</td></tr>
+                <tr><th>Current RX power level</th><td id="stat_bg_pwr_now_dbm">--</td></tr>
+                <tr><th>Noise floor power level</th><td id="stat_bg_pwr_dbm">--</td></tr>
+                </tbody>
+			</table>
+	
+			<div class="panel-actions">
+				<button id="stat_reset_btn">
+					Reset statistics
+				</button>
+			</div>
+
+			<h2>Device Statistics</h2>
+			<table class="stats-table">
+                <tbody>
+                <tr><th>Uptime</th><td id="stat_uptime">--</td></tr>
+                <tr><th>Hostname</th><td id="stat_hostname">--</td></tr>
+                <tr><th>IP address</th><td id="stat_ip">--</td></tr>
+                <tr><th>MAC address</th><td id="stat_mac">--</td></tr>
+                <tr><th>Firmware version</th><td id="stat_fwver">--</td></tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- Device Settings tab -->
+        <section id="settings" class="tab-content">
+            <!-- RF Settings Panel -->
+            <div class="panel">
+                <h3>RF Settings</h3>
+                <label>
+                    <span>TX power (dBm)</span>
+                    <input type="number" id="halow_power_dbm" min="1" max="20">
+                </label>
+                <label>
+                    <span>Central frequency (MHz)</span>
+                    <input type="number" id="halow_central_freq" min="750" max="950" step="0.1">
+                </label>
+                <label>
+                    <span>MCS index</span>
+                    <select id="halow_mcs_index">
+                        <option value="MCS10">MCS10</option>
+                        <option value="MCS0">MCS0</option>
+                        <option value="MCS1">MCS1</option>
+                        <option value="MCS2">MCS2</option>
+                        <option value="MCS3">MCS3</option>
+                        <option value="MCS4">MCS4</option>
+                        <option value="MCS5">MCS5</option>
+                        <option value="MCS6">MCS6</option>
+                        <option value="MCS7">MCS7</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Bandwidth</span>
+                    <select id="halow_bandwidth">
+                        <option value="1 MHz">1&nbsp;MHz</option>
+                        <option value="2 MHz">2&nbsp;MHz</option>
+                        <option value="4 MHz">4&nbsp;MHz</option>
+                        <option value="8 MHz">8&nbsp;MHz</option>
+                    </select>
+                </label>
+                <label class="toggle-label">
+                    <span>TX super power</span>
+                    <input type="checkbox" id="halow_super_power">
+                </label>
+                <div class="panel-actions">
+                    <button id="save_halow" disabled>Save</button>
+                </div>
+            </div>
+
+            <!-- Listen Before Talk Panel -->
+            <div class="panel">
+                <h3>Listen Before Talk (LBT)</h3>
+                <label class="toggle-label">
+                    <span>Enable LBT</span>
+                    <input type="checkbox" id="lbt_enable">
+                </label>
+                <fieldset id="lbt_fields">
+                    <label>
+                        <span>Short window (samples)</span>
+                        <input type="number" id="lbt_sw" min="1" max="65535">
+                    </label>
+                    <label>
+                        <span>Long window (samples)</span>
+                        <input type="number" id="lbt_lw" min="1" max="65535">
+                    </label>
+                    <label>
+                        <span>Lowest percent (%)</span>
+                        <input type="number" id="lbt_lp" min="0" max="100">
+                    </label>
+                    <h4>Thresholds</h4>
+                    <label>
+                        <span>Relative offset (dBm)</span>
+                        <input type="number" id="lbt_roff" min="-128" max="127">
+                    </label>
+                    <label>
+                        <span>Absolute busy (dBm)</span>
+                        <input type="number" id="lbt_abusy" min="-128" max="127">
+                    </label>
+                    <h4>TX timing</h4>
+                    <label>
+                        <span>TX grace (µs)</span>
+                        <input type="number" id="lbt_txgr" min="0" max="65535">
+                    </label>
+                    <label>
+                        <span>Max continuous TX (ms)</span>
+                        <input type="number" id="lbt_txmax" min="0" max="65535">
+                    </label>
+                    <h4>Backoff</h4>
+                    <label>
+                        <span>Backoff min (µs)</span>
+                        <input type="number" id="lbt_bmin" min="0" max="65535">
+                    </label>
+                    <label>
+                        <span>Backoff max (µs)</span>
+                        <input type="number" id="lbt_bmax" min="0" max="65535">
+                    </label>
+                    <h4>Channel utilisation limit</h4>
+                    <label class="toggle-label">
+                        <span>Enable util</span>
+                        <input type="checkbox" id="lbt_uen">
+                    </label>
+                    <label>
+                        <span>Util max (%)</span>
+                        <input type="number" id="lbt_umax" min="0" max="100">
+                    </label>
+                    <label>
+                        <span>Util window (ms)</span>
+                        <input type="number" id="lbt_uwin" min="1" max="65535">
+                    </label>
+                    <label>
+                        <span>Util burst (ms)</span>
+                        <input type="number" id="lbt_uburst" min="0" max="65535">
+                    </label>
+                </fieldset>
+                <div class="panel-actions">
+                    <button id="save_lbt" disabled>Save</button>
+                </div>
+            </div>
+
+            <!-- Network Settings Panel -->
+            <div class="panel">
+                <h3>Network Settings</h3>
+                <label class="toggle-label">
+                    <span>Enable DHCP</span>
+                    <input type="checkbox" id="net_dhcp">
+                </label>
+                <fieldset id="net_fields">
+                    <label>
+                        <span>IP address</span>
+                        <input type="text" id="net_ip_address">
+                    </label>
+                    <label>
+                        <span>Gateway address</span>
+                        <input type="text" id="net_gw_address">
+                    </label>
+                    <label>
+                        <span>Network mask</span>
+                        <input type="text" id="net_netmask">
+                    </label>
+                </fieldset>
+                <div class="panel-actions">
+                    <button id="save_net" disabled>Save</button>
+                </div>
+            </div>
+
+            <!-- TCP Radio Bridge Panel -->
+            <div class="panel">
+                <h3>TCP Radio Bridge</h3>
+                <label class="toggle-label">
+                    <span>Enable bridge</span>
+                    <input type="checkbox" id="tcp_enable">
+                </label>
+                <fieldset id="tcp_fields">
+                    <label>
+                        <span>Port</span>
+                        <input type="number" id="tcp_port" min="1024" max="65535">
+                    </label>
+                    <label>
+                        <span>Whitelist</span>
+                        <input type="text" id="tcp_whitelist">
+                    </label>
+                </fieldset>
+                <label>
+                    <span>Client</span>
+                    <span id="tcp_client">--</span>
+                </label>
+                <p class="note">This TCP socket forwards outgoing data to the radio interface and delivers incoming radio data back to the socket.</p>
+                <div class="panel-actions">
+                    <button id="save_tcp" disabled>Save</button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Firmware Update tab -->
+		<section id="firmware" class="tab-content">
+			<div class="panel">
+				<h3>Firmware Update</h3>
+
+				<label>
+					<span>Current firmware version</span>
+					<span id="fw_current">--</span>
+				</label>
+
+				<label>
+					<span>Firmware file</span>
+					<input id="fw_file" type="file" accept=".bin,.img,.fw,.uf2,application/octet-stream">
+				</label>
+
+				<label>
+					<span>Console</span>
+				</label>
+
+				<div id="fw_console" class="fw-console"></div>
+
+				<div class="panel-actions">
+					<button id="fw_flash" disabled>Flash</button>
+				</div>
+			</div>
+		</section>
+    </main>
+
+    <script src="main.js"></script>
+</body>
+</html>

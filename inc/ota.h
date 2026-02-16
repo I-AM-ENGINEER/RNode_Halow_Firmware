@@ -2,28 +2,18 @@
 #define __OTA_H__
 
 #include "basic_include.h"
+#include <stdint.h>
+#include <stdbool.h>
 
-// Musthave only for OTA
-struct system_status {
-    uint32 dhcpc_done : 1,
-        wifi_connected : 1,
-        dbg_heap : 1,
-        dbg_top : 2,
-        dbg_lmac : 2,
-        dbg_umac : 1,
-        dbg_irq : 1,
-        reset_wdt : 1,
-        pair_success : 1,
-        upgrading : 1;
-    uint8 bssid[6];
-    int8 rssi;
-    int8 evm;
-    uint8 channel;
-    struct {
-        uint32 ipaddr, netmask, svrip, router, dns1, dns2;
-    } dhcpc_result;
-};
+#define OTA_TAR_FILE_PATH                   "/ota.tar"
+#define OTA_FIWMWARE_FILE_PATH              "/fw.bin"
+
+uint32_t ota_lfs_begin( uint32_t total_size, uint32_t expect_crc32 );
+uint32_t ota_lfs_write( uint32_t off, const void *data, uint32_t len );
+uint32_t ota_lfs_end( void );
+int32_t ota_lfs_upgrade_from_tar( void );
 
 int32_t ota_reset_to_default(void);
+int32_t ota_write_firmware_from_file( void );
 
 #endif // __OTA_H__

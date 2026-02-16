@@ -410,7 +410,7 @@ Board: txw4002a
         <File Name="../sdk/lib/common/us_ticker.c">
           <FileOption/>
         </File>
-        <File Name="../sdk/lib/common/atcmd.c">
+        <File Name="../sdk/lib/common/atcmd.c" ExcludeProjConfig="BuildSet">
           <FileOption/>
         </File>
         <File Name="../sdk/lib/common/tcptest.c">
@@ -718,6 +718,9 @@ Board: txw4002a
                 <FileOption/>
               </File>
             </VirtualDirectory>
+            <VirtualDirectory Name="tftp">
+              <File Name="../sdk/lib/net/lwip/src/apps/tftp/tftp_server.c"/>
+            </VirtualDirectory>
           </VirtualDirectory>
           <VirtualDirectory Name="apps">
             <VirtualDirectory Name="lwiperf">
@@ -810,6 +813,58 @@ Board: txw4002a
           <FileOption/>
         </File>
       </VirtualDirectory>
+      <VirtualDirectory Name="fal">
+        <File Name="../sdk/lib/fal/fal.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/fal/fal_flash.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/fal/fal_partition.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/fal/fal_rtt.c">
+          <FileOption/>
+        </File>
+      </VirtualDirectory>
+      <VirtualDirectory Name="flashdb">
+        <File Name="../sdk/lib/flashdb/fdb.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/flashdb/fdb_file.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/flashdb/fdb_kvdb.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/flashdb/fdb_tsdb.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/flashdb/fdb_utils.c">
+          <FileOption/>
+        </File>
+      </VirtualDirectory>
+      <VirtualDirectory Name="littlefs">
+        <File Name="../sdk/lib/littlefs/lfs.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/littlefs/lfs_util.c">
+          <FileOption/>
+        </File>
+      </VirtualDirectory>
+      <VirtualDirectory Name="minz">
+        <File Name="../sdk/lib/minz/miniz.c">
+          <FileOption/>
+        </File>
+      </VirtualDirectory>
+      <VirtualDirectory Name="lwrb">
+        <File Name="../sdk/lib/lwrb/lwrb.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/lwrb/lwrb_ex.c">
+          <FileOption/>
+        </File>
+      </VirtualDirectory>
     </VirtualDirectory>
     <VirtualDirectory Name="hal">
       <File Name="../sdk/hal/gpio.c">
@@ -893,18 +948,63 @@ Board: txw4002a
     <File Name="../src/main.c">
       <FileOption/>
     </File>
-    <File Name="../src/syscfg.c">
+    <File Name="../src/cJSON.c">
       <FileOption/>
     </File>
-    <File Name="../src/kiss_task.c">
+    <File Name="../src/configdb.c">
       <FileOption/>
     </File>
-    <File Name="../src/kiss-tnc.c">
+    <File Name="../src/halow_lbt.c">
       <FileOption/>
     </File>
-    <File Name="../src/ota.c">
+    <File Name="../src/net_ip.c">
       <FileOption/>
     </File>
+    <File Name="../src/statistics.c">
+      <FileOption/>
+    </File>
+    <File Name="../src/tcp_server.c">
+      <FileOption/>
+    </File>
+    <File Name="../src/tftp_server.c">
+      <FileOption/>
+    </File>
+    <File Name="../src/utils.c">
+      <FileOption/>
+    </File>
+    <VirtualDirectory Name="config_page">
+      <File Name="../src/config_page/config_api_calls.c">
+        <FileOption/>
+      </File>
+      <File Name="../src/config_page/config_api_dispatch.c">
+        <FileOption/>
+      </File>
+      <File Name="../src/config_page/config_api_ota.c">
+        <FileOption/>
+      </File>
+      <File Name="../src/config_page/config_page.c">
+        <FileOption/>
+      </File>
+    </VirtualDirectory>
+    <VirtualDirectory Name="ota">
+      <File Name="../src/ota/ota.c">
+        <FileOption/>
+      </File>
+      <File Name="../src/ota/ota_lfs.c">
+        <FileOption/>
+      </File>
+      <File Name="../src/ota/ota_unpack.c">
+        <FileOption/>
+      </File>
+    </VirtualDirectory>
+    <VirtualDirectory Name="ports">
+      <File Name="../src/ports/fal_norflash_port.c">
+        <FileOption/>
+      </File>
+      <File Name="../src/ports/littlefs_port.c">
+        <FileOption/>
+      </File>
+    </VirtualDirectory>
   </VirtualDirectory>
   <DebugSessions>
     <watchExpressions>psalive:1;sdata:1;__sleep_data_start:1;__sleep_data_stop:1;g_rx_cb:1;g_ops:1</watchExpressions>
@@ -1042,7 +1142,7 @@ Board: txw4002a
       <Asm>
         <Define>__NO_BOARD_INIT TXW4002ACK803</Define>
         <Undefine/>
-        <IncludePath>$(ProjectPath);$(ProjectPath)/../csky/configs;$(ProjectPath)/../csky/csi_core/include;$(ProjectPath)/../csky/csi_driver/include;$(ProjectPath)/../csky/csi_kernel/include;$(ProjectPath)/../csky/csi_kernel/rhino/arch/include;$(ProjectPath)/../csky/csi_kernel/rhino/common;$(ProjectPath)/../csky/csi_kernel/rhino/core/include;$(ProjectPath)/../csky/csi_kernel/rhino/driver;$(ProjectPath)/../csky/csi_kernel/rhino/pwrmgmt;$(ProjectPath)/../csky/libs/include;$(ProjectPath)/../sdk/driver/emac;$(ProjectPath)/../sdk/include;$(ProjectPath)/../sdk/include/chip;$(ProjectPath)/../sdk/include/chip/txw4002ack803;$(ProjectPath)/../sdk/lib/net/ethphy;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/altcp_tls;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/http;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/http/makefsdata;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/snmp;$(ProjectPath)/../sdk/lib/umac/umac4/include;$(ProjectPath)/../sdk/lib/umac/umac4/lib;$(ProjectPath)/../sdk/lib/umac/umac4/wnb/include;$(ProjectPath)/../sdk/lib/umac/umac4/wpa;$(ProjectPath)/../sdk/lib/umac/umac4/wpa_auth;$(ProjectPath)/../inc</IncludePath>
+        <IncludePath>$(ProjectPath);$(ProjectPath)/../csky/configs;$(ProjectPath)/../csky/csi_core/include;$(ProjectPath)/../csky/csi_driver/include;$(ProjectPath)/../csky/csi_kernel/include;$(ProjectPath)/../csky/csi_kernel/rhino/arch/include;$(ProjectPath)/../csky/csi_kernel/rhino/common;$(ProjectPath)/../csky/csi_kernel/rhino/core/include;$(ProjectPath)/../csky/csi_kernel/rhino/driver;$(ProjectPath)/../csky/csi_kernel/rhino/pwrmgmt;$(ProjectPath)/../csky/libs/include;$(ProjectPath)/../inc;$(ProjectPath)/../sdk/driver/emac;$(ProjectPath)/../sdk/include;$(ProjectPath)/../sdk/include/chip;$(ProjectPath)/../sdk/include/chip/txw4002ack803;$(ProjectPath)/../sdk/lib/net/ethphy;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/altcp_tls;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/http;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/http/makefsdata;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/snmp;$(ProjectPath)/../sdk/lib/umac/umac4/include;$(ProjectPath)/../sdk/lib/umac/umac4/lib;$(ProjectPath)/../sdk/lib/umac/umac4/wnb/include;$(ProjectPath)/../sdk/lib/umac/umac4/wpa;$(ProjectPath)/../sdk/lib/umac/umac4/wpa_auth</IncludePath>
         <OtherFlags/>
         <DebugLevel>gdwarf2</DebugLevel>
       </Asm>

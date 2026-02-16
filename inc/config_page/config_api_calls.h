@@ -26,4 +26,16 @@ int32_t web_api_dev_stat_get( const cJSON *in, cJSON *out );
 int32_t web_api_radio_stat_get( const cJSON *in, cJSON *out );
 int32_t web_api_radio_stat_post( const cJSON *in, cJSON *out );
 
+int32_t web_api_online_ota_get( const cJSON *in, cJSON *out );
+int32_t web_api_online_ota_post( const cJSON *in, cJSON *out );
+
+int32_t web_api_stat_get( const cJSON *in, cJSON *out );
+int32_t web_api_all_get( const cJSON *in, cJSON *out );
+
+int32_t web_api_stat_reset( const cJSON *in, cJSON *out );
+int32_t web_api_ota_begin_post( const cJSON *in, cJSON *out );
+int32_t web_api_ota_chunk_post( const cJSON *in, cJSON *out );
+int32_t web_api_ota_end_post( const cJSON *in, cJSON *out );
+int32_t web_api_ota_write_post( const cJSON *in, cJSON *out );
+
 #endif // __CONFIG_API_CALLS_H__

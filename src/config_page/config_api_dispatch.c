@@ -71,13 +71,18 @@ static const char *api_uri_to_endpoint( const char *uri, char *tmp, size_t tmp_s
  * because it's simpler to read and removes "why NULL alias" questions.
  */
 static const web_api_route_t s_api_routes[] = {
-    { "heartbeat",              web_api_heartbeat_get,       NULL },
-    { "api_halow_cfg",          web_api_halow_cfg_get,       web_api_halow_cfg_post },
-    { "api_net_cfg",            web_api_net_cfg_get,         web_api_net_cfg_post },
-    { "api_tcp_server_cfg",     web_api_tcp_server_cfg_get,  web_api_tcp_server_cfg_post },
-    { "api_lbt_cfg",            web_api_lbt_cfg_get,         web_api_lbt_cfg_post },
-    { "api_dev_stat",           web_api_dev_stat_get,        NULL },
-    { "api_radio_stat",         web_api_radio_stat_get,      web_api_radio_stat_post },
+    //{ "stat_reset",  web_api_stat_reset,  NULL },
+    { "get_stat",   web_api_stat_get,       NULL },
+    { "get_all",    web_api_all_get,        NULL },
+    { "halow_cfg",  NULL,                   web_api_halow_cfg_post },
+    { "lbt_cfg",    NULL,                   web_api_lbt_cfg_post },
+    { "net_cfg",    NULL,                   web_api_net_cfg_post },
+    { "tcp_server_cfg",    NULL,            web_api_tcp_server_cfg_post },
+
+    { "ota_begin",  NULL,                   web_api_ota_begin_post },
+    { "ota_chunk",  NULL,                   web_api_ota_chunk_post },
+    { "ota_end",    NULL,                   web_api_ota_end_post },
+    { "ota_write",  NULL,                   web_api_ota_write_post },
 };
 
 static const web_api_route_t *api_find_route( const char *endpoint ){

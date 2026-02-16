@@ -16,8 +16,11 @@
 #include "lib/ota/libota.h"
 #include "lib/ota/fw.h"
 #include "lib/fal/fal.h"
+#include "lib/littlefs/lfs.h"
 #include "basic_include.h"
+#include "sys_config.h"
 
+extern lfs_t g_lfs;
 
 #define OTA_DEBUG
 
@@ -26,9 +29,6 @@
 #else
 #define ota_dbg(fmt, ...) do { } while (0)
 #endif
-
-
-#define OTA_FAL_PART_NAME "ota_slot0"
 
 static const struct fal_partition *g_ota_part;
 static bool g_ota_erased;
@@ -295,4 +295,80 @@ int ota_reset_to_default( void ){
     }
 
     return 0;
+}
+
+int32_t ota_write_firmware_from_file( void ){
+    struct lfs_info st;
+    lfs_file_t f;
+    const struct fal_partition *p;
+
+    int32_t rc = 0;
+
+    uint8_t buf[1024];
+    uint32_t off = 0;
+    uint32_t tot_len = 0;
+
+    memset(&st, 0, sizeof(st));
+    memset(&f, 0, sizeof(f));
+
+    int lfs_rc = lfs_stat(&g_lfs, OTA_FIWMWARE_FILE_PATH, &st);
+    if (lfs_rc < 0) {
+        return -1;
+    }
+    if (st.type != LFS_TYPE_REG) {
+        return -2;
+    }
+    if (st.size <= 0) {
+        return -3;
+    }
+    tot_len = (uint32_t)st.size;
+
+    p = fal_partition_find(OTA_FAL_PART_NAME);
+    if (p == NULL) {
+        return -4;
+    }
+
+    lfs_rc = lfs_file_open(&g_lfs, &f, OTA_FIWMWARE_FILE_PATH, LFS_O_RDONLY);
+    if (lfs_rc < 0) {
+        return -5;
+    }
+
+    while (off < tot_len) {
+        uint32_t want = tot_len - off;
+        if (want > (uint32_t)sizeof(buf)) {
+            want = (uint32_t)sizeof(buf);
+        }
+
+        lfs_ssize_t rd = lfs_file_read(&g_lfs, &f, buf, (lfs_size_t)want);
+        if (rd < 0) {
+            rc = -6;
+            goto out;
+        }
+        if (rd == 0) {
+            rc = -7;
+            goto out;
+        }
+
+        int32_t er = ota_fal_erase_if_needed(p, tot_len, off);
+        if (er != 0) {
+            rc = er;
+            goto out;
+        }
+
+        int32_t wr = fal_partition_write(p, off, buf, (size_t)rd);
+        if (wr < 0) {
+            rc = -8;
+            goto out;
+        }
+        if (wr != (int32_t)rd) {
+            rc = -9;
+            goto out;
+        }
+
+        off += (uint32_t)rd;
+    }
+
+out:
+    (void)lfs_file_close(&g_lfs, &f);
+    return rc;
 }

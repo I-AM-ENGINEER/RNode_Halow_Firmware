@@ -468,7 +468,8 @@ int32_t web_api_lbt_cfg_post( const cJSON *in, cJSON *out ){
     halow_lbt_config_save(&cfg);
 
     web_api_notify_change();
-    return web_api_lbt_cfg_get(NULL, out);
+    //return web_api_lbt_cfg_get(NULL, out);
+    return web_api_halow_cfg_get(NULL, out);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -588,4 +589,131 @@ int32_t web_api_radio_stat_post( const cJSON *in, cJSON *out ){
     statistics_radio_reset();
     web_api_notify_change();
     return web_api_lbt_cfg_get(NULL, out);
+}
+
+int32_t web_api_online_ota_get( const cJSON *in, cJSON *out ){
+    return 0;
+}
+
+int32_t web_api_online_ota_post( const cJSON *in, cJSON *out ){
+    return 0;
+}
+
+int32_t web_api_stat_get( const cJSON *in, cJSON *out ){
+    cJSON *dev   = NULL;
+    cJSON *radio = NULL;
+    int32_t rc;
+
+    (void)in;
+
+    if (out == NULL) {
+        return WEB_API_RC_BAD_REQUEST;
+    }
+
+    dev   = cJSON_CreateObject();
+    radio = cJSON_CreateObject();
+
+    if (!dev || !radio) {
+        rc = WEB_API_RC_INTERNAL;
+        goto fail;
+    }
+
+    rc = web_api_dev_stat_get(NULL, dev);
+    if (rc != WEB_API_RC_OK) goto fail;
+
+    rc = web_api_radio_stat_get(NULL, radio);
+    if (rc != WEB_API_RC_OK) goto fail;
+
+    cJSON_AddItemToObject(out, "device", dev);    dev = NULL;
+    cJSON_AddItemToObject(out, "radio",  radio);  radio = NULL;
+
+    return WEB_API_RC_OK;
+
+fail:
+    cJSON_Delete(dev);
+    cJSON_Delete(radio);
+    return rc;
+}
+
+int32_t web_api_all_get( const cJSON *in, cJSON *out ){
+    cJSON *halow = NULL;
+    cJSON *net   = NULL;
+    cJSON *tcp   = NULL;
+    cJSON *lbt   = NULL;
+    cJSON *ota   = NULL;
+
+    cJSON *stat  = NULL;
+    cJSON *dev   = NULL;
+    cJSON *radio = NULL;
+
+    int32_t rc;
+
+    (void)in;
+
+    if (out == NULL) {
+        return WEB_API_RC_BAD_REQUEST;
+    }
+
+    (void)cJSON_AddNumberToObject(out, "ver", (double)web_api_change_version());
+
+    halow = cJSON_CreateObject();
+    net   = cJSON_CreateObject();
+    tcp   = cJSON_CreateObject();
+    lbt   = cJSON_CreateObject();
+    ota   = cJSON_CreateObject();
+
+    stat  = cJSON_CreateObject();
+    dev   = cJSON_CreateObject();
+    radio = cJSON_CreateObject();
+
+    if (!halow || !net || !tcp || !lbt || !ota || !stat || !dev || !radio) {
+        rc = WEB_API_RC_INTERNAL;
+        goto fail;
+    }
+
+    rc = web_api_halow_cfg_get(NULL, halow);
+    if (rc != WEB_API_RC_OK) goto fail;
+
+    rc = web_api_net_cfg_get(NULL, net);
+    if (rc != WEB_API_RC_OK) goto fail;
+
+    rc = web_api_tcp_server_cfg_get(NULL, tcp);
+    if (rc != WEB_API_RC_OK) goto fail;
+
+    rc = web_api_lbt_cfg_get(NULL, lbt);
+    if (rc != WEB_API_RC_OK) goto fail;
+
+    rc = web_api_online_ota_get(NULL, ota);
+    if (rc != WEB_API_RC_OK) goto fail;
+
+    rc = web_api_dev_stat_get(NULL, dev);
+    if (rc != WEB_API_RC_OK) goto fail;
+
+    rc = web_api_radio_stat_get(NULL, radio);
+    if (rc != WEB_API_RC_OK) goto fail;
+
+    cJSON_AddItemToObject(stat, "device", dev);    dev = NULL;
+    cJSON_AddItemToObject(stat, "radio",  radio);  radio = NULL;
+
+    cJSON_AddItemToObject(out, "halow", halow);   halow = NULL;
+    cJSON_AddItemToObject(out, "net",   net);     net   = NULL;
+    cJSON_AddItemToObject(out, "tcp",   tcp);     tcp   = NULL;
+    cJSON_AddItemToObject(out, "lbt",   lbt);     lbt   = NULL;
+    cJSON_AddItemToObject(out, "ota",   ota);     ota   = NULL;
+
+    cJSON_AddItemToObject(out, "stat",  stat);    stat  = NULL;
+
+    return WEB_API_RC_OK;
+
+fail:
+    cJSON_Delete(halow);
+    cJSON_Delete(net);
+    cJSON_Delete(tcp);
+    cJSON_Delete(lbt);
+    cJSON_Delete(ota);
+
+    cJSON_Delete(stat);
+    cJSON_Delete(dev);
+    cJSON_Delete(radio);
+    return rc;
 }
