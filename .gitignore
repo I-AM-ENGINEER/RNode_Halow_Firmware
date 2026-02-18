@@ -16,3 +16,4 @@
 *.map
 __pycache__
 out
+flasher/OTA/downloads

@@ -91,16 +91,20 @@ def parse_scan_report_payload(b: bytes) -> Optional[tuple[int, int, int, int, in
 def pack_get_ip_req() -> bytes:
     return struct.pack("BB", int(OtaStype.FW_CUSTOM_GET_IP), 0)
 
-def parse_get_ip_resp_payload(b: bytes) -> Optional[tuple[int, int, int, int]]:
+def parse_get_ip_resp_payload(b: bytes) -> Optional[tuple[int, int, int, int, str]]:
     if len(b) < 14:
         return None
     if b[0] != int(OtaStype.FW_CUSTOM_GET_IP_RESP):
         return None
     status = b[1]
-    ip = struct.unpack(">I", b[2:6])[0]
-    gw = struct.unpack(">I", b[6:10])[0]
+    ip   = struct.unpack(">I", b[2:6])[0]
+    gw   = struct.unpack(">I", b[6:10])[0]
     mask = struct.unpack(">I", b[10:14])[0]
-    return (int(status), int(ip), int(gw), int(mask))
+    ver = ""
+    if len(b) >= 14 + 32:
+        raw = b[14:14+32]
+        ver = raw.split(b"\x00", 1)[0].decode("ascii", errors="replace")
+    return (int(status), int(ip), int(gw), int(mask), ver)
 
 def pack_reboot_req(flags: int = 0) -> bytes:
     return struct.pack(">BBI", int(OtaStype.REBOOT), 0, int(flags) & 0xFFFFFFFF)

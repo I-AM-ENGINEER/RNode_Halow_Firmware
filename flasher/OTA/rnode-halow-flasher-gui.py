@@ -790,6 +790,7 @@ class App(tk.Tk):
         key = r.key()
         try:
             ip_s = ""
+            ver_s = ""
             with self._pcap_lock:
                 with self._iface_lock(r.iface_id):
                     sess = HgicSession(r.iface_id)
@@ -798,9 +799,9 @@ class App(tk.Tk):
                 ip_s = str(getattr(ans, "ip", "") or "")
                 if ip_s == "0.0.0.0":
                     ip_s = ""
+                ver_s = str(getattr(ans, "version", "") or "")
 
-            ver_s = ""
-            if ip_s:
+            if ip_s and not ver_s:
                 for path in ("/api/heartbeat", "/api/version", "/api/info", "/api/get_all"):
                     obj = http_get_json(f"http://{ip_s}{path}", timeout_s=1.0)
                     if isinstance(obj, dict):

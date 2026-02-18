@@ -37,6 +37,7 @@ class IpInfo:
     ip: ipaddress.IPv4Address
     gw: ipaddress.IPv4Address
     mask: ipaddress.IPv4Address
+    version: str
 
 
 class HgicSession:
@@ -90,12 +91,13 @@ class HgicSession:
                 r = parse_get_ip_resp_payload(bytes(p[Raw].load))
                 if r is None:
                     continue
-                status, ip, gw, mask = r
+                status, ip, gw, mask, ver = r
                 return IpInfo(
                     status=int(status),
                     ip=ipaddress.IPv4Address(int(ip)),
                     gw=ipaddress.IPv4Address(int(gw)),
                     mask=ipaddress.IPv4Address(int(mask)),
+                    version=str(ver),
                 )
 
         return None
