@@ -16,6 +16,8 @@ enum ETH_P_OTA_STYPE{
     ETH_P_OTA_FW_GET_PARAM_RESP,
     ETH_P_OTA_FW_SET_PARAM,
     ETH_P_OTA_FW_SET_PARAM_RESP,
+    ETH_P_OTA_FW_CUSTOM_GET_IP = 0xF0,
+    ETH_P_OTA_FW_CUSTOM_GET_IP_RESP = 0xF1,
 };
 
 enum HGIC_OTA_RESP_ERR_CODE{
@@ -67,6 +69,14 @@ struct hgic_ota_hdr{
     uint16 chipid;
     uint16  err_code;
     uint8  data[0];
+};
+
+struct eth_ota_get_ip_resp{
+    struct eth_ota_hdr hdr;
+    uint32 ip;
+    uint32 gw;
+    uint32 mask;
+    char version[32];
 };
 
 struct sk_buff *libota_proc(uint8 mode, struct sk_buff *skb);

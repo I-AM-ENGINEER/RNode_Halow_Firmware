@@ -37,5 +37,6 @@ int32_t web_api_ota_begin_post( const cJSON *in, cJSON *out );
 int32_t web_api_ota_chunk_post( const cJSON *in, cJSON *out );
 int32_t web_api_ota_end_post( const cJSON *in, cJSON *out );
 int32_t web_api_ota_write_post( const cJSON *in, cJSON *out );
+int32_t web_api_reboot_post( const cJSON *in, cJSON *out );
 
 #endif // __CONFIG_API_CALLS_H__
