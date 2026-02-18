@@ -332,6 +332,7 @@ bool halow_init(uint32_t rxbuf, uint32_t rxbuf_size,
     halow_cfg_sanitize(&config);
     halow_config_save(&config); // Incorrect values should be removed from DB
     halow_config_apply(&config);
+    halow_lbt_set_tx_as_deactive();
     return true;
 }
 
@@ -389,8 +390,8 @@ int32_t halow_tx(const uint8_t *data, uint32_t len) {
 
     skb->priority = 0;
     skb->tx       = 1;
+    halow_lbt_wait_tx_allowed();
     halow_get_tx_vacanted_bytes(skb->len);
-    //halow_lbt_wait();
     int32_t res = lmac_tx(g_ops, skb);
     halow_lbt_set_tx_as_active();
     return res;

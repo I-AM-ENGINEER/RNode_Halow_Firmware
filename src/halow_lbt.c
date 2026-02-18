@@ -17,6 +17,7 @@
 #include "utils.h"
 #include "configdb.h"
 #include "halow.h"
+#include "indication.h"
 
 //#define HALOW_LBT_DEBUG
 
@@ -38,7 +39,8 @@
 #define HALOW_LBT_CONFIG_UTIL_REFILL_MS_NAME    HALOW_LBT_CONFIG_ADD_CONFIG("u_ref")
 #define HALOW_LBT_CONFIG_UTIL_BUCKET_MS_NAME    HALOW_LBT_CONFIG_ADD_CONFIG("u_bkt")
 
-#define HALOW_LBT_AIRTIME_ACCUMULATOR_S 10
+#define HALOW_LBT_AIRTIME_ACCUMULATOR_BUF   10
+#define HALOW_LBT_AIRTIME_UPDATE_PERIOD_MS  100
 
 #ifdef HALOW_LBT_DEBUG
 #define hlbt_debug(fmt, ...)  os_printf("[HLBT] " fmt "\r\n", ##__VA_ARGS__)
@@ -72,8 +74,8 @@ typedef struct {
     int64_t       airtime_time_last_tx_started;
     int32_t       airtime_time_tx_from_last_cycle_update_us;
     bool          airtime_tx_active;
-    float         airtime_rb[HALOW_LBT_AIRTIME_ACCUMULATOR_S];
-    int8_t         airtime_rb_idx;
+    float         airtime_rb[HALOW_LBT_AIRTIME_ACCUMULATOR_BUF];
+    int8_t        airtime_rb_idx;
 
     lwrb_t        long_rb;
 } halow_lbt_ctx_t;
@@ -173,9 +175,34 @@ float halow_lbt_ch_util_get(void){
 
     (void)os_mutex_unlock(&g_lbt_ctx_mutex);
 
-    return ((float)busy) / (float)n;
+    float ch_util = ((float)busy) / (float)n;
+    float airtime = halow_lbt_airtime_get();
+    if(ch_util < airtime){
+        ch_util = airtime;
+    }
+    return ch_util;
 }
 
+static float halow_lbt_airtime_max_percentage(void){
+    if(g_lbt_ctx_mutex.hdl == NULL){
+        return 0.0f;
+    }
+    os_mutex_lock(&g_lbt_ctx_mutex, 100);
+
+    if (g_lbt_ctx == NULL) {
+        os_mutex_unlock(&g_lbt_ctx_mutex);
+        return 0.0f;
+    }
+    float max_airtime = 1.0f;
+    if(g_lbt_ctx->cfg.util_enabled){
+        max_airtime = ((float)g_lbt_ctx->cfg.util_max_percent)/100.0f;
+    }
+    if(max_airtime < 0.01f){
+        max_airtime = 0.01f;
+    }
+    os_mutex_unlock(&g_lbt_ctx_mutex);
+    return max_airtime;
+}
 
 float halow_lbt_airtime_get(void){
     if(g_lbt_ctx_mutex.hdl == NULL){
@@ -188,10 +215,10 @@ float halow_lbt_airtime_get(void){
         return 0.0f;
     }
     float airtime = 0;
-    for(uint32_t i = 0; i < HALOW_LBT_AIRTIME_ACCUMULATOR_S; i++){
+    for(uint32_t i = 0; i < HALOW_LBT_AIRTIME_ACCUMULATOR_BUF; i++){
         airtime += g_lbt_ctx->airtime_rb[i];
     }
-    airtime /= HALOW_LBT_AIRTIME_ACCUMULATOR_S;
+    airtime /= HALOW_LBT_AIRTIME_ACCUMULATOR_BUF;
     os_mutex_unlock(&g_lbt_ctx_mutex);
     return airtime;
 }
@@ -367,7 +394,7 @@ void halow_lbt_task( void *arg ){
         
         int64_t current_time_ms = get_time_ms();
         static int64_t airtime_cycle_timetamp;
-        if((current_time_ms - airtime_cycle_timetamp) >= 1000){
+        if((current_time_ms - airtime_cycle_timetamp) >= HALOW_LBT_AIRTIME_UPDATE_PERIOD_MS){
             airtime_cycle_timetamp = current_time_ms;
             // Airtime
             int64_t now_us  = get_time_us();
@@ -389,7 +416,7 @@ void halow_lbt_task( void *arg ){
 
             float current_airtime = (float)airtime_us / (float)cycle_us;
             ctx->airtime_rb[ctx->airtime_rb_idx++] = current_airtime;
-            if(ctx->airtime_rb_idx >= HALOW_LBT_AIRTIME_ACCUMULATOR_S){
+            if(ctx->airtime_rb_idx >= HALOW_LBT_AIRTIME_ACCUMULATOR_BUF){
                 ctx->airtime_rb_idx = 0;
             }
 
@@ -637,6 +664,12 @@ void halow_lbt_config_load( halow_lbt_config_t *cfg ){
     configdb_get_i8 (HALOW_LBT_CONFIG_UTIL_MAX_NAME,       (int8_t*)&cfg->util_max_percent);
     configdb_get_i32(HALOW_LBT_CONFIG_UTIL_REFILL_MS_NAME, (int32_t*)&cfg->util_refill_window_ms);
     configdb_get_i16(HALOW_LBT_CONFIG_UTIL_BUCKET_MS_NAME, (int16_t*)&cfg->util_bucket_capacity_ms);
+}
+
+void halow_lbt_wait_tx_allowed(void){
+    while (halow_lbt_airtime_get() > halow_lbt_airtime_max_percentage()){
+        os_sleep_ms(HALOW_LBT_AIRTIME_UPDATE_PERIOD_MS);
+    }
 }
 
 int32_t halow_lbt_init( void ){
