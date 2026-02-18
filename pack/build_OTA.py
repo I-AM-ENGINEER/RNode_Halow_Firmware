@@ -19,6 +19,8 @@ def main():
         print(f"Firmware file not found: {bin_path}")
         sys.exit(2)
 
+    script_dir = Path(__file__).resolve().parent
+
     # 0) create _filesystem directory
     fs_dir = base_path / "_filesystem"
     if fs_dir.exists():
@@ -29,18 +31,26 @@ def main():
     fw_dst = fs_dir / "fw.bin"
     shutil.copyfile(bin_path, fw_dst)
 
-    # 2) call neighbor script
-    this_script_dir = Path(__file__).resolve().parent
-    neighbor_script = this_script_dir / "prepare_filesystem.py"
+    # 2) pack_www: собрать ../web_configurator/www → _filesystem/_firmware/index.html
+    www_src = (script_dir / "../web_configurator/www").resolve()
+    firmware_www_dir = fs_dir / "www"
+    firmware_www_dir.mkdir(parents=True, exist_ok=True)
 
-    if not neighbor_script.is_file():
-        print(f"Neighbor script not found: {neighbor_script}")
-        sys.exit(3)
+    out_index = firmware_www_dir / "index.html"
 
-    subprocess.run(
-        [sys.executable, str(neighbor_script), str(fs_dir.resolve())],
-        check=True
-    )
+    try:
+        subprocess.run(
+            [
+                sys.executable,
+                str(script_dir / "pack_www.py"),  # если pack_www лежит рядом
+                "--www", str(www_src),
+                "--out", str(out_index)
+            ],
+            check=True
+        )
+    except subprocess.CalledProcessError as e:
+        print("pack_www failed")
+        sys.exit(e.returncode)
 
     # 3) pack _filesystem into ota_firmware.tar
     tar_path = base_path / "ota_firmware.tar"
@@ -48,7 +58,8 @@ def main():
         tar_path.unlink()
 
     with tarfile.open(tar_path, "w") as tar:
-        tar.add(fs_dir, arcname="_filesystem")
+        for item in fs_dir.iterdir():
+            tar.add(item, arcname=item.name)
 
     print(f"Created: {tar_path}")
 
