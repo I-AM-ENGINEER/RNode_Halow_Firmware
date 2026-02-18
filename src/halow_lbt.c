@@ -18,7 +18,7 @@
 #include "configdb.h"
 #include "halow.h"
 
-#define HALOW_LBT_DEBUG
+//#define HALOW_LBT_DEBUG
 
 #define HALOW_LBT_CONFIG_PREFIX                 CONFIGDB_ADD_MODULE("hlbt")
 #define HALOW_LBT_CONFIG_ADD_CONFIG(name)       HALOW_LBT_CONFIG_PREFIX "." name
