@@ -18,6 +18,7 @@
 #include "net_ip.h"
 #include "tcp_server.h"
 #include "utils.h"
+#include "device.h"
 #include "statistics.h"
 
 /* -------------------------------------------------------------------------- */
@@ -570,7 +571,7 @@ int32_t web_api_radio_stat_get( const cJSON *in, cJSON *out ){
     snprintf(buf, sizeof(buf), "%.2f kbit/s", v);
     (void)cJSON_AddStringToObject(out, "tx_speed", buf);
 
-    (void)snprintf(buf, sizeof(buf), "WIP");
+    (void)snprintf(buf, sizeof(buf), "%.1f %%", (double)(st.airtime*100.0f));
     (void)cJSON_AddStringToObject(out, "airtime", buf);
 
     (void)snprintf(buf, sizeof(buf), "%.1f %%", (double)(st.ch_util*100.0f));
@@ -716,4 +717,9 @@ fail:
     cJSON_Delete(dev);
     cJSON_Delete(radio);
     return rc;
+}
+
+int32_t web_api_reboot_post( const cJSON *in, cJSON *out ){
+    device_reboot();
+    return 0;
 }

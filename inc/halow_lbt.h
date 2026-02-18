@@ -32,6 +32,8 @@ typedef struct {
 } halow_lbt_config_t;
 
 // Call on tx complete for reset timer
+void halow_lbt_set_tx_as_active(void);
+void halow_lbt_set_tx_as_deactive(void);
 float halow_lbt_ch_util_get(void);
 float halow_lbt_airtime_get(void);
 int8_t halow_lbt_background_short_dbm_get( void );

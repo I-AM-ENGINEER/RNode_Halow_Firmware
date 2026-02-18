@@ -252,3 +252,9 @@ struct gpio_device *gpio_get(uint32 pin) {
     }
     return NULL;
 }
+
+void device_reboot(void){
+    mcu_watchdog_timeout(1);
+    disable_irq();
+    while(1){}
+}

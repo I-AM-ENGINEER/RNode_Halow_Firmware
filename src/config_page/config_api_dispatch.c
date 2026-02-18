@@ -83,6 +83,7 @@ static const web_api_route_t s_api_routes[] = {
     { "ota_chunk",  NULL,                   web_api_ota_chunk_post },
     { "ota_end",    NULL,                   web_api_ota_end_post },
     { "ota_write",  NULL,                   web_api_ota_write_post },
+    { "reboot",     NULL,                   web_api_reboot_post },
 };
 
 static const web_api_route_t *api_find_route( const char *endpoint ){

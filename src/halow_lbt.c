@@ -18,7 +18,7 @@
 #include "configdb.h"
 #include "halow.h"
 
-//#define HALOW_LBT_DEBUG
+#define HALOW_LBT_DEBUG
 
 #define HALOW_LBT_CONFIG_PREFIX                 CONFIGDB_ADD_MODULE("hlbt")
 #define HALOW_LBT_CONFIG_ADD_CONFIG(name)       HALOW_LBT_CONFIG_PREFIX "." name
@@ -37,6 +37,8 @@
 #define HALOW_LBT_CONFIG_UTIL_MAX_NAME          HALOW_LBT_CONFIG_ADD_CONFIG("u_max")
 #define HALOW_LBT_CONFIG_UTIL_REFILL_MS_NAME    HALOW_LBT_CONFIG_ADD_CONFIG("u_ref")
 #define HALOW_LBT_CONFIG_UTIL_BUCKET_MS_NAME    HALOW_LBT_CONFIG_ADD_CONFIG("u_bkt")
+
+#define HALOW_LBT_AIRTIME_ACCUMULATOR_S 10
 
 #ifdef HALOW_LBT_DEBUG
 #define hlbt_debug(fmt, ...)  os_printf("[HLBT] " fmt "\r\n", ##__VA_ARGS__)
@@ -65,6 +67,13 @@ typedef struct {
     int8_t       *short_samples;
     int8_t       *long_rb_data;
     int8_t       *tmp_sort;
+
+    int64_t       time_last_cycle_update_us;
+    int64_t       airtime_time_last_tx_started;
+    int32_t       airtime_time_tx_from_last_cycle_update_us;
+    bool          airtime_tx_active;
+    float         airtime_rb[HALOW_LBT_AIRTIME_ACCUMULATOR_S];
+    int8_t         airtime_rb_idx;
 
     lwrb_t        long_rb;
 } halow_lbt_ctx_t;
@@ -172,7 +181,19 @@ float halow_lbt_airtime_get(void){
     if(g_lbt_ctx_mutex.hdl == NULL){
         return 0.0f;
     }
-    return 0.0f;
+    os_mutex_lock(&g_lbt_ctx_mutex, -1);
+
+    if (g_lbt_ctx == NULL) {
+        os_mutex_unlock(&g_lbt_ctx_mutex);
+        return 0.0f;
+    }
+    float airtime = 0;
+    for(uint32_t i = 0; i < HALOW_LBT_AIRTIME_ACCUMULATOR_S; i++){
+        airtime += g_lbt_ctx->airtime_rb[i];
+    }
+    airtime /= HALOW_LBT_AIRTIME_ACCUMULATOR_S;
+    os_mutex_unlock(&g_lbt_ctx_mutex);
+    return airtime;
 }
 
 int8_t halow_lbt_noise_dbm_now( int64_t sample_time_us ){
@@ -343,14 +364,49 @@ void halow_lbt_task( void *arg ){
             ctx->short_sum = 0;
         }
 
+        
+        int64_t current_time_ms = get_time_ms();
+        static int64_t airtime_cycle_timetamp;
+        if((current_time_ms - airtime_cycle_timetamp) >= 1000){
+            airtime_cycle_timetamp = current_time_ms;
+            // Airtime
+            int64_t now_us  = get_time_us();
+            int64_t last_us = ctx->time_last_cycle_update_us;
+            int64_t cycle_us = now_us - last_us;
+            int32_t airtime_us = ctx->airtime_time_tx_from_last_cycle_update_us;
+
+            if (ctx->airtime_tx_active) {
+                int64_t start_us = ctx->airtime_time_last_tx_started;
+
+                int64_t dt = now_us - start_us;
+                int64_t acc = (int64_t)airtime_us + dt;
+                
+                airtime_us = (int32_t)acc;
+                ctx->airtime_time_last_tx_started = now_us;
+            } else {
+                ctx->airtime_time_last_tx_started = 0;
+            }
+
+            float current_airtime = (float)airtime_us / (float)cycle_us;
+            ctx->airtime_rb[ctx->airtime_rb_idx++] = current_airtime;
+            if(ctx->airtime_rb_idx >= HALOW_LBT_AIRTIME_ACCUMULATOR_S){
+                ctx->airtime_rb_idx = 0;
+            }
+
+            ctx->airtime_time_tx_from_last_cycle_update_us = 0;
+            ctx->time_last_cycle_update_us = now_us;
+        }
 #ifdef HALOW_LBT_DEBUG
         static uint16_t dbg_tick;
         if (++dbg_tick >= 1000) {
             dbg_tick = 0;
-            hlbt_debug("ccur=%d floor=%d util=%.1f%%",
+            hlbt_debug(
+                "ccur=%d floor=%d util=%.1f%% airtime=%.1f%%",
                 (int32_t)halow_lbt_background_short_dbm_get(),
                 (int32_t)halow_lbt_background_long_dbm_get(),
-                halow_lbt_ch_util_get()*100.0f);
+                halow_lbt_ch_util_get() * 100.0f,
+                halow_lbt_airtime_get() * 100.0f
+            );
         }
 #endif
 
@@ -414,6 +470,61 @@ static void halow_lbt_ctx_free( halow_lbt_ctx_t *ctx ){
     os_free(ctx->long_rb_data);
     os_free(ctx->tmp_sort);
     os_free(ctx);
+}
+
+void halow_lbt_set_tx_as_active( void ){
+    if (g_lbt_ctx_mutex.hdl == NULL) { 
+        return; 
+    }
+    if (os_mutex_lock(&g_lbt_ctx_mutex, 10) != 0) { 
+        return; 
+    }
+    if (g_lbt_ctx == NULL) { os_mutex_unlock(&g_lbt_ctx_mutex); 
+        return; 
+    }
+
+    if (!g_lbt_ctx->airtime_tx_active) {
+        g_lbt_ctx->airtime_tx_active = true;
+        g_lbt_ctx->airtime_time_last_tx_started = get_time_us();
+        hlbt_debug("SET TX");
+    }
+
+    os_mutex_unlock(&g_lbt_ctx_mutex);
+}
+
+void halow_lbt_set_tx_as_deactive( void ){
+    if (g_lbt_ctx_mutex.hdl == NULL) {
+        return;
+    }
+    if (os_mutex_lock(&g_lbt_ctx_mutex, 10) != 0) {
+        return;
+    }
+    if (g_lbt_ctx == NULL) {
+        os_mutex_unlock(&g_lbt_ctx_mutex);
+        return;
+    }
+
+    if (g_lbt_ctx->airtime_tx_active) {
+        hlbt_debug("RESET TX");
+        int64_t now_us = get_time_us();
+        int64_t start_us = g_lbt_ctx->airtime_time_last_tx_started;
+
+        if (start_us == 0) {
+            start_us = g_lbt_ctx->time_last_cycle_update_us;
+        }
+
+        int64_t dt = now_us - start_us;
+        if (dt > 0) {
+            int64_t acc = (int64_t)g_lbt_ctx->airtime_time_tx_from_last_cycle_update_us + dt;
+            if (acc > INT32_MAX) { acc = INT32_MAX; }
+            g_lbt_ctx->airtime_time_tx_from_last_cycle_update_us = (int32_t)acc;
+        }
+
+        g_lbt_ctx->airtime_time_last_tx_started = 0;
+        g_lbt_ctx->airtime_tx_active = false;
+    }
+
+    os_mutex_unlock(&g_lbt_ctx_mutex);
 }
 
 void halow_lbt_config_apply( const halow_lbt_config_t *cfg ){

@@ -126,9 +126,11 @@ static int32_t halow_lmac_tx_status_callback(struct lmac_ops *ops, struct sk_buf
     (void)ops;
     if (skb) {
         g_tx_vacated_bytes += skb->len;
+        if(g_tx_vacated_bytes == TX_BUFFER_SIZE){
+            halow_lbt_set_tx_as_deactive();
+        }
         os_sema_up(&g_tx_vacated_sem);
         kfree_skb(skb);
-        //halow_lbt_tx_complete_update();
     }
     return 0;
 }
@@ -389,5 +391,7 @@ int32_t halow_tx(const uint8_t *data, uint32_t len) {
     skb->tx       = 1;
     halow_get_tx_vacanted_bytes(skb->len);
     //halow_lbt_wait();
-    return lmac_tx(g_ops, skb);
+    int32_t res = lmac_tx(g_ops, skb);
+    halow_lbt_set_tx_as_active();
+    return res;
 }
