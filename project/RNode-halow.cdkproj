@@ -719,7 +719,9 @@ Board: txw4002a
               </File>
             </VirtualDirectory>
             <VirtualDirectory Name="tftp">
-              <File Name="../sdk/lib/net/lwip/src/apps/tftp/tftp_server.c"/>
+              <File Name="../sdk/lib/net/lwip/src/apps/tftp/tftp_server.c">
+                <FileOption/>
+              </File>
             </VirtualDirectory>
           </VirtualDirectory>
           <VirtualDirectory Name="apps">
@@ -1005,21 +1007,16 @@ Board: txw4002a
         <FileOption/>
       </File>
     </VirtualDirectory>
+    <File Name="../src/indication.c">
+      <FileOption/>
+    </File>
+    <File Name="../src/ramfs.c">
+      <FileOption/>
+    </File>
+    <File Name="../src/ports/fal_osram_port.c">
+      <FileOption/>
+    </File>
   </VirtualDirectory>
-  <DebugSessions>
-    <watchExpressions>psalive:1;sdata:1;__sleep_data_start:1;__sleep_data_stop:1;g_rx_cb:1;g_ops:1</watchExpressions>
-    <memoryExpressions>0x2002f604;;;</memoryExpressions>
-    <statistics>;;MHZ;;MHZ;;up</statistics>
-    <peripheralTabs>
-      <Tab disFormat="Hex">SYSCTRL</Tab>
-      <Tab disFormat="Hex">GMAC</Tab>
-    </peripheralTabs>
-    <WatchDisplayFormat>1</WatchDisplayFormat>
-    <LocalDisplayFormat>1</LocalDisplayFormat>
-    <debugLayout/>
-    <memoryTabColSizeExpressions>100:4;100:8;100:8;100:8;</memoryTabColSizeExpressions>
-    <QuickWatchDisplayFormat>1</QuickWatchDisplayFormat>
-  </DebugSessions>
   <BuildConfigs>
     <BuildConfig Name="BuildSet">
       <Target>
@@ -1245,4 +1242,18 @@ Board: txw4002a
       </Flash>
     </BuildConfig>
   </BuildConfigs>
+  <DebugSessions>
+    <watchExpressions>psalive:1;sdata:1;__sleep_data_start:1;__sleep_data_stop:1;g_rx_cb:1;g_ops:1</watchExpressions>
+    <memoryExpressions>0x50000000;;;</memoryExpressions>
+    <statistics>;;MHZ;;MHZ;;up</statistics>
+    <peripheralTabs>
+      <Tab disFormat="Hex">SYSCTRL</Tab>
+      <Tab disFormat="Hex">GMAC</Tab>
+    </peripheralTabs>
+    <WatchDisplayFormat>1</WatchDisplayFormat>
+    <LocalDisplayFormat>1</LocalDisplayFormat>
+    <debugLayout/>
+    <memoryTabColSizeExpressions>100:4;100:8;100:8;100:8;</memoryTabColSizeExpressions>
+    <QuickWatchDisplayFormat>1</QuickWatchDisplayFormat>
+  </DebugSessions>
 </Project>

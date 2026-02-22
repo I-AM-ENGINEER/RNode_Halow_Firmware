@@ -137,6 +137,45 @@ def make_minimal_ota_tar_from_bin(bin_path: Path) -> Tuple[Path, tempfile.Tempor
     return tar_path, td
 
 
+
+def _norm_tar_name(name: str) -> str:
+    s = str(name).replace("\\", "/").strip()
+    while s.startswith("./"):
+        s = s[2:]
+    while s.startswith("/"):
+        s = s[1:]
+    return s
+
+
+def strip_fw_bin_from_tar(src_tar: Path) -> Tuple[Path, tempfile.TemporaryDirectory]:
+    """Create a temporary copy of src_tar without root fw.bin (for HTTP OTA)."""
+    td = tempfile.TemporaryDirectory(prefix="rnode_halow_tmp_")
+    out = Path(td.name) / Path(src_tar).name
+
+    # preserve compression if any, based on extension
+    name_l = out.name.lower()
+    wmode = "w"
+    if name_l.endswith(".tar.gz") or name_l.endswith(".tgz"):
+        wmode = "w:gz"
+    elif name_l.endswith(".tar.bz2") or name_l.endswith(".tbz2"):
+        wmode = "w:bz2"
+    elif name_l.endswith(".tar.xz") or name_l.endswith(".txz"):
+        wmode = "w:xz"
+
+    with tarfile.open(Path(src_tar), mode="r:*") as tf_in:
+        with tarfile.open(out, mode=wmode) as tf_out:
+            for m in tf_in.getmembers():
+                if _norm_tar_name(m.name) == "fw.bin":
+                    continue
+                if m.isfile():
+                    f = tf_in.extractfile(m)
+                    tf_out.addfile(m, fileobj=f)
+                else:
+                    tf_out.addfile(m)
+
+    return out, td
+
+
 def http_get_json(url: str, timeout_s: float = 1.0) -> Optional[Dict[str, Any]]:
     try:
         import urllib.request
@@ -326,7 +365,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
 
-        self.title("RNode-HaLow Flasher")
+        self.title("RNode-HaLow Flasher v1.1.0")
         self.geometry("950x620")
         self.minsize(880, 560)
 
@@ -873,10 +912,8 @@ class App(tk.Tk):
         if mode == "bin":
             plan = "RAW flash (bin) -> reboot"
         else:
-            if have_ip:
-                plan = "OTA via HTTP"
-            else:
-                plan = "RAW flash -> reboot -> wait IP -> OTA via HTTP"
+            # OTA mode: always flash firmware first via HGIC, then upload filesystem via HTTP (without fw.bin)
+            plan = "RAW flash fw.bin -> reboot -> wait IP -> OTA via HTTP (no fw.bin)"
 
         if not messagebox.askyesno(
             "Confirm flash",
@@ -927,23 +964,29 @@ class App(tk.Tk):
                         return
 
                     # mode == "ota"
-                    if not have_ip:
-                        self._q.put(("log", ("[*] stage1: RAW flash (ota.tar)", "stage")))
-                        sess.flash(r.mac, fw_path, timeout=0.45, retries=6, progress_cb=cb_progress)
-                        self._q.put(("log", ("[OK] stage1 done", "ok")))
+                    self._q.put(("log", ("[*] stage1: RAW flash fw.bin (HGIC)", "stage")))
+                    sess.flash(r.mac, fw_path, timeout=0.45, retries=6, progress_cb=cb_progress)
+                    self._q.put(("log", ("[OK] stage1 done", "ok")))
 
-                        self._q.put(("log", ("[*] reboot", "stage")))
-                        sess.reboot(r.mac, flags=0, count=3, period_sec=0.05)
+                    self._q.put(("log", ("[*] reboot", "stage")))
+                    sess.reboot(r.mac, flags=0, count=3, period_sec=0.05)
 
-                        self._q.put(("log", ("[*] waiting IP…", "stage")))
-                        ip_s = self._wait_ip(sess, r.mac, overall_timeout_s=80.0)
-                        if not ip_s:
-                            self._q.put(("log", ("[ERR] IP not acquired (timeout).", "err")))
-                            return
-                        self._q.put(("devinfo", (r.key(), ip_s, "")))
+                    self._q.put(("log", ("[*] waiting IP…", "stage")))
+                    ip_s = self._wait_ip(sess, r.mac, overall_timeout_s=80.0)
+                    if not ip_s:
+                        self._q.put(("log", ("[ERR] IP not acquired (timeout).", "err")))
+                        return
+                    self._q.put(("devinfo", (r.key(), ip_s, "")))
 
-                    self._q.put(("log", ("[*] stage2: OTA via HTTP", "stage")))
-                    sess.flash_fs(r.mac, fw_path, stage_cb=cb_stage, progress_cb=cb_progress)
+                    self._q.put(("log", ("[*] stage2: OTA via HTTP (no fw.bin)", "stage")))
+                    tar_p, td = strip_fw_bin_from_tar(fw_path)
+                    try:
+                        sess.flash_fs(r.mac, tar_p, stage_cb=cb_stage, progress_cb=cb_progress)
+                    finally:
+                        try:
+                            td.cleanup()
+                        except Exception:
+                            pass
                     self._q.put(("log", ("[OK] flash done", "ok")))
 
             self._maybe_poll_ip(self._rows.get(r.key(), r))
@@ -1009,35 +1052,32 @@ class App(tk.Tk):
                     def cb_stage(msg: str) -> None:
                         self._q.put(("log", ("[*] " + msg, "stage")))
 
-                    # Stage 1 (only for non-rnode-halow)
-                    if r.kind != "rnode-halow":
-                        self._q.put(("log", ("[*] stage1: RAW flash", "stage")))
-                        # slightly lower retries vs old GUI to avoid "unnecessary retries"
-                        sess.flash(r.mac, tar_path, timeout=0.45, retries=6, progress_cb=cb_progress)
-                        self._q.put(("log", ("[OK] stage1 done", "ok")))
+                    # Stage 1: always flash firmware first via HGIC (fw.bin from ota.tar)
+                    self._q.put(("log", ("[*] stage1: RAW flash fw.bin (HGIC)", "stage")))
+                    # slightly lower retries vs old GUI to avoid "unnecessary retries"
+                    sess.flash(r.mac, tar_path, timeout=0.45, retries=6, progress_cb=cb_progress)
+                    self._q.put(("log", ("[OK] stage1 done", "ok")))
 
-                        self._q.put(("log", ("[*] reboot", "stage")))
-                        sess.reboot(r.mac)
+                    self._q.put(("log", ("[*] reboot", "stage")))
+                    sess.reboot(r.mac, flags=0, count=3, period_sec=0.05)
 
-                        self._q.put(("log", ("[*] waiting IP…", "stage")))
-                        ip_s = self._wait_ip(sess, r.mac, overall_timeout_s=80.0)
-                        if not ip_s:
-                            self._q.put(("log", ("[ERR] IP not acquired (timeout).", "err")))
-                            return
-                        self._q.put(("devinfo", (r.key(), ip_s, "")))
-                    else:
-                        # Stage 0: ensure IP even if not displayed yet
-                        if not (r.ip or "").strip():
-                            self._q.put(("log", ("[*] waiting IP…", "stage")))
-                            ip_s = self._wait_ip(sess, r.mac, overall_timeout_s=35.0)
-                            if not ip_s:
-                                self._q.put(("log", ("[ERR] No IP (timeout).", "err")))
-                                return
-                            self._q.put(("devinfo", (r.key(), ip_s, r.ver)))
+                    self._q.put(("log", ("[*] waiting IP…", "stage")))
+                    ip_s = self._wait_ip(sess, r.mac, overall_timeout_s=80.0)
+                    if not ip_s:
+                        self._q.put(("log", ("[ERR] IP not acquired (timeout).", "err")))
+                        return
+                    self._q.put(("devinfo", (r.key(), ip_s, "")))
 
-                    # Stage 2 (HTTP OTA): uses flash_fs
-                    self._q.put(("log", ("[*] stage2: OTA via HTTP", "stage")))
-                    sess.flash_fs(r.mac, tar_path, stage_cb=cb_stage, progress_cb=cb_progress)
+                    # Stage 2 (HTTP OTA): upload filesystem tar without fw.bin
+                    self._q.put(("log", ("[*] stage2: OTA via HTTP (no fw.bin)", "stage")))
+                    tar_p, td = strip_fw_bin_from_tar(tar_path)
+                    try:
+                        sess.flash_fs(r.mac, tar_p, stage_cb=cb_stage, progress_cb=cb_progress)
+                    finally:
+                        try:
+                            td.cleanup()
+                        except Exception:
+                            pass
                     self._q.put(("log", ("[OK] update done", "ok")))
 
             # refresh ip/version (best-effort)

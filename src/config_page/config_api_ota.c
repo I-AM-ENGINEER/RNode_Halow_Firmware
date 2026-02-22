@@ -162,8 +162,8 @@ int32_t web_api_ota_write_post( const cJSON *in, cJSON *out ){
         return -1;
     }
 
-    if (ota_write_firmware_from_file() != 0) {
-        return -2; 
-    }
+    //if (ota_write_firmware_from_file() != 0) {
+    //    return -2; 
+    //}
     return 0;
 }

@@ -321,6 +321,7 @@
 				setText('stat_ip', d.ip);
 				setText('stat_mac', d.mac);
 				setText('stat_fwver', d.ver);
+				setText('stat_flashs', d.flashs);
 			}
 		} catch (err) {
 			// ignore

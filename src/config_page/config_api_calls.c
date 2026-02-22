@@ -20,6 +20,7 @@
 #include "utils.h"
 #include "device.h"
 #include "statistics.h"
+#include "hal/spi_nor.h"
 
 /* -------------------------------------------------------------------------- */
 /* Change version                                                             */
@@ -27,6 +28,7 @@
 
 static volatile uint32_t s_change_version = 0;
 extern struct netif *netif_default;
+extern struct spi_nor_flash flash0;
 
 void web_api_notify_change( void ){
     s_change_version++;
@@ -519,6 +521,8 @@ int32_t web_api_dev_stat_get( const cJSON *in, cJSON *out ){
     }
 
     (void)cJSON_AddStringToObject(out, "mac", s);
+    snprintf(s, sizeof(s), "%d Mbit", flash0.size * 8 / 1024 / 1024);
+    (void)cJSON_AddStringToObject(out, "flashs", s);
 
     return WEB_API_RC_OK;
 }
