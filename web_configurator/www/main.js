@@ -184,6 +184,8 @@
         // TCP Bridge
         document.getElementById('tcp_enable').addEventListener('change', updateTcpDisabled);
         document.getElementById('save_tcp').addEventListener('click', saveTcp);
+		
+		document.getElementById('stat_reset_btn').addEventListener('click', resetStats);
         // Firmware Update
 		document.getElementById('fw_file').addEventListener('change', updateFwDisabled);
 		document.getElementById('fw_flash').addEventListener('click', fwFlash);
@@ -248,6 +250,18 @@
             el.disabled = !enabled;
         });
     }
+
+	async function resetStats() {
+		try {
+			await fetch('/api/reset_stat', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: '{}'
+			});
+		} catch (err) {
+			console.error('resetStats error', err);
+		}
+	}
 
     /**
      * Request the full configuration from the backend.  After the
