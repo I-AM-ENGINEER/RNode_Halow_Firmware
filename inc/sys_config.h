@@ -2,40 +2,39 @@
 #define __SYS_CONFIG_H__
 
 #define PROJECT_TYPE           PRO_TYPE_WNB
-#define FW_VERSION              "1.1.0"
+#define FW_VERSION              "1.2.0"
 #define FW_FULL_VERSION         FW_VERSION " (" __DATE__ " " __TIME__ ")"
 
 #define IP_SOF_BROADCAST       1
 #define LWIP_RAW               1
 #define LWIP_NETIF_HOSTNAME    1
-#define TCPIP_MBOX_SIZE              32
-#define DEFAULT_TCP_RECVMBOX_SIZE    32
-#define DEFAULT_ACCEPTMBOX_SIZE      8
-#define MEMP_NUM_TCP_PCB         16
-#define MEMP_NUM_TCP_PCB_LISTEN  16
-#define DEFAULT_RAW_RECVMBOX_SIZE 8
-#define MEMP_NUM_NETBUF 8
+
+// LWIP debug
+
+//#define TCPIP_MBOX_SIZE              32
+//#define DEFAULT_TCP_RECVMBOX_SIZE    32
+//#define DEFAULT_ACCEPTMBOX_SIZE      8
+//#define MEMP_NUM_TCP_PCB         16
+//#define MEMP_NUM_TCP_PCB_LISTEN  16
+//#define DEFAULT_RAW_RECVMBOX_SIZE 8
+//#define MEMP_NUM_NETBUF 8
 #define LWIP_SO_RCVTIMEO 1
-#define LWIP_DEBUG                  1
-#define MEM_SIZE (32*1024)
-#define PBUF_POOL_SIZE  32   // было 16 → 32/64
+//#define LWIP_DEBUG                  1
+//#define MEM_SIZE (8*1024)
+//#define PBUF_POOL_SIZE  16
 //#define LWIP_DBG_MIN_LEVEL          LWIP_DBG_LEVEL_ALL
 //#define LWIP_DBG_TYPES_ON           LWIP_DBG_ON
 
-// #define TCP_MSS                 (HALOW_MTU)              // Smaller packets -> less latency
+// #define TCP_MSS                 (HALOW_MTU)
 
-// #define TCP_SND_BUF             (2*TCP_MSS)         // Near realtime
+// #define TCP_SND_BUF             (2*TCP_MSS) 
 // #define TCP_SNDLOWAT            (TCP_MSS)
 // #define TCP_SNDQUEUELOWAT       2
 // #define TCP_SND_QUEUELEN        4
 
-#define SYS_FACTORY_PARAM_SIZE 2048
+#define TDMA_BUFF_SIZE 0
 
-#ifndef TDMA_BUFF_SIZE
-#define TDMA_BUFF_SIZE (40 * 1024)
-#endif
-
-#define SYS_HEAP_SIZE     (100 * 1024)
+#define SYS_HEAP_SIZE     (256 * 1024)
 
 #define WIFI_RX_BUFF_SIZE (40 * 1024) //(17*1024)
 
@@ -47,7 +46,7 @@
 #define SKB_POOL_ADDR     (WIFI_RX_BUFF_ADDR + WIFI_RX_BUFF_SIZE)
 #define SKB_POOL_SIZE     (SRAM_POOL_START + SRAM_POOL_SIZE - SKB_POOL_ADDR)
 
-#define DEFAULT_SYS_CLK   192000000UL // options: 32M/48M/72M/144M, and 16*N from 64M to 128M
+#define DEFAULT_SYS_CLK   128000000UL // options: 32M/48M/72M/144M, and 16*N from 64M to 128M
 
 #define GMAC_ENABLE       1
 

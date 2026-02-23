@@ -30,11 +30,6 @@ uint32 srampool_end   = 0;
 
 k_task_handle_t main_task_hdl;
 
-#ifndef SYS_FACTORY_PARAM_SIZE
-#define SYS_FACTORY_PARAM_SIZE 4
-#endif
-const uint16_t __used sys_factory_param[SYS_FACTORY_PARAM_SIZE/2] __at_section("SYS_PARAM") = {SYS_FACTORY_PARAM_SIZE};
-
 __weak void dsleep_wakeup(void){}
 
 void cpu_clk_sel_hosc(void)
