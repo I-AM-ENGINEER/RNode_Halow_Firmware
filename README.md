@@ -1,4 +1,3 @@
-```markdown
 # RNode-Halow
 
 [🇬🇧 English](#english) | [🇷🇺 Русский](#русский)
