@@ -27,8 +27,20 @@ static inline void configdb_debug_i32( const char *tag,
               (long)v,
               (long)rc);
 }
+
+static inline void configdb_debug_blob( const char *tag,
+                                        const char *key,
+                                        size_t size,
+                                        int32_t rc ){
+    cdb_debug("%s key=%s size=%lu rc=%ld",
+              tag ? tag : "CDB",
+              key ? key : "(null)",
+              (unsigned long)size,
+              (long)rc);
+}
 #else
 #define configdb_debug_i32(tag, key, v, rc) do { } while (0)
+#define configdb_debug_blob(tag, key, size, rc) do { } while (0)
 #endif
 
 static int16_t clamp_i16(int32_t v){
@@ -188,4 +200,67 @@ int32_t configdb_get_set_i8(const char *key, int8_t *paramp){
     *paramp = (int8_t)tmp;
 
     return configdb_set_i32(key, &tmp);
+}
+
+int32_t configdb_set_blob(const char *key, const void *buf, size_t size){
+    struct fdb_blob blob;
+    int32_t res;
+    fdb_kvdb_t dbp;
+
+    if ((key == NULL) || (buf == NULL) || (size == 0u)) {
+        return -1;
+    }
+
+    dbp = configdb_grab();
+    if (dbp == NULL) {
+        return -2;
+    }
+
+    blob.buf = (void *)buf;
+    blob.size = size;
+
+    res = (int32_t)fdb_kv_set_blob(dbp, key, &blob);
+    configdb_release();
+
+    configdb_debug_blob("SET_BLOB", key, size, res);
+
+    if (res != FDB_NO_ERR) {
+        return -3;
+    }
+
+    return 0;
+}
+
+int32_t configdb_get_blob(const char *key, void *buf, size_t size){
+    struct fdb_blob blob;
+    size_t rd;
+    fdb_kvdb_t dbp;
+
+    if ((key == NULL) || (buf == NULL) || (size == 0u)) {
+        return -1;
+    }
+
+    dbp = configdb_grab();
+    if (dbp == NULL) {
+        return -2;
+    }
+
+    blob.buf = buf;
+    blob.size = size;
+
+    rd = fdb_kv_get_blob(dbp, key, &blob);
+    configdb_release();
+
+    if (rd != size) {
+        configdb_debug_blob("GET_BLOB", key, size, -3);
+        return -3;
+    }
+
+    configdb_debug_blob("GET_BLOB", key, size, 0);
+    return 0;
+}
+
+int32_t configdb_get_set_blob(const char *key, void *buf, size_t size){
+    configdb_get_blob(key, buf, size);
+    return configdb_set_blob(key, buf, size);
 }

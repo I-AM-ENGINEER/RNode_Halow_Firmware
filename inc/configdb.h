@@ -19,6 +19,10 @@ int32_t configdb_get_i8(const char *key, int8_t *paramp);
 int32_t configdb_set_i8(const char *key, const int8_t *paramp);
 int32_t configdb_get_set_i8(const char *key, int8_t *paramp);
 
+int32_t configdb_get_blob(const char *key, void *buf, size_t size);
+int32_t configdb_set_blob(const char *key, const void *buf, size_t size);
+int32_t configdb_get_set_blob(const char *key, void *buf, size_t size);
+
 int32_t configdb_init(void);
 
 #endif // __CONFIGDB_H__
