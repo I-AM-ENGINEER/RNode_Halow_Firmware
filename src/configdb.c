@@ -90,7 +90,7 @@ int32_t configdb_init(void){
     return 0;
 }
 
-int32_t configdb_set_i32(const char* key, int32_t* paramp){
+int32_t configdb_set_i32(const char* key, const int32_t* paramp){
     struct fdb_blob blob;
     int32_t current_param;
     int32_t res;
