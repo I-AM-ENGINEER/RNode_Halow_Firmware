@@ -11,5 +11,6 @@ bool utils_cidr_to_ip( const char *s, ip4_addr_t *ip );
 
 int64_t get_time_ms(void);
 int64_t get_time_us(void);
+void get_mac(uint8_t mac[6]);
 
 #endif // __UTILS_H_

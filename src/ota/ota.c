@@ -22,6 +22,7 @@
 #include "basic_include.h"
 #include "sys_config.h"
 #include "device.h"
+#include "utils.h"
 
 extern lfs_t g_lfs;
 
@@ -127,7 +128,6 @@ int32_t _libota_write_fw_ah( uint32_t tot_len, uint32_t off, const uint8_t *data
     return 0;
 }
 
-extern uint8 g_mac[6];
 extern int32_t __real_lwip_netif_hook_inputdata(struct netif* nif, uint8_t* data, uint32_t len);
 
 static int ota_cmd_firmware_data(struct netif* nif, uint8_t* data, uint32_t len){
@@ -188,7 +188,7 @@ static int ota_cmd_firmware_data(struct netif* nif, uint8_t* data, uint32_t len)
 
     struct eth_ota_fw_data answer;
     memset(&answer, 0, sizeof(answer));
-    memcpy(answer.hdr.src,  g_mac, 6);
+    get_mac(answer.hdr.src);
     memcpy(answer.hdr.dest, fw->hdr.src, 6);
     answer.hdr.proto  = __be16(ETH_P_OTA);
     answer.hdr.stype  = ETH_P_OTA_FW_DATA_RESP;
@@ -243,7 +243,7 @@ static int ota_cmd_scan(struct netif* nif, uint8_t* data, uint32_t len){
     struct eth_ota_hdr* hdr = (struct eth_ota_hdr*)data;
 
     struct eth_ota_hdr answer_hdr;
-    memcpy(answer_hdr.src, g_mac, 6);
+    get_mac(answer_hdr.src);
     memcpy(answer_hdr.dest, hdr->src, 6);
     answer_hdr.proto = __be16(ETH_P_OTA);
     answer_hdr.stype = ETH_P_OTA_SCAN_REPORT;
@@ -307,7 +307,7 @@ static int ota_cmd_get_ip( struct netif *nif, uint8_t *data, uint32_t len ){
     struct eth_ota_get_ip_resp resp;
     memset(&resp, 0, sizeof(resp));
 
-    memcpy(resp.hdr.src,  g_mac,    6);
+    get_mac(resp.hdr.src);
     memcpy(resp.hdr.dest, hdr->src, 6);
     resp.hdr.proto  = __be16(ETH_P_OTA);
     resp.hdr.stype  = ETH_P_OTA_FW_CUSTOM_GET_IP_RESP;

@@ -47,7 +47,6 @@
 static struct os_work main_wk;
 extern uint32_t srampool_start;
 extern uint32_t srampool_end;
-uint8 g_mac[6];
 
 //extern void lmac_transceive_statics(uint8 en);
 
@@ -72,9 +71,10 @@ __init static void sys_network_init(void) {
     tcpip_init(NULL, NULL);
     sock_monitor_init();
 
-    sysctrl_efuse_mac_addr_calc(g_mac);
+    uint8_t mac[6];
+    get_mac(mac);
     ndev = (struct netdev *)dev_get(HG_GMAC_DEVID);
-    netdev_set_macaddr(ndev, g_mac);
+    netdev_set_macaddr(ndev, mac);
     if (ndev) {
         lwip_netif_add(ndev, "e0", NULL, NULL, NULL);
         lwip_netif_set_default(ndev);
