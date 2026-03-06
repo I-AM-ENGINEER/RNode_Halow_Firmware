@@ -2,6 +2,9 @@
 
 [🇬🇧 English](#english) | [🇷🇺 Русский](#русский)
 
+
+Coverage map: https://map.rnode-halow.ru/
+
 ---
 
 ## English
