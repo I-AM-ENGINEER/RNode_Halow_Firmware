@@ -54,7 +54,7 @@ clean:
 
 prebuild:
 	@printf "$(COLOR_INF)prebuild ...$(COLOR_END)\n"
-	rm -rf "/out" && mkdir "/out"
+	rm -rf "out" && mkdir "out"
 
 ./build/Debug/.obj/csky/csi_kernel/rhino/adapter:
 	$(Q)mkdir -p $@
@@ -1340,7 +1340,6 @@ elf: $(objs) Makefile
 bin: elf Makefile
 postbuild: bin
 	@printf "$(COLOR_INF)postbuild ...$(COLOR_END)\n"
-	mkdir -p out
 	csky-elfabiv2-objcopy -O binary build/Debug/TXW8301-PHY.elf build/Debug/TXW8301-PHY.bin
 	python3 pack/prepare_firmware.py build/Debug/TXW8301-PHY.bin -o out/fw.bin
 	python3 pack/build_OTA.py out out/fw.bin
