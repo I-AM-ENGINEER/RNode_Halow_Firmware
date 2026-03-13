@@ -9,9 +9,11 @@
 #include "lib/skb/skbuff.h"
 #include "osal/semaphore.h"
 #include "osal/string.h"
+#include "osal/work.h"
 #include "halow_lbt.h"
 #include "configdb.h"
 #include "sys_config.h"
+#include "lmac_ctx.h"
 
 #define HALOW_CONFIG_PREFIX             CONFIGDB_ADD_MODULE("halow")
 #define HALOW_CONFIG_ADD_CONFIG(name)   HALOW_CONFIG_PREFIX "." name
@@ -72,6 +74,8 @@
 #endif
 
 /* ===== internal state ===== */
+
+static struct os_work lmac_wdt_wk;
 
 static struct lmac_ops *g_ops = NULL;
 static halow_rx_cb g_rx_cb;
@@ -297,6 +301,11 @@ static void halow_modem_set_default(void){
     lmac_set_dbg_levle(g_ops, HALOW_DBG_LEVEL);
 }
 
+static void lmac_watchdog_feed_task( void ){
+    ah_lmac.phy_watchdog_flags &= ~0x01;
+    os_run_work_delay(&lmac_wdt_wk, 100);
+}
+
 bool halow_init(uint32_t rxbuf, uint32_t rxbuf_size,
                 uint32_t tdma_buf, uint32_t tdma_buf_size) {
     struct lmac_init_param p;
@@ -333,6 +342,9 @@ bool halow_init(uint32_t rxbuf, uint32_t rxbuf_size,
     halow_config_save(&config); // Incorrect values should be removed from DB
     halow_config_apply(&config);
     halow_lbt_set_tx_as_deactive();
+    
+    OS_WORK_INIT(&lmac_wdt_wk, lmac_watchdog_feed_task,0);
+    os_run_work_delay(&lmac_wdt_wk, 10);
     return true;
 }
 
