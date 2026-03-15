@@ -157,29 +157,31 @@ static uint32_t firmware_build_hash( void ){
     return hash;
 }
 
-static bool firmware_check_updated_and_reset( void ){
+static void firmware_check_updated_and_reset( void ){
     int32_t stored_hash = 0;
     uint32_t current_hash = firmware_build_hash();
 
     configdb_get_i32("fw_build_hash", &stored_hash);
 
     if ((uint32_t)stored_hash != current_hash) {
-
         os_printf("FW update detected\n");
         os_printf("old hash = 0x%08X\n", (uint32_t)stored_hash);
         os_printf("new hash = 0x%08X\n", current_hash);
 
-        ota_reset_to_default();
+        const struct fal_partition *p;
+        // Prepare for web page flash
+        p = fal_partition_find("littlefs");
+        if (p == NULL) {
+            return -3;
+        }
+
+        if (fal_partition_erase(p, 0, p->len) < 0) {
+            return -4;
+        }
         configdb_init();
         stored_hash = (int32_t)current_hash;
         configdb_set_i32("fw_build_hash", &stored_hash);
-        
-        os_printf("Config reset to default\n");
-        device_reboot();
-        return true;
     }
-
-    return false;
 }
 
 static void boot_counter_update(void){
