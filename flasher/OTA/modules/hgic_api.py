@@ -21,7 +21,7 @@ from scapy.all import Ether, Raw, sendp, AsyncSniffer, srp1
 from .hgic_device import HgicDevice
 from .hgic_flash import HgicFlasher
 from .hgic_ota_tar import load_fw_bin_from_ota_tar
-from .hgic_http_ota import HttpOtaConfig, ping_host, upload_ota_file_http
+from .hgic_tftp_ota import TftpOtaConfig, upload_ota_files_tftp
 from .hgic_ota import (
     ETH_P_OTA,
     pack_get_ip_req,
@@ -108,8 +108,10 @@ class HgicSession:
         ota_tar: bytes | Path | str,
         *,
         timeout: float = 3.0,
-        retries: int = 10,
+        retries: int = 3,
+        retry_delay: float = 3.0,
         progress_cb: Optional[Callable[[int, int, float], None]] = None,
+        retry_cb: Optional[Callable[[int, int, str], None]] = None,
     ) -> None:
         """Flash device firmware from an OTA tar bundle.
 
@@ -124,13 +126,31 @@ class HgicSession:
         else:
             payload = bytes(ota_tar)
 
-        self._flasher.flash_firmware(
-            dst_mac,
-            payload,
-            timeout=float(timeout),
-            retries=int(retries),
-            progress_cb=progress_cb,
-        )
+        attempts = int(retries)
+        if attempts < 1:
+            raise ValueError("retries must be >= 1")
+
+        last_err: Optional[Exception] = None
+        for attempt in range(1, attempts + 1):
+            try:
+                self._flasher.flash_firmware(
+                    dst_mac,
+                    payload,
+                    timeout=float(timeout),
+                    retries=1,
+                    progress_cb=progress_cb,
+                )
+                return
+            except Exception as e:
+                last_err = e
+                if attempt >= attempts:
+                    break
+                if retry_cb:
+                    retry_cb(attempt, attempts, str(e))
+                time.sleep(float(retry_delay))
+
+        assert last_err is not None
+        raise RuntimeError(f"flash failed after {attempts} attempts: {last_err}") from last_err
 
     def flash_fs(
         self,
@@ -139,17 +159,15 @@ class HgicSession:
         *,
         getip_tries: int = 8,
         getip_timeout: float = 0.5,
-        ping_timeout_ms: int = 800,
-        http_cfg: HttpOtaConfig = HttpOtaConfig(),
+        tftp_cfg: TftpOtaConfig = TftpOtaConfig(),
         stage_cb: Optional[Callable[[str], None]] = None,
         progress_cb: Optional[Callable[[int, int, float], None]] = None,
     ) -> IpInfo:
-        """Upload ota.tar over HTTP (LittleFS) and trigger ota_write.
+        """Upload filesystem files from ota.tar directly over TFTP.
 
         Steps:
           1) GET_IP over Ethernet (custom OTA ethertype)
-          2) Ping the reported IP
-          3) HTTP upload via /api/ota_begin|chunk|end|write
+          2) Upload every non-fw.bin file from ota.tar to the device TFTP server
 
         Returns resolved IpInfo.
         """
@@ -164,15 +182,11 @@ class HgicSession:
 
         if stage_cb:
             stage_cb(f"Device IP: {ip_s}")
-            stage_cb("Pinging device...")
 
-        if not ping_host(ip_s, timeout_ms=int(ping_timeout_ms)):
-            raise RuntimeError(f"ping failed: {ip_s}")
-
-        upload_ota_file_http(
+        upload_ota_files_tftp(
             ip_s,
             Path(ota_tar),
-            cfg=http_cfg,
+            cfg=tftp_cfg,
             stage_cb=stage_cb,
             progress_cb=progress_cb,
         )

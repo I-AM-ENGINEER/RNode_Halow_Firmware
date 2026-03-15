@@ -16,8 +16,8 @@ Firmware sources:
 
 Actions:
 - Update selected (recommended): requires OTA .tar
-  * if device is NOT rnode-halow: RAW flash -> reboot -> wait IP -> HTTP OTA
-  * if device IS rnode-halow: wait IP -> HTTP OTA
+  * if device is NOT rnode-halow: RAW flash -> reboot -> wait IP -> TFTP file upload
+  * if device IS rnode-halow: wait IP -> TFTP file upload
 - Flash RAW (advanced): allows .tar or .bin (bin wrapped into minimal tar)
 - Double click device with IP: open http://<ip>/
 
@@ -32,6 +32,8 @@ from __future__ import annotations
 import json
 import platform
 import queue
+import shutil
+import sys
 import tarfile
 import tempfile
 import threading
@@ -46,6 +48,7 @@ from tkinter import ttk, filedialog, messagebox
 
 from modules import scan_all_parallel
 from modules import HgicSession
+from modules.hgic_scan import scan_iface
 from modules.hgic_ota_tar import inspect_ota_tar
 
 
@@ -62,6 +65,11 @@ GITHUB_API_RELEASES = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/re
 # NOTE: GitHub releases are downloaded into a temporary directory per GUI run.
 # This avoids accidentally flashing a stale cached file when user switches between
 # "GitHub release" and "Local file" modes.
+
+BUILTIN_PREFLASH_FW_CANDIDATES = [
+    "txw8301_v2.4.1.3-38247_2025.11.6_TAIXIN_WNB.bin",
+    "E611-orig.bin",
+]
 
 
 # ----------------------------
@@ -138,42 +146,58 @@ def make_minimal_ota_tar_from_bin(bin_path: Path) -> Tuple[Path, tempfile.Tempor
 
 
 
-def _norm_tar_name(name: str) -> str:
-    s = str(name).replace("\\", "/").strip()
-    while s.startswith("./"):
-        s = s[2:]
-    while s.startswith("/"):
-        s = s[1:]
-    return s
+
+def _app_base_dir() -> Path:
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(getattr(sys, "_MEIPASS"))
+    return Path(__file__).resolve().parent
 
 
-def strip_fw_bin_from_tar(src_tar: Path) -> Tuple[Path, tempfile.TemporaryDirectory]:
-    """Create a temporary copy of src_tar without root fw.bin (for HTTP OTA)."""
-    td = tempfile.TemporaryDirectory(prefix="rnode_halow_tmp_")
-    out = Path(td.name) / Path(src_tar).name
+def _builtin_fw_dir() -> Path:
+    return _app_base_dir() / "embedded_fw"
 
-    # preserve compression if any, based on extension
-    name_l = out.name.lower()
-    wmode = "w"
-    if name_l.endswith(".tar.gz") or name_l.endswith(".tgz"):
-        wmode = "w:gz"
-    elif name_l.endswith(".tar.bz2") or name_l.endswith(".tbz2"):
-        wmode = "w:bz2"
-    elif name_l.endswith(".tar.xz") or name_l.endswith(".txz"):
-        wmode = "w:xz"
 
-    with tarfile.open(Path(src_tar), mode="r:*") as tf_in:
-        with tarfile.open(out, mode=wmode) as tf_out:
-            for m in tf_in.getmembers():
-                if _norm_tar_name(m.name) == "fw.bin":
-                    continue
-                if m.isfile():
-                    f = tf_in.extractfile(m)
-                    tf_out.addfile(m, fileobj=f)
-                else:
-                    tf_out.addfile(m)
+def list_builtin_firmware_names() -> List[str]:
+    fw_dir = _builtin_fw_dir()
+    if not fw_dir.is_dir():
+        return []
+    return sorted(p.name for p in fw_dir.glob("*.bin") if p.is_file())
 
-    return out, td
+
+def pick_preflash_firmware_name() -> str:
+    names = list_builtin_firmware_names()
+    for cand in BUILTIN_PREFLASH_FW_CANDIDATES:
+        if cand in names:
+            return cand
+    if names:
+        return names[0]
+    raise FileNotFoundError(f"no built-in firmware found in: {_builtin_fw_dir()}")
+
+
+def extract_builtin_firmware(name: str, dst_dir: Path) -> Path:
+    src = _builtin_fw_dir() / str(name)
+    if not src.is_file():
+        raise FileNotFoundError(f"built-in firmware not found: {src}")
+
+    dst_dir.mkdir(parents=True, exist_ok=True)
+    dst = dst_dir / src.name
+    if (not dst.exists()) or (dst.stat().st_size != src.stat().st_size):
+        shutil.copy2(src, dst)
+    return dst
+
+
+def read_builtin_firmware(name: str) -> bytes:
+    src = _builtin_fw_dir() / str(name)
+    if not src.is_file():
+        raise FileNotFoundError(f"built-in firmware not found: {src}")
+    data = src.read_bytes()
+    if not data:
+        raise ValueError(f"built-in firmware is empty: {src.name}")
+    return data
+
+
+def is_builtin_source(src: str) -> bool:
+    return str(src or "").strip() == "builtin"
 
 
 def http_get_json(url: str, timeout_s: float = 1.0) -> Optional[Dict[str, Any]]:
@@ -365,7 +389,7 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
 
-        self.title("RNode-HaLow Flasher v1.1.0")
+        self.title("RNode-HaLow Flasher v1.3.0")
         self.geometry("950x620")
         self.minsize(880, 560)
 
@@ -386,12 +410,12 @@ class App(tk.Tk):
         self._ip_jobs_inflight: set[Tuple[str, str]] = set()
 
         # firmware state
-        self._fw_source = tk.StringVar(value="github")  # "github"|"local"
+        self._fw_source = tk.StringVar(value="github")  # "github"|"local"|"builtin"
         self._fw_path = tk.StringVar(value="")
         self._fw_mode = tk.StringVar(value="")          # "ota"|"bin"|""
         self._fw_info = tk.StringVar(value="")
 
-        # keep both selections; switching radiobuttons must immediately switch mode/info/buttons
+        # keep all selections; switching radiobuttons must immediately switch mode/info/buttons
         self._fw_local_path: Optional[Path] = None
         self._fw_local_mode: str = ""
         self._fw_local_info: str = ""
@@ -401,9 +425,17 @@ class App(tk.Tk):
         self._fw_gh_info: str = ""
         self._fw_gh_tag: str = ""
 
-        # github download temp dir (per GUI run)
+        builtin_names = list_builtin_firmware_names()
+        self._fw_builtin_name = tk.StringVar(value=(builtin_names[0] if builtin_names else ""))
+        self._fw_builtin_path: Optional[Path] = None
+        self._fw_builtin_mode: str = ""
+        self._fw_builtin_info: str = ""
+
+        # temp dirs (per GUI run)
         self._gh_tmp = tempfile.TemporaryDirectory(prefix="rnode_halow_gh_")
         self._gh_tmp_dir = Path(self._gh_tmp.name)
+        self._builtin_tmp = tempfile.TemporaryDirectory(prefix="rnode_halow_builtin_")
+        self._builtin_tmp_dir = Path(self._builtin_tmp.name)
 
         # github
         self._gh_status = tk.StringVar(value="GitHub: …")
@@ -429,6 +461,8 @@ class App(tk.Tk):
             return
 
         self._build_ui()
+        self._refresh_builtin_fw_list()
+        self._set_fw_builtin(self._fw_builtin_name.get().strip())
         self.deiconify()
 
         # timers/threads
@@ -450,7 +484,6 @@ class App(tk.Tk):
         fw_top.pack(side=tk.TOP, fill=tk.X, padx=8, pady=(6, 2))
 
         ttk.Button(fw_top, text="GitHub", command=lambda: webbrowser.open(REPO_URL)).pack(side=tk.RIGHT)
-        ttk.Button(fw_top, text="Releases", command=lambda: webbrowser.open(RELEASES_URL)).pack(side=tk.RIGHT, padx=(6, 6))
 
         ttk.Radiobutton(
             fw_top, text="GitHub release:", value="github", variable=self._fw_source,
@@ -464,7 +497,7 @@ class App(tk.Tk):
         ttk.Button(fw_top, text="Refresh", command=self._gh_refresh_async).pack(side=tk.LEFT)
 
         fw_mid = ttk.Frame(fw)
-        fw_mid.pack(side=tk.TOP, fill=tk.X, padx=8, pady=(2, 6))
+        fw_mid.pack(side=tk.TOP, fill=tk.X, padx=8, pady=(2, 2))
 
         ttk.Radiobutton(
             fw_mid, text="Local file:", value="local", variable=self._fw_source,
@@ -477,8 +510,29 @@ class App(tk.Tk):
         self._btn_browse = ttk.Button(fw_mid, text="Browse…", command=self._browse_fw)
         self._btn_browse.pack(side=tk.LEFT)
 
-        ttk.Label(fw_mid, textvariable=self._fw_info, foreground="#888").pack(side=tk.LEFT, padx=(10, 0))
-        ttk.Label(fw, textvariable=self._gh_status, foreground="#888").pack(side=tk.TOP, anchor=tk.W, padx=10, pady=(0, 6))
+        fw_builtin = ttk.Frame(fw)
+        fw_builtin.pack(side=tk.TOP, fill=tk.X, padx=8, pady=(2, 6))
+
+        ttk.Radiobutton(
+            fw_builtin, text="Built-in original:", value="builtin", variable=self._fw_source,
+            command=self._fw_source_changed
+        ).pack(side=tk.LEFT)
+
+        self._builtin_combo = ttk.Combobox(
+            fw_builtin, textvariable=self._fw_builtin_name, state="readonly", width=54, values=[]
+        )
+        self._builtin_combo.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(6, 6))
+        self._builtin_combo.bind("<<ComboboxSelected>>", self._builtin_fw_selected)
+
+        fw_status = tk.Frame(fw)
+        fw_status.pack(side=tk.TOP, fill=tk.X, padx=8, pady=(0, 6))
+        tk.Label(
+            fw_status,
+            textvariable=self._fw_info,
+            fg="#888",
+            bg=self.cget("bg"),
+            anchor="w",
+        ).pack(side=tk.TOP, fill=tk.X)
 
         dev = ttk.LabelFrame(self, text="Devices")
         dev.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=(0, 8))
@@ -529,7 +583,7 @@ class App(tk.Tk):
         self._log = tk.Text(bot, height=9, wrap=tk.WORD)
         self._log.pack(side=tk.TOP, fill=tk.BOTH, expand=True, pady=(8, 0))
         self._log.tag_configure("err", foreground="#ff6666")
-        self._log.tag_configure("ok", foreground="#66ff99")
+        self._log.tag_configure("ok", foreground="#006400")
         self._log.tag_configure("stage", foreground="#66aaff")
 
         self._fw_source_changed()
@@ -584,6 +638,18 @@ class App(tk.Tk):
                 self._fw_path.set("")
                 self._fw_mode.set("")
                 self._fw_info.set("")
+        elif is_builtin_source(src):
+            p = self._fw_builtin_path
+            m = (self._fw_builtin_mode or "").strip()
+            info = self._fw_builtin_info
+            if p and p.is_file() and m in ("bin",):
+                self._fw_path.set(str(p))
+                self._fw_mode.set(m)
+                self._fw_info.set(info)
+            else:
+                self._fw_path.set("")
+                self._fw_mode.set("")
+                self._fw_info.set(info)
         else:
             p = self._fw_local_path
             m = (self._fw_local_mode or "").strip()
@@ -595,7 +661,7 @@ class App(tk.Tk):
             else:
                 # keep the entry text for convenience, but disable actions
                 self._fw_mode.set("")
-                self._fw_info.set("")
+                self._fw_info.set(info)
         self._refresh_buttons()
 
     def _fw_source_changed(self) -> None:
@@ -604,13 +670,51 @@ class App(tk.Tk):
             self._gh_combo.configure(state="readonly")
             self._fw_entry.configure(state="disabled")
             self._btn_browse.configure(state="disabled")
+            self._builtin_combo.configure(state="disabled")
+        elif is_builtin_source(src):
+            self._gh_combo.configure(state="disabled")
+            self._fw_entry.configure(state="disabled")
+            self._btn_browse.configure(state="disabled")
+            self._builtin_combo.configure(state="readonly")
         else:
             self._gh_combo.configure(state="disabled")
             self._fw_entry.configure(state="normal")
             self._btn_browse.configure(state="normal")
+            self._builtin_combo.configure(state="disabled")
 
         # switching radiobuttons must immediately switch mode/info/buttons
         self._apply_fw_view()
+
+    def _refresh_builtin_fw_list(self) -> None:
+        names = list_builtin_firmware_names()
+        self._builtin_combo.configure(values=names)
+        current = self._fw_builtin_name.get().strip()
+        if current not in names:
+            self._fw_builtin_name.set(names[0] if names else "")
+
+    def _builtin_fw_selected(self, _evt=None) -> None:
+        self._set_fw_builtin(self._fw_builtin_name.get().strip())
+
+    def _set_fw_builtin(self, name: str) -> None:
+        name = str(name or "").strip()
+        info_s = ""
+        mode = ""
+        p: Optional[Path] = None
+
+        if name:
+            try:
+                p = extract_builtin_firmware(name, self._builtin_tmp_dir)
+                mode = "bin"
+                info_s = f"Built-in original: {name}"
+            except Exception as e:
+                info_s = f"Built-in missing: {e}"
+
+        self._fw_builtin_name.set(name)
+        self._fw_builtin_path = p
+        self._fw_builtin_mode = mode
+        self._fw_builtin_info = info_s
+        if is_builtin_source(self._fw_source.get()):
+            self._apply_fw_view()
 
     # ---------- Firmware: local ----------
 
@@ -641,9 +745,8 @@ class App(tk.Tk):
         info_s = ""
         if mode == "ota":
             try:
-                info = inspect_ota_tar(path)
-                name = "./" + str(info.fw_member_name).lstrip("./")
-                info_s = f"Local OTA: {name}"
+                inspect_ota_tar(path)
+                info_s = f"Local OTA: {path.name}"
             except Exception as e:
                 info_s = f"Local OTA invalid: {e}"
         elif mode == "bin":
@@ -855,7 +958,7 @@ class App(tk.Tk):
 
     # ---------- Actions ----------
 
-    def _ensure_fw_path(self) -> Optional[Tuple[Path, str]]:
+    def _ensure_fw_path(self) -> Optional[Tuple[Path, str, str]]:
         src = self._fw_source.get().strip()
         if src == "github":
             tag = self._gh_tag.get().strip()
@@ -864,6 +967,9 @@ class App(tk.Tk):
             if (self._fw_gh_tag or "").strip() != tag:
                 return None
             if not self._fw_gh_path or not self._fw_gh_path.is_file():
+                return None
+        elif is_builtin_source(src):
+            if not self._fw_builtin_path or not self._fw_builtin_path.is_file():
                 return None
         else:
             if not self._fw_local_path or not self._fw_local_path.is_file():
@@ -875,7 +981,7 @@ class App(tk.Tk):
             return None
         if mode not in ("ota", "bin"):
             return None
-        return (p, mode)
+        return (p, mode, src)
 
     def _ensure_selected(self) -> Optional[DevRow]:
         if not self._selected_key:
@@ -897,33 +1003,38 @@ class App(tk.Tk):
             messagebox.showerror("No firmware", "Select a firmware first.")
             return
 
-        fw_path, mode = fw
+        fw_path, mode, src = fw
         have_ip = bool((r.ip or "").strip())
 
-        fw_name = ""
+        fw_name = fw_path.name
+        has_www_dir = False
+        needs_preflash = not is_builtin_source(src)
         if mode == "ota":
             try:
                 info = inspect_ota_tar(fw_path)
-                fw_name = "./" + str(info.fw_member_name).lstrip("./")
+                if src == "github":
+                    fw_name = "./" + str(info.fw_member_name).lstrip("./")
+                has_www_dir = bool(info.has_www_dir)
             except Exception as e:
                 messagebox.showerror("Invalid OTA", f"Invalid ota.tar: {e}")
                 return
 
-        if mode == "bin":
-            plan = "RAW flash (bin) -> reboot"
-        else:
-            # OTA mode: always flash firmware first via HGIC, then upload filesystem via HTTP (without fw.bin)
-            plan = "RAW flash fw.bin -> reboot -> wait IP -> OTA via HTTP (no fw.bin)"
+        preflash_name = ""
+        if needs_preflash:
+            try:
+                preflash_name = pick_preflash_firmware_name()
+            except Exception as e:
+                messagebox.showerror("Built-in firmware missing", str(e))
+                return
+
+        confirm_msg = f"Device: {r.mac}\n"
+        if (r.ip or "").strip():
+            confirm_msg += f"IP: {r.ip}\n"
+        confirm_msg += f"\nFirmware: {fw_name or fw_path.name}\n\nProceed?"
 
         if not messagebox.askyesno(
             "Confirm flash",
-            f"Device: {r.mac}\n"
-            f"Type: {r.kind}\n"
-            f"IP: {(r.ip or '(none)')}\n\n"
-            f"Firmware: {fw_name or fw_path.name}\n"
-            f"Mode: {mode}\n\n"
-            f"Plan: {plan}\n\n"
-            f"Proceed?",
+            confirm_msg,
         ):
             return
 
@@ -931,9 +1042,21 @@ class App(tk.Tk):
             return
         self._set_busy(True)
         self._set_progress(0.0, 0, 0, 0.0)
-        threading.Thread(target=self._flash_worker, args=(r, fw_path, mode, have_ip), daemon=True).start()
+        threading.Thread(
+            target=self._flash_worker,
+            args=(r, fw_path, mode, have_ip, needs_preflash, has_www_dir),
+            daemon=True,
+        ).start()
 
-    def _flash_worker(self, r: DevRow, fw_path: Path, mode: str, have_ip: bool) -> None:
+    def _flash_worker(
+        self,
+        r: DevRow,
+        fw_path: Path,
+        mode: str,
+        have_ip: bool,
+        needs_preflash: bool,
+        has_www_dir: bool,
+    ) -> None:
         try:
             with self._pcap_lock:
                 with self._iface_lock(r.iface_id):
@@ -946,12 +1069,29 @@ class App(tk.Tk):
                     def cb_stage(msg: str) -> None:
                         self._q.put(("log", ("[*] " + msg, "stage")))
 
+                    def cb_retry(attempt: int, total: int, err: str) -> None:
+                        self._q.put(("log", (f"[!] flash attempt {attempt}/{total} failed: {err}; retry in 3s", "err")))
+
+                    if needs_preflash:
+                        preflash_name = pick_preflash_firmware_name()
+                        self._q.put(("log", (f'[*] flash original firmware "{preflash_name}"', "stage")))
+                        sess.flash(r.mac, read_builtin_firmware(preflash_name), timeout=0.45, retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
+                        self._q.put(("log", ("[OK] original firmware flashed", "ok")))
+                        self._q.put(("log", ("[*] reboot original firmware", "stage")))
+                        sess.reboot(r.mac, flags=0, count=3, period_sec=0.05)
+                        self._q.put(("log", ("[*] waiting original firmware reboot...", "stage")))
+                        if not self._wait_hgic_ready(r.mac, r.iface_id, overall_timeout_s=15.0):
+                            raise RuntimeError("original firmware did not return as HGIC within 15 seconds")
+                        self._q.put(("log", ("[*] waiting original firmware settle...", "stage")))
+                        time.sleep(5.0)
+                        self._q.put(("log", ("[OK] original firmware is back online", "ok")))
+
                     if mode == "bin":
-                        self._q.put(("log", ("[*] RAW flash (bin)", "stage")))
+                        self._q.put(("log", ("[*] flash rnode-halow firmware", "stage")))
                         tar_p, td = make_minimal_ota_tar_from_bin(fw_path)
                         try:
-                            sess.flash(r.mac, tar_p, timeout=3.0, retries=10, progress_cb=cb_progress)
-                            self._q.put(("log", ("[OK] RAW flash done", "ok")))
+                            sess.flash(r.mac, tar_p, timeout=3.0, retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
+                            self._q.put(("log", ("[OK] rnode-halow firmware flashed", "ok")))
                         finally:
                             try:
                                 td.cleanup()
@@ -964,12 +1104,16 @@ class App(tk.Tk):
                         return
 
                     # mode == "ota"
-                    self._q.put(("log", ("[*] stage1: RAW flash fw.bin (HGIC)", "stage")))
-                    sess.flash(r.mac, fw_path, timeout=0.45, retries=6, progress_cb=cb_progress)
-                    self._q.put(("log", ("[OK] stage1 done", "ok")))
+                    self._q.put(("log", ("[*] flash rnode-halow firmware", "stage")))
+                    sess.flash(r.mac, fw_path, timeout=0.45, retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
+                    self._q.put(("log", ("[OK] rnode-halow firmware flashed", "ok")))
 
                     self._q.put(("log", ("[*] reboot", "stage")))
                     sess.reboot(r.mac, flags=0, count=3, period_sec=0.05)
+
+                    if not has_www_dir:
+                        self._q.put(("log", ("[OK] flash done", "ok")))
+                        return
 
                     self._q.put(("log", ("[*] waiting IP…", "stage")))
                     ip_s = self._wait_ip(sess, r.mac, overall_timeout_s=80.0)
@@ -978,15 +1122,8 @@ class App(tk.Tk):
                         return
                     self._q.put(("devinfo", (r.key(), ip_s, "")))
 
-                    self._q.put(("log", ("[*] stage2: OTA via HTTP (no fw.bin)", "stage")))
-                    tar_p, td = strip_fw_bin_from_tar(fw_path)
-                    try:
-                        sess.flash_fs(r.mac, tar_p, stage_cb=cb_stage, progress_cb=cb_progress)
-                    finally:
-                        try:
-                            td.cleanup()
-                        except Exception:
-                            pass
+                    self._q.put(("log", ("[*] upload filesystem via TFTP", "stage")))
+                    sess.flash_fs(r.mac, fw_path, stage_cb=cb_stage, progress_cb=cb_progress)
                     self._q.put(("log", ("[OK] flash done", "ok")))
 
             self._maybe_poll_ip(self._rows.get(r.key(), r))
@@ -1039,6 +1176,22 @@ class App(tk.Tk):
             time.sleep(0.4)
         return None
 
+    def _wait_hgic_ready(self, mac: str, iface_id: str, *, overall_timeout_s: float = 15.0) -> bool:
+        mac = str(mac or "").lower()
+        t0 = time.time()
+        while time.time() - t0 < overall_timeout_s:
+            try:
+                devs = scan_iface(iface_id, packet_cnt=6, period_sec=0.010, sniff_time=0.35)
+            except Exception:
+                devs = []
+            for d in devs or []:
+                if fmt_mac(d) != mac:
+                    continue
+                if not is_rnode_halow_by_scan(fmt_scan_ver(d)):
+                    return True
+            time.sleep(0.20)
+        return False
+
     def _update_worker(self, r: DevRow, tar_path: Path) -> None:
         try:
             with self._pcap_lock:
@@ -1052,14 +1205,36 @@ class App(tk.Tk):
                     def cb_stage(msg: str) -> None:
                         self._q.put(("log", ("[*] " + msg, "stage")))
 
+                    def cb_retry(attempt: int, total: int, err: str) -> None:
+                        self._q.put(("log", (f"[!] flash attempt {attempt}/{total} failed: {err}; retry in 3s", "err")))
+
+                    info = inspect_ota_tar(tar_path)
+
+                    preflash_name = pick_preflash_firmware_name()
+                    self._q.put(("log", (f'[*] flash original firmware "{preflash_name}"', "stage")))
+                    sess.flash(r.mac, read_builtin_firmware(preflash_name), timeout=0.45, retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
+                    self._q.put(("log", ("[OK] original firmware flashed", "ok")))
+                    self._q.put(("log", ("[*] reboot original firmware", "stage")))
+                    sess.reboot(r.mac, flags=0, count=3, period_sec=0.05)
+                    self._q.put(("log", ("[*] waiting original firmware reboot...", "stage")))
+                    if not self._wait_hgic_ready(r.mac, r.iface_id, overall_timeout_s=15.0):
+                        raise RuntimeError("original firmware did not return as HGIC within 15 seconds")
+                    self._q.put(("log", ("[*] waiting original firmware settle...", "stage")))
+                    time.sleep(5.0)
+                    self._q.put(("log", ("[OK] original firmware is back online", "ok")))
+
                     # Stage 1: always flash firmware first via HGIC (fw.bin from ota.tar)
-                    self._q.put(("log", ("[*] stage1: RAW flash fw.bin (HGIC)", "stage")))
+                    self._q.put(("log", ("[*] flash rnode-halow firmware", "stage")))
                     # slightly lower retries vs old GUI to avoid "unnecessary retries"
-                    sess.flash(r.mac, tar_path, timeout=0.45, retries=6, progress_cb=cb_progress)
-                    self._q.put(("log", ("[OK] stage1 done", "ok")))
+                    sess.flash(r.mac, tar_path, timeout=0.45, retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
+                    self._q.put(("log", ("[OK] rnode-halow firmware flashed", "ok")))
 
                     self._q.put(("log", ("[*] reboot", "stage")))
                     sess.reboot(r.mac, flags=0, count=3, period_sec=0.05)
+
+                    if not info.has_www_dir:
+                        self._q.put(("log", ("[OK] flash done", "ok")))
+                        return
 
                     self._q.put(("log", ("[*] waiting IP…", "stage")))
                     ip_s = self._wait_ip(sess, r.mac, overall_timeout_s=80.0)
@@ -1068,17 +1243,10 @@ class App(tk.Tk):
                         return
                     self._q.put(("devinfo", (r.key(), ip_s, "")))
 
-                    # Stage 2 (HTTP OTA): upload filesystem tar without fw.bin
-                    self._q.put(("log", ("[*] stage2: OTA via HTTP (no fw.bin)", "stage")))
-                    tar_p, td = strip_fw_bin_from_tar(tar_path)
-                    try:
-                        sess.flash_fs(r.mac, tar_p, stage_cb=cb_stage, progress_cb=cb_progress)
-                    finally:
-                        try:
-                            td.cleanup()
-                        except Exception:
-                            pass
-                    self._q.put(("log", ("[OK] update done", "ok")))
+                    # Stage 2 (TFTP): upload filesystem files directly from ota.tar
+                    self._q.put(("log", ("[*] upload filesystem via TFTP", "stage")))
+                    sess.flash_fs(r.mac, tar_path, stage_cb=cb_stage, progress_cb=cb_progress)
+                    self._q.put(("log", ("[OK] flash done", "ok")))
 
             # refresh ip/version (best-effort)
             self._maybe_poll_ip(self._rows.get(r.key(), r))
@@ -1098,15 +1266,18 @@ class App(tk.Tk):
                         pct = (done * 100.0 / total) if total else 0.0
                         self._q.put(("progress", (pct, done, total, speed)))
 
+                    def cb_retry(attempt: int, total: int, err: str) -> None:
+                        self._q.put(("log", (f"[!] flash attempt {attempt}/{total} failed: {err}; retry in 3s", "err")))
+
                     if mode == "ota":
                         self._q.put(("log", ("[*] RAW flash (ota.tar)", "stage")))
-                        sess.flash(r.mac, fw_path, timeout=2.0, retries=3, progress_cb=cb_progress)
+                        sess.flash(r.mac, fw_path, timeout=2.0, retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
                         self._q.put(("log", ("[OK] RAW flash done", "ok")))
                     else:
                         self._q.put(("log", ("[*] RAW flash (bin)", "stage")))
                         tar_p, td = make_minimal_ota_tar_from_bin(fw_path)
                         try:
-                            sess.flash(r.mac, tar_p, timeout=3.0, retries=10, progress_cb=cb_progress)
+                            sess.flash(r.mac, tar_p, timeout=3.0, retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
                             self._q.put(("log", ("[OK] RAW flash done", "ok")))
                         finally:
                             try:
@@ -1234,6 +1405,12 @@ class App(tk.Tk):
         try:
             if hasattr(self, "_gh_tmp") and self._gh_tmp is not None:
                 self._gh_tmp.cleanup()
+        except Exception:
+            pass
+
+        try:
+            if hasattr(self, "_builtin_tmp") and self._builtin_tmp is not None:
+                self._builtin_tmp.cleanup()
         except Exception:
             pass
 

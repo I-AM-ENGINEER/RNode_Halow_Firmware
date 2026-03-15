@@ -24,6 +24,8 @@ if not exist "modules\" (
   exit /b 1
 )
 
+if not exist "embedded_fw\" mkdir "embedded_fw"
+
 rem --- pick python ---
 set "PY=python"
 where py >nul 2>nul
@@ -65,6 +67,7 @@ echo [*] Building EXE...
   --name "%SPEC_NAME%" ^
   --icon rns.ico ^
   --add-data "modules;modules" ^
+  --add-data "embedded_fw;embedded_fw" ^
   --collect-all scapy ^
   "%APP_PY%"
 

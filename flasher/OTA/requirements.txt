@@ -1,3 +1,4 @@
 scapy>=2.5.0
 requests>=2.31.0
 tqdm>=4.66.0
+tftpy>=0.8.6

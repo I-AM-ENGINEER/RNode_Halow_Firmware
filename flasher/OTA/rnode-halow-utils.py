@@ -134,8 +134,15 @@ def _flash_selected(devs, sel_idx, path_str):
         print("canceled")
         return
 
+    def _progress(done, total, speed):
+        pct = (done * 100.0 / total) if total else 0.0
+        print(f"\r[{pct:6.2f}%] {done}/{total} bytes  {speed/1024:.1f} KiB/s", end="", flush=True)
+
+    def _retry(attempt, total, err):
+        print(f"\n[!] flash attempt {attempt}/{total} failed: {err}; retry in 3s", flush=True)
+
     sess = HgicSession(op_iface)
-    sess.flash(mac, p, timeout=0.5, retries=10, progress_cb=_progress)
+    sess.flash(mac, p, timeout=0.5, retries=3, progress_cb=_progress, retry_cb=_retry)
 
     print("\n[+] Done.")
 

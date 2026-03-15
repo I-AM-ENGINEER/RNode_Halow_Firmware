@@ -24,6 +24,8 @@ if [[ ! -d "modules" ]]; then
   exit 1
 fi
 
+mkdir -p embedded_fw
+
 PYTHON_BIN="python3"
 
 # --- create venv (once) ---
@@ -57,6 +59,7 @@ echo "[*] Building..."
   --onefile \
   --name "$SPEC_NAME" \
   --add-data "modules:modules" \
+  --add-data "embedded_fw:embedded_fw" \
   --collect-all scapy \
   "$APP_PY"
 
