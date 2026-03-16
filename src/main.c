@@ -62,6 +62,7 @@ static void halow_rx_handler(struct hgic_rx_info *info,
         return;
     }
     //os_printf("RX: %db\n", len);
+    indication_led_rx();
     statistics_radio_register_rx_package(len);
     int32_t res = tcp_server_send(data, len);
     if(res != 0){
