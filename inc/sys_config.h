@@ -2,7 +2,7 @@
 #define __SYS_CONFIG_H__
 
 #define PROJECT_TYPE           PRO_TYPE_WNB
-#define FW_VERSION              "1.2.0"
+#define FW_VERSION              "1.3.0"
 #define FW_FULL_VERSION         FW_VERSION " (" __DATE__ " " __TIME__ ")"
 
 #define IP_SOF_BROADCAST       1
@@ -35,7 +35,7 @@
 
 #define TDMA_BUFF_SIZE 0
 
-#define SYS_HEAP_SIZE     (256 * 1024)
+#define SYS_HEAP_SIZE     (200 * 1024)
 
 #define WIFI_RX_BUFF_SIZE (40 * 1024) //(17*1024)
 
@@ -101,8 +101,8 @@
 
 #define OTA_FAL_PART_NAME "ota_slot0"
 
-#define CONFIG_PAGE_TASK_PRIO    (3)
-#define CONFIG_PAGE_TASK_STACK   (10*1024)
+#define CONFIG_PAGE_TASK_PRIO    (OS_TASK_PRIORITY_BELOW_NORMAL-5)
+#define CONFIG_PAGE_TASK_STACK   (2*1024)
 
 #define STATISTICS_TASK_PRIO    (2)
 #define STATISTICS_TASK_STACK   (2*1024)
@@ -112,6 +112,7 @@
 
 #define TELEMETRY_WORK_PRIO             (10)
 
+#define TCPIP_THREAD_STACKSIZE      2048
 // #define ANT_CTRL_PIN PB_1 // 网桥用PB1来做双天线选择
 
 #endif
