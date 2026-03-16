@@ -42,7 +42,7 @@ import time
 import webbrowser
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Any, Dict, Optional, Tuple, List, Set
 
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -411,6 +411,14 @@ class DevRow:
 
     def key(self) -> Tuple[str, str]:
         return (self.mac, self.iface_id)
+
+
+@dataclass
+class FlashTargetState:
+    iface_id: str
+    current_mac: str
+    allowed_macs: Set[str] = field(default_factory=set)
+    blacklist_macs: Set[str] = field(default_factory=set)
 
 
 # ----------------------------
@@ -1093,6 +1101,9 @@ class App(tk.Tk):
             with self._pcap_lock:
                 with self._iface_lock(r.iface_id):
                     sess = HgicSession(r.iface_id)
+                    target = self._build_flash_target_state(r)
+                    if target.blacklist_macs:
+                        self._q.put(("log", (f"[*] blacklist active: {', '.join(sorted(target.blacklist_macs))}", "stage")))
 
                     def cb_progress(done: int, total: int, speed: float) -> None:
                         pct = (done * 100.0 / total) if total else 0.0
@@ -1107,12 +1118,12 @@ class App(tk.Tk):
                     if needs_preflash:
                         preflash_name = pick_preflash_firmware_name()
                         self._q.put(("log", (f'[*] flash original firmware "{preflash_name}"', "stage")))
-                        sess.flash(r.mac, read_builtin_firmware(preflash_name), timeout=main_timeout(5.45), retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
+                        sess.flash(target.current_mac, read_builtin_firmware(preflash_name), timeout=main_timeout(5.45), retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
                         self._q.put(("log", ("[OK] original firmware flashed", "ok")))
                         self._q.put(("log", ("[*] reboot original firmware", "stage")))
-                        sess.reboot(r.mac, flags=0, count=3, period_sec=main_timeout(0.05))
+                        sess.reboot(target.current_mac, flags=0, count=3, period_sec=main_timeout(0.05))
                         self._q.put(("log", ("[*] waiting original firmware reboot...", "stage")))
-                        if not self._wait_hgic_ready(r.mac, r.iface_id, overall_timeout_s=main_timeout(15.0)):
+                        if not self._wait_hgic_ready(target, overall_timeout_s=main_timeout(15.0)):
                             raise RuntimeError("original firmware did not return as HGIC within 15 seconds")
                         self._q.put(("log", ("[*] waiting original firmware settle...", "stage")))
                         time.sleep(main_timeout(5.0))
@@ -1122,7 +1133,7 @@ class App(tk.Tk):
                         self._q.put(("log", ("[*] flash rnode-halow firmware", "stage")))
                         tar_p, td = make_minimal_ota_tar_from_bin(fw_path)
                         try:
-                            sess.flash(r.mac, tar_p, timeout=main_timeout(5.0), retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
+                            sess.flash(target.current_mac, tar_p, timeout=main_timeout(5.0), retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
                             self._q.put(("log", ("[OK] rnode-halow firmware flashed", "ok")))
                         finally:
                             try:
@@ -1131,42 +1142,42 @@ class App(tk.Tk):
                                 pass
 
                         self._q.put(("log", ("[*] reboot", "stage")))
-                        sess.reboot(r.mac, flags=0, count=3, period_sec=main_timeout(0.05))
+                        sess.reboot(target.current_mac, flags=0, count=3, period_sec=main_timeout(0.05))
                         self._q.put(("log", ("[OK] reboot sent", "ok")))
                         return
 
                     # mode == "ota"
                     self._q.put(("log", ("[*] flash rnode-halow firmware", "stage")))
-                    sess.flash(r.mac, fw_path, timeout=main_timeout(5.45), retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
+                    sess.flash(target.current_mac, fw_path, timeout=main_timeout(5.45), retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
                     self._q.put(("log", ("[OK] rnode-halow firmware flashed", "ok")))
 
                     self._q.put(("log", ("[*] reboot", "stage")))
-                    sess.reboot(r.mac, flags=0, count=3, period_sec=main_timeout(0.05))
+                    sess.reboot(target.current_mac, flags=0, count=3, period_sec=main_timeout(0.05))
 
                     if not has_www_dir:
                         self._q.put(("log", ("[OK] flash done", "ok")))
                         return
 
                     self._q.put(("log", ("[*] waiting IP…", "stage")))
-                    ip_s = self._wait_ip(sess, r.mac, overall_timeout_s=main_timeout(80.0))
+                    ip_s = self._wait_ip(sess, target, overall_timeout_s=main_timeout(80.0))
                     if not ip_s:
                         self._q.put(("log", ("[ERR] IP not acquired (timeout).", "err")))
                         return
                     self._q.put(("devinfo", (r.key(), ip_s, "")))
 
                     self._q.put(("log", ("[*] format LittleFS", "stage")))
-                    self._format_littlefs(sess, r.mac)
+                    self._format_littlefs(sess, target.current_mac)
                     self._q.put(("log", ("[OK] LittleFS formatted", "ok")))
                     self._q.put(("log", ("[*] reboot after LittleFS format", "stage")))
-                    sess.reboot(r.mac, flags=0, count=3, period_sec=main_timeout(0.05))
+                    sess.reboot(target.current_mac, flags=0, count=3, period_sec=main_timeout(0.05))
                     self._q.put(("log", ("[*] waiting IP after LittleFS format reboot…", "stage")))
-                    ip_s = self._wait_ip(sess, r.mac, overall_timeout_s=main_timeout(80.0))
+                    ip_s = self._wait_ip(sess, target, overall_timeout_s=main_timeout(80.0))
                     if not ip_s:
                         self._q.put(("log", ("[ERR] IP not acquired after LittleFS format reboot (timeout).", "err")))
                         return
                     self._q.put(("devinfo", (r.key(), ip_s, "")))
                     self._q.put(("log", ("[*] upload filesystem via TFTP", "stage")))
-                    sess.flash_fs(r.mac, fw_path, stage_cb=cb_stage, progress_cb=cb_progress)
+                    sess.flash_fs(target.current_mac, fw_path, stage_cb=cb_stage, progress_cb=cb_progress)
                     self._q.put(("log", ("[OK] flash done", "ok")))
 
             self._maybe_poll_ip(self._rows.get(r.key(), r))
@@ -1175,6 +1186,113 @@ class App(tk.Tk):
         finally:
             self._q.put(("progress", (0.0, 0, 0, 0.0)))
             self._q.put(("busy", False))
+
+    def _build_flash_target_state(self, r: DevRow) -> FlashTargetState:
+        current_mac = str(r.mac or "").lower()
+        blacklist_macs: Set[str] = set()
+
+        for row in self._rows.values():
+            row_mac = str(getattr(row, "mac", "") or "").lower()
+            if not row_mac:
+                continue
+            if str(getattr(row, "iface_id", "") or "") != str(r.iface_id or ""):
+                continue
+            if row_mac == current_mac:
+                continue
+            blacklist_macs.add(row_mac)
+
+        return FlashTargetState(
+            iface_id=str(r.iface_id or ""),
+            current_mac=current_mac,
+            allowed_macs={current_mac},
+            blacklist_macs=blacklist_macs,
+        )
+
+    def _scan_live_targets(self, state: FlashTargetState) -> List[Tuple[str, str]]:
+        try:
+            devs = scan_iface(state.iface_id, packet_cnt=6, period_sec=main_timeout(0.010), sniff_time=main_timeout(0.35))
+        except Exception:
+            return []
+
+        out: List[Tuple[str, str]] = []
+        seen: Set[str] = set()
+        for d in devs or []:
+            mac = fmt_mac(d)
+            if not mac or mac in seen or mac in state.blacklist_macs:
+                continue
+            kind = "rnode-halow" if is_rnode_halow_by_scan(fmt_scan_ver(d)) else "hgic"
+            out.append((mac, kind))
+            seen.add(mac)
+        return out
+
+    def _pick_live_target_mac(self, state: FlashTargetState, *, prefer_kind: Optional[str] = None) -> Optional[str]:
+        candidates = self._scan_live_targets(state)
+        if not candidates:
+            return None
+
+        ordered: List[str] = []
+        preferred: List[str] = []
+        fallback: List[str] = []
+
+        for mac, kind in candidates:
+            if prefer_kind is not None and kind == prefer_kind:
+                preferred.append(mac)
+            else:
+                fallback.append(mac)
+
+        ordered.extend(preferred)
+        ordered.extend(fallback)
+
+        picked: Optional[str] = None
+        if state.current_mac in ordered:
+            picked = state.current_mac
+        else:
+            for mac in ordered:
+                if mac in state.allowed_macs:
+                    picked = mac
+                    break
+            if picked is None:
+                picked = ordered[0]
+
+        if picked is None:
+            return None
+
+        old_mac = state.current_mac
+        is_new_mac = picked not in state.allowed_macs
+        state.allowed_macs.add(picked)
+        state.current_mac = picked
+
+        if is_new_mac and old_mac and old_mac != picked:
+            self._q.put(("log", (f"[*] target MAC changed: {old_mac} -> {picked}", "stage")))
+        if len(ordered) > 1 and picked != old_mac:
+            self._q.put(("log", (f"[!] multiple non-blacklisted devices visible; using {picked}", "err")))
+
+        return picked
+
+    def _wait_hgic_ready(self, state: FlashTargetState, *, overall_timeout_s: float = main_timeout(15.0)) -> bool:
+        t0 = time.time()
+        while time.time() - t0 < overall_timeout_s:
+            if self._pick_live_target_mac(state, prefer_kind="hgic"):
+                return True
+            time.sleep(main_timeout(0.20))
+        return False
+
+    def _wait_ip(self, sess: HgicSession, state: FlashTargetState, *, overall_timeout_s: float = main_timeout(60.0)) -> Optional[str]:
+        t0 = time.time()
+        while time.time() - t0 < overall_timeout_s:
+            mac = self._pick_live_target_mac(state, prefer_kind="rnode-halow")
+            if mac is None:
+                mac = state.current_mac
+            try:
+                ans = sess.get_ip(mac, tries=1, timeout=main_timeout(0.5))
+            except Exception:
+                ans = None
+            if ans is not None:
+                ip_s = str(getattr(ans, "ip", "") or "")
+                if ip_s and ip_s != "0.0.0.0":
+                    return ip_s
+            time.sleep(main_timeout(0.4))
+        return None
 
     def _format_littlefs(self, sess: HgicSession, mac: str) -> None:
         dst_mac_s = str(mac or "").lower()
@@ -1233,49 +1351,26 @@ class App(tk.Tk):
             with self._pcap_lock:
                 with self._iface_lock(r.iface_id):
                     sess = HgicSession(r.iface_id)
+                    target = self._build_flash_target_state(r)
+                    if target.blacklist_macs:
+                        self._q.put(("log", (f"[*] blacklist active: {', '.join(sorted(target.blacklist_macs))}", "stage")))
                     self._q.put(("log", ("[*] reboot", "stage")))
-                    sess.reboot(r.mac, flags=0, count=3, period_sec=main_timeout(0.05))
+                    sess.reboot(target.current_mac, flags=0, count=3, period_sec=main_timeout(0.05))
                     self._q.put(("log", ("[OK] reboot sent", "ok")))
         except Exception as e:
             self._q.put(("log", (f"[ERR] reboot failed: {e}", "err")))
         finally:
             self._q.put(("busy", False))
 
-    def _wait_ip(self, sess: HgicSession, mac: str, *, overall_timeout_s: float = main_timeout(60.0)) -> Optional[str]:
-        t0 = time.time()
-        while time.time() - t0 < overall_timeout_s:
-            try:
-                ans = sess.get_ip(mac, tries=1, timeout=main_timeout(0.5))
-            except Exception:
-                ans = None
-            if ans is not None:
-                ip_s = str(getattr(ans, "ip", "") or "")
-                if ip_s and ip_s != "0.0.0.0":
-                    return ip_s
-            time.sleep(main_timeout(0.4))
-        return None
-
-    def _wait_hgic_ready(self, mac: str, iface_id: str, *, overall_timeout_s: float = main_timeout(15.0)) -> bool:
-        mac = str(mac or "").lower()
-        t0 = time.time()
-        while time.time() - t0 < overall_timeout_s:
-            try:
-                devs = scan_iface(iface_id, packet_cnt=6, period_sec=main_timeout(0.010), sniff_time=main_timeout(0.35))
-            except Exception:
-                devs = []
-            for d in devs or []:
-                if fmt_mac(d) != mac:
-                    continue
-                if not is_rnode_halow_by_scan(fmt_scan_ver(d)):
-                    return True
-            time.sleep(main_timeout(0.20))
-        return False
 
     def _update_worker(self, r: DevRow, tar_path: Path) -> None:
         try:
             with self._pcap_lock:
                 with self._iface_lock(r.iface_id):
                     sess = HgicSession(r.iface_id)
+                    target = self._build_flash_target_state(r)
+                    if target.blacklist_macs:
+                        self._q.put(("log", (f"[*] blacklist active: {', '.join(sorted(target.blacklist_macs))}", "stage")))
 
                     def cb_progress(done: int, total: int, speed: float) -> None:
                         pct = (done * 100.0 / total) if total else 0.0
@@ -1291,12 +1386,12 @@ class App(tk.Tk):
 
                     preflash_name = pick_preflash_firmware_name()
                     self._q.put(("log", (f'[*] flash original firmware "{preflash_name}"', "stage")))
-                    sess.flash(r.mac, read_builtin_firmware(preflash_name), timeout=main_timeout(5.45), retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
+                    sess.flash(target.current_mac, read_builtin_firmware(preflash_name), timeout=main_timeout(5.45), retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
                     self._q.put(("log", ("[OK] original firmware flashed", "ok")))
                     self._q.put(("log", ("[*] reboot original firmware", "stage")))
-                    sess.reboot(r.mac, flags=0, count=3, period_sec=main_timeout(0.05))
+                    sess.reboot(target.current_mac, flags=0, count=3, period_sec=main_timeout(0.05))
                     self._q.put(("log", ("[*] waiting original firmware reboot...", "stage")))
-                    if not self._wait_hgic_ready(r.mac, r.iface_id, overall_timeout_s=main_timeout(15.0)):
+                    if not self._wait_hgic_ready(target, overall_timeout_s=main_timeout(15.0)):
                         raise RuntimeError("original firmware did not return as HGIC within 15 seconds")
                     self._q.put(("log", ("[*] waiting original firmware settle...", "stage")))
                     time.sleep(main_timeout(5.0))
@@ -1305,18 +1400,18 @@ class App(tk.Tk):
                     # Stage 1: always flash firmware first via HGIC (fw.bin from ota.tar)
                     self._q.put(("log", ("[*] flash rnode-halow firmware", "stage")))
                     # slightly lower retries vs old GUI to avoid "unnecessary retries"
-                    sess.flash(r.mac, tar_path, timeout=main_timeout(5.45), retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
+                    sess.flash(target.current_mac, tar_path, timeout=main_timeout(5.45), retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
                     self._q.put(("log", ("[OK] rnode-halow firmware flashed", "ok")))
 
                     self._q.put(("log", ("[*] reboot", "stage")))
-                    sess.reboot(r.mac, flags=0, count=3, period_sec=main_timeout(0.05))
+                    sess.reboot(target.current_mac, flags=0, count=3, period_sec=main_timeout(0.05))
 
                     if not info.has_www_dir:
                         self._q.put(("log", ("[OK] flash done", "ok")))
                         return
 
                     self._q.put(("log", ("[*] waiting IP…", "stage")))
-                    ip_s = self._wait_ip(sess, r.mac, overall_timeout_s=main_timeout(80.0))
+                    ip_s = self._wait_ip(sess, target, overall_timeout_s=main_timeout(80.0))
                     if not ip_s:
                         self._q.put(("log", ("[ERR] IP not acquired (timeout).", "err")))
                         return
@@ -1324,18 +1419,18 @@ class App(tk.Tk):
 
                     # Stage 2 (TFTP): upload filesystem files directly from ota.tar
                     self._q.put(("log", ("[*] format LittleFS", "stage")))
-                    self._format_littlefs(sess, r.mac)
+                    self._format_littlefs(sess, target.current_mac)
                     self._q.put(("log", ("[OK] LittleFS formatted", "ok")))
                     self._q.put(("log", ("[*] reboot after LittleFS format", "stage")))
-                    sess.reboot(r.mac, flags=0, count=3, period_sec=main_timeout(0.05))
+                    sess.reboot(target.current_mac, flags=0, count=3, period_sec=main_timeout(0.05))
                     self._q.put(("log", ("[*] waiting IP after LittleFS format reboot…", "stage")))
-                    ip_s = self._wait_ip(sess, r.mac, overall_timeout_s=main_timeout(80.0))
+                    ip_s = self._wait_ip(sess, target, overall_timeout_s=main_timeout(80.0))
                     if not ip_s:
                         self._q.put(("log", ("[ERR] IP not acquired after LittleFS format reboot (timeout).", "err")))
                         return
                     self._q.put(("devinfo", (r.key(), ip_s, "")))
                     self._q.put(("log", ("[*] upload filesystem via TFTP", "stage")))
-                    sess.flash_fs(r.mac, tar_path, stage_cb=cb_stage, progress_cb=cb_progress)
+                    sess.flash_fs(target.current_mac, tar_path, stage_cb=cb_stage, progress_cb=cb_progress)
                     self._q.put(("log", ("[OK] flash done", "ok")))
 
             # refresh ip/version (best-effort)
@@ -1351,6 +1446,9 @@ class App(tk.Tk):
             with self._pcap_lock:
                 with self._iface_lock(r.iface_id):
                     sess = HgicSession(r.iface_id)
+                    target = self._build_flash_target_state(r)
+                    if target.blacklist_macs:
+                        self._q.put(("log", (f"[*] blacklist active: {', '.join(sorted(target.blacklist_macs))}", "stage")))
 
                     def cb_progress(done: int, total: int, speed: float) -> None:
                         pct = (done * 100.0 / total) if total else 0.0
@@ -1361,13 +1459,13 @@ class App(tk.Tk):
 
                     if mode == "ota":
                         self._q.put(("log", ("[*] RAW flash (ota.tar)", "stage")))
-                        sess.flash(r.mac, fw_path, timeout=main_timeout(5.0), retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
+                        sess.flash(target.current_mac, fw_path, timeout=main_timeout(5.0), retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
                         self._q.put(("log", ("[OK] RAW flash done", "ok")))
                     else:
                         self._q.put(("log", ("[*] RAW flash (bin)", "stage")))
                         tar_p, td = make_minimal_ota_tar_from_bin(fw_path)
                         try:
-                            sess.flash(r.mac, tar_p, timeout=main_timeout(5.0), retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
+                            sess.flash(target.current_mac, tar_p, timeout=main_timeout(5.0), retries=5, progress_cb=cb_progress, retry_cb=cb_retry)
                             self._q.put(("log", ("[OK] RAW flash done", "ok")))
                         finally:
                             try:
@@ -1377,7 +1475,7 @@ class App(tk.Tk):
 
 
                     self._q.put(("log", ("[*] reboot", "stage")))
-                    sess.reboot(r.mac, flags=0, count=3, period_sec=main_timeout(0.05))
+                    sess.reboot(target.current_mac, flags=0, count=3, period_sec=main_timeout(0.05))
                     self._q.put(("log", ("[OK] reboot sent", "ok")))
         except Exception as e:
             self._q.put(("log", (f"[ERR] RAW flash failed: {e}", "err")))
