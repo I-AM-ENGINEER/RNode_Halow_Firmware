@@ -259,3 +259,62 @@ fieldset:disabled select,
 fieldset:disabled textarea {
     cursor: not-allowed;
 }
+
+
+.throughput-card {
+    margin-top: 1rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid #e5e7eb;
+}
+
+.throughput-card h4 {
+    margin: 0 0 0.6rem;
+    font-size: 0.98rem;
+    color: #444;
+}
+
+.throughput-table-wrap {
+    overflow-x: auto;
+}
+
+.throughput-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.82rem;
+    background: #fafafa;
+    border: 1px solid #e5e7eb;
+    border-radius: 4px;
+    overflow: hidden;
+}
+
+.throughput-table th,
+.throughput-table td {
+    padding: 0.38rem 0.45rem;
+    text-align: center;
+    border-bottom: 1px solid #ececec;
+    white-space: nowrap;
+}
+
+.throughput-table thead th {
+    background: #f3f4f6;
+    font-weight: 600;
+    color: #444;
+}
+
+.throughput-table tbody th {
+    background: #f9fafb;
+    font-weight: 600;
+    color: #444;
+}
+
+.throughput-table tbody tr:last-child th,
+.throughput-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.throughput-note {
+    margin: 0.65rem 0 0;
+    font-size: 0.82rem;
+    color: #666;
+    line-height: 1.45;
+}

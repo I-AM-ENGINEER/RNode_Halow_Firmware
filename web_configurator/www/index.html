@@ -8,10 +8,10 @@
 </head>
 <body>
     <nav class="tabs">
-        <button data-tab="dashboard" class="active">Dashboard</button>
-        <button data-tab="settings">Device Settings</button>
-        <button data-tab="telemetry">Telemetry</button>
-        <button data-tab="firmware">Firmware Update</button>
+        <button type="button" data-tab="dashboard" class="active">Dashboard</button>
+        <button type="button" data-tab="settings">Device Settings</button>
+        <button type="button" data-tab="telemetry">Telemetry</button>
+        <button type="button" data-tab="firmware">Firmware Update</button>
     </nav>
 
     <main>
@@ -33,7 +33,7 @@
             </table>
 
             <div class="panel-actions">
-                <button id="stat_reset_btn">Reset statistics</button>
+                <button type="button" id="stat_reset_btn">Reset statistics</button>
             </div>
 
             <h2>Device Statistics</h2>
@@ -88,8 +88,82 @@
                     <input type="checkbox" id="halow_super_power">
                 </label>
                 <div class="panel-actions">
-                    <button id="save_halow" disabled>Save</button>
+                    <button type="button" id="save_halow" disabled>Save</button>
                 </div>
+
+                <div class="throughput-card">
+                    <h4>TX Throughput (Mbps)</h4>
+                    <div class="throughput-table-wrap">
+                        <table class="throughput-table">
+                            <thead>
+                                <tr>
+                                    <th>Channel Width</th>
+                                    <th>MCS0</th>
+                                    <th>MCS1</th>
+                                    <th>MCS2</th>
+                                    <th>MCS3</th>
+                                    <th>MCS4</th>
+                                    <th>MCS5</th>
+                                    <th>MCS6</th>
+                                    <th>MCS7</th>
+                                    <th>MCS10</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr>
+                                    <th>1 MHz</th>
+                                    <td>0.5</td>
+                                    <td>0.5</td>
+                                    <td>0.7</td>
+                                    <td>0.9</td>
+                                    <td>1.3</td>
+                                    <td>1.6</td>
+                                    <td>1.7</td>
+                                    <td>1.8</td>
+                                    <td>N/A</td>
+                                </tr>
+                                <tr>
+                                    <th>2 MHz</th>
+                                    <td>0.6</td>
+                                    <td>1.0</td>
+                                    <td>1.5</td>
+                                    <td>1.7</td>
+                                    <td>2.3</td>
+                                    <td>2.7</td>
+                                    <td>2.9</td>
+                                    <td>2.9</td>
+                                    <td>—</td>
+                                </tr>
+                                <tr>
+                                    <th>4 MHz</th>
+                                    <td>1.1</td>
+                                    <td>1.8</td>
+                                    <td>2.4</td>
+                                    <td>2.8</td>
+                                    <td>3.4</td>
+                                    <td>3.9</td>
+                                    <td>4.0</td>
+                                    <td>4.0</td>
+                                    <td>—</td>
+                                </tr>
+                                <tr>
+                                    <th>8 MHz</th>
+                                    <td>1.9</td>
+                                    <td>2.9</td>
+                                    <td>3.4</td>
+                                    <td>4.0</td>
+                                    <td>4.1</td>
+                                    <td>4.6</td>
+                                    <td>4.7</td>
+                                    <td>4.8</td>
+                                    <td>—</td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="throughput-note">Devices using different MCS values can still see each other and communicate. MCS affects throughput and radio robustness, not interoperability.</p>
+                </div>
+
             </div>
 
             <div class="panel">
@@ -106,7 +180,7 @@
                     </label>
                 </fieldset>
                 <div class="panel-actions">
-                    <button id="save_lbt" disabled>Save</button>
+                    <button type="button" id="save_lbt" disabled>Save</button>
                 </div>
             </div>
 
@@ -131,7 +205,7 @@
                     </label>
                 </fieldset>
                 <div class="panel-actions">
-                    <button id="save_net" disabled>Save</button>
+                    <button type="button" id="save_net" disabled>Save</button>
                 </div>
             </div>
 
@@ -157,7 +231,7 @@
                 </label>
                 <p class="note">This TCP socket forwards outgoing data to the radio interface and delivers incoming radio data back to the socket.</p>
                 <div class="panel-actions">
-                    <button id="save_tcp" disabled>Save</button>
+                    <button type="button" id="save_tcp" disabled>Save</button>
                 </div>
             </div>
         </section>
@@ -246,8 +320,8 @@
                 <div id="telemetry_status" class="status-message" aria-live="polite"></div>
 
                 <div class="panel-actions panel-actions-wrap">
-                    <button id="save_telemetry" disabled>Save</button>
-                    <button id="telemetry_send_btn" class="secondary">Send now</button>
+                    <button type="button" id="save_telemetry" disabled>Save</button>
+                    <button type="button" id="telemetry_send_btn" class="secondary">Send now</button>
                 </div>
             </div>
         </section>
@@ -273,9 +347,9 @@
                 <div id="fw_console" class="fw-console"></div>
 
                 <div class="panel-actions panel-actions-wrap">
-                    <button id="fw_flash" disabled>Flash</button>
-                    <button id="fw_reboot" class="secondary">Reboot device</button>
-                    <button id="fw_factory_reset" class="danger">Factory reset</button>
+                    <button type="button" id="fw_flash" disabled>Flash</button>
+                    <button type="button" id="fw_reboot" class="secondary">Reboot device</button>
+                    <button type="button" id="fw_factory_reset" class="danger">Factory reset</button>
                 </div>
                 <div id="fw_action_status" class="status-message" aria-live="polite"></div>
             </div>
