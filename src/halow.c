@@ -64,7 +64,7 @@
 
 /* Debug */
 #define HALOW_DBG_LEVEL         0
-#define TX_BUFFER_SIZE          (4*1024)
+#define TX_BUFFER_SIZE          (8*1024)
 
 //#define HALOW_DEBUG
 #ifdef HALOW_DEBUG
@@ -214,6 +214,14 @@ void halow_config_load(halow_config_t *cfg){
     configdb_get_i16(HALOW_CONFIG_CENTRAL_FREQ_NAME, (int16_t*)&cfg->central_freq);
 }
 
+void halow_config_set_mcs(uint8_t mcs){
+	lmac_set_fix_tx_rate(g_ops, mcs);
+    lmac_set_tx_mcs(g_ops, mcs);
+    lmac_set_fallback_mcs(g_ops, mcs);
+    lmac_set_mcast_txmcs(g_ops, mcs);
+    halow_debug("GET MCS: %d", lmac_get_tx_mcs(g_ops));
+}
+
 void halow_config_apply(const halow_config_t *cfg){
     halow_config_t halow_cfg;
     if (cfg == NULL) { 
@@ -229,11 +237,7 @@ void halow_config_apply(const halow_config_t *cfg){
     lmac_set_bss_bw(g_ops, halow_cfg.bandwidth);
 
     /* ---- PHY rate control ---- */
-    int32_t mcs_val = get_mcs_val(halow_cfg.mcs);
-    lmac_set_tx_mcs(g_ops, mcs_val);
-    lmac_set_fix_tx_rate(g_ops, mcs_val);
-    lmac_set_fallback_mcs(g_ops, mcs_val);
-    lmac_set_mcast_txmcs(g_ops, mcs_val);
+    halow_config_set_mcs(halow_cfg.mcs);
 	
     /* ---- power ---- */
     lmac_set_txpower(g_ops, halow_cfg.rf_power);
@@ -255,11 +259,7 @@ static void halow_modem_set_default(void){
     lmac_set_bss_bw(g_ops, HALOW_CONFIG_BANDWIDTH_DEF);
 
     /* ---- PHY rate control ---- */
-    int32_t mcs_val = get_mcs_val(HALOW_CONFIG_MCS_DEF);
-    lmac_set_tx_mcs(g_ops, mcs_val);
-    lmac_set_fix_tx_rate(g_ops, mcs_val);
-    lmac_set_fallback_mcs(g_ops, mcs_val);
-    lmac_set_mcast_txmcs(g_ops, mcs_val);
+    halow_config_set_mcs(HALOW_CONFIG_MCS_DEF);
 	
     /* ---- power ---- */
     lmac_set_txpower(g_ops, HALOW_CONFIG_POWER_DEF);
@@ -405,6 +405,7 @@ int32_t halow_tx(const uint8_t *data, uint32_t len) {
     halow_lbt_wait_tx_allowed();
     halow_get_tx_vacanted_bytes(skb->len);
     int32_t res = lmac_tx(g_ops, skb);
+	lmac_kick_tx_task();
     halow_lbt_set_tx_as_active();
     return res;
 }

@@ -58,12 +58,31 @@ static void halow_rx_handler(struct hgic_rx_info *info,
                              int32 len) {
     (void)info;
 
-    if (!data || len <= 0) {
+    if (data == NULL || len <= 0) {
         return;
     }
     //os_printf("RX: %db\n", len);
     statistics_radio_register_rx_package(len);
-    tcp_server_send(data, len);
+    int32_t res = tcp_server_send(data, len);
+    if(res != 0){
+        os_printf("rf->tcp send error: %d\n", res);
+    }
+}
+
+int32_t tcp_to_halow_send(const uint8_t* data, uint32_t len){
+    if(data == NULL){
+        return -100;
+    }
+    if(len == 0){
+        return -200;
+    }
+    int32_t res = halow_tx(data, len);
+    if(res != 0){
+        os_printf("tcp->rf send error: %d\n", res);
+        return res;
+    }
+    statistics_radio_register_tx_package(len);  
+    return 0;
 }
 
 __init static void sys_network_init(void) {
@@ -95,14 +114,6 @@ __init static void sys_network_init(void) {
     }
 }
 
-static int32 sys_blink_loop(struct os_work *work) {
-    static bool active = 0;
-    active = !active;
-    indication_led_main_set(active);
-    os_run_work_delay(&main_wk, active ? 20 : 4980);
-    return 0;
-}
-
 sysevt_hdl_res sys_event_hdl(uint32 event_id, uint32 data, uint32 priv) {
     struct netif *nif;
     ip4_addr_t ip;
@@ -119,26 +130,6 @@ sysevt_hdl_res sys_event_hdl(uint32 event_id, uint32 data, uint32 priv) {
             break;
     }
     return SYSEVT_CONTINUE;
-}
-
-int32_t tcp_to_halow_send(const uint8_t* data, uint32_t len){
-    if(data == NULL){
-        return -100;
-    }
-    if(len == 0){
-        return -200;
-    }
-    int32_t res = halow_tx(data, len);
-    if(res != 0){
-        return res;
-    }
-    statistics_radio_register_tx_package(len);  
-    return 0;
-}
-
-void assert_printf(char *msg, int line, char *file){
-    os_printf("assert %s: %d, %s", msg, line, file);
-    for (;;) {}
 }
 
 static uint32_t firmware_build_hash( void ){
@@ -165,6 +156,14 @@ static void boot_counter_update(void){
     printf("Boot counter = %d\n", pwr_on_cnt);
 }
 
+static int32 sys_blink_work(struct os_work *work) {
+    static bool active = 0;
+    active = !active;
+    indication_led_main_set(active);
+    os_run_work_delay(&main_wk, active ? 20 : 4980);
+    return 0;
+}
+
 __init int main(void) {
     extern uint32 __sinit, __einit;
     mcu_watchdog_timeout(5);
@@ -173,7 +172,6 @@ __init int main(void) {
     fal_init();
     //ota_reset_to_default();
     configdb_init();
-    firmware_check_updated_and_reset();
     littlefs_init();
     boot_counter_update();
     sys_event_init(32);
@@ -190,7 +188,7 @@ __init int main(void) {
     statistics_init();
     tcp_server_init(tcp_to_halow_send);
     telemetry_init();
-    OS_WORK_INIT(&main_wk, sys_blink_loop,0);
+    OS_WORK_INIT(&main_wk, sys_blink_work,0);
     os_run_work_delay(&main_wk, 1000);
     sysheap_collect_init(&sram_heap, (uint32)&__sinit, (uint32)&__einit); // delete init code from heap
     return 0;
