@@ -22,6 +22,7 @@
 #include "statistics.h"
 #include "telemetry.h"
 #include "hal/spi_nor.h"
+#include "ota.h"
 
 /* -------------------------------------------------------------------------- */
 /* Change version                                                             */
@@ -832,6 +833,12 @@ fail:
 }
 
 int32_t web_api_reboot_post( const cJSON *in, cJSON *out ){
+    device_reboot();
+    return 0;
+}
+
+int32_t web_api_default_reset( const cJSON *in, cJSON *out ){
+    ota_reset_to_default();
     device_reboot();
     return 0;
 }
