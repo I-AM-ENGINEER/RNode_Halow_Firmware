@@ -14,28 +14,34 @@
 //#define TCPIP_MBOX_SIZE              32
 //#define DEFAULT_TCP_RECVMBOX_SIZE    32
 //#define DEFAULT_ACCEPTMBOX_SIZE      8
-//#define MEMP_NUM_TCP_PCB         16
-//#define MEMP_NUM_TCP_PCB_LISTEN  16
+#define TCP_WND                     (TCP_MSS*8)
+#define MEMP_NUM_TCP_PCB            8
+#define MEMP_NUM_TCP_PCB_LISTEN     8
+#define PBUF_POOL_SIZE              32
 //#define DEFAULT_RAW_RECVMBOX_SIZE 8
 //#define MEMP_NUM_NETBUF 8
+#define TCP_LISTEN_BACKLOG 1
 #define LWIP_SO_RCVTIMEO 1
+#define LWIP_SO_SNDTIMEO 1
 #define MQTT_OUTPUT_RINGBUF_SIZE 1024
-//#define LWIP_DEBUG                  1
-//#define MEM_SIZE (8*1024)
-//#define PBUF_POOL_SIZE  16
-//#define LWIP_DBG_MIN_LEVEL          LWIP_DBG_LEVEL_ALL
-//#define LWIP_DBG_TYPES_ON           LWIP_DBG_ON
 
-// #define TCP_MSS                 (HALOW_MTU)
+// LWIP debug
+// #define LWIP_DEBUG                  1
+// #define LWIP_DBG_MIN_LEVEL          LWIP_DBG_LEVEL_ALL
+// #define LWIP_DBG_TYPES_ON           LWIP_DBG_ON
 
-// #define TCP_SND_BUF             (2*TCP_MSS) 
-// #define TCP_SNDLOWAT            (TCP_MSS)
-// #define TCP_SNDQUEUELOWAT       2
-// #define TCP_SND_QUEUELEN        4
+// #define TCP_INPUT_DEBUG      LWIP_DBG_ON
+// #define TCP_OUTPUT_DEBUG     LWIP_DBG_ON
+// #define TCP_RST_DEBUG        LWIP_DBG_ON
+// #define TCP_RTO_DEBUG        LWIP_DBG_ON
+// #define API_LIB_DEBUG        LWIP_DBG_ON
+// #define API_MSG_DEBUG        LWIP_DBG_ON
+// #define TCP_WND_DEBUG        LWIP_DBG_ON
+// #define TCP_QLEN_DEBUG       LWIP_DBG_ON
 
 #define TDMA_BUFF_SIZE 0
 
-#define SYS_HEAP_SIZE     (200 * 1024)
+#define SYS_HEAP_SIZE     (128 * 1024)
 
 #define WIFI_RX_BUFF_SIZE (40 * 1024) //(17*1024)
 
@@ -47,7 +53,7 @@
 #define SKB_POOL_ADDR     (WIFI_RX_BUFF_ADDR + WIFI_RX_BUFF_SIZE)
 #define SKB_POOL_SIZE     (SRAM_POOL_START + SRAM_POOL_SIZE - SKB_POOL_ADDR)
 
-#define DEFAULT_SYS_CLK   192000000UL // options: 32M/48M/72M/144M, and 16*N from 64M to 128M
+#define DEFAULT_SYS_CLK   64000000UL // options: 32M/48M/72M/144M, and 16*N from 64M to 128M
 
 #define GMAC_ENABLE       1
 
@@ -101,7 +107,7 @@
 #define CONFIG_PAGE_TASK_PRIO                   (OS_TASK_PRIORITY_ABOVE_NORMAL)
 #define CONFIG_PAGE_TASK_STACK                  (2*1024)
 
-#define TCP_SERVER_TASK_PRIO                    (OS_TASK_PRIORITY_NORMAL)
+#define TCP_SERVER_TASK_PRIO                    (OS_TASK_PRIORITY_ABOVE_NORMAL + 2)
 #define TCP_SERVER_TASK_STACK                   (2*1024)
 
 #define STATISTICS_TASK_PRIO                    (OS_TASK_PRIORITY_LOW)
@@ -112,7 +118,8 @@
 
 #define TELEMETRY_WORK_PRIO                     (OS_TASK_PRIORITY_BELOW_NORMAL)
 
-#define TCPIP_THREAD_STACKSIZE      2048
+#define TCPIP_THREAD_PRIO                       (OS_TASK_PRIORITY_ABOVE_NORMAL + 5)
+#define TCPIP_THREAD_STACKSIZE                  (2*1024)
 // #define ANT_CTRL_PIN PB_1 // 网桥用PB1来做双天线选择
 
 #endif
