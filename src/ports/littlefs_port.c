@@ -22,6 +22,7 @@
 #include "lib/littlefs/lfs.h"
 #include <lib/fal/fal.h>
 #include "littelfs_port.h"
+#include "osal/mutex.h"
 
 #include "hal/spi_nor.h"
 
@@ -52,6 +53,7 @@ extern struct spi_nor_flash flash0;
 #endif
 
 lfs_t g_lfs;
+static struct os_mutex g_lfs_mutex;
 static struct lfs_config g_lfs_cfg;
 static const struct fal_partition *g_part;
 
@@ -140,8 +142,32 @@ static int lfs_bd_sync (const struct lfs_config *c){
     return 0;
 }
 
+static int lfs_lock_cb( const struct lfs_config *c ){
+    (void)c;
+
+    if (os_mutex_lock(&g_lfs_mutex, OS_MUTEX_WAIT_FOREVER) != 0) {
+        return LFS_ERR_IO;
+    }
+
+    return 0;
+}
+
+static int lfs_unlock_cb( const struct lfs_config *c ){
+    (void)c;
+
+    if (os_mutex_unlock(&g_lfs_mutex) != 0) {
+        return LFS_ERR_IO;
+    }
+
+    return 0;
+}
+
 static void lfs_cfg_setup (void){
     memset(&g_lfs_cfg, 0, sizeof(g_lfs_cfg));
+    os_mutex_init(&g_lfs_mutex);
+    
+    g_lfs_cfg.lock           = lfs_lock_cb;
+    g_lfs_cfg.unlock         = lfs_unlock_cb;
 
     g_lfs_cfg.read  = lfs_bd_read;
     g_lfs_cfg.prog  = lfs_bd_prog;

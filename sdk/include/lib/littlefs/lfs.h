@@ -8,6 +8,8 @@
 #ifndef LFS_H
 #define LFS_H
 
+#define LFS_THREADSAFE
+
 #include "lfs_util.h"
 
 #ifdef __cplusplus
