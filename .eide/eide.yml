@@ -97,22 +97,22 @@ targets:
           afterBuildTasks:
             - name: Create bin
               abortAfterFailed: false
-              command: ${workspaceFolder}/pack/csky-elfabiv2-objcopy.exe -O binary ${OutDir}/${ProjectName}.elf ${OutDir}/${ProjectName}.bin
+              command: ${ToolchainRoot}/bin/${CompilerPrefix}objcopy -O binary ${OutDir}/${ProjectName}.elf ${OutDir}/${ProjectName}.bin
               disable: false
             - name: Compress bin
               abortAfterFailed: false
-              command: python ${workspaceFolder}/pack/prepare_firmware.py ${OutDir}/${ProjectName}.bin -o ${workspaceFolder}/out/fw.bin
+              command: python pack/prepare_firmware.py ${OutDir}/${ProjectName}.bin -o out/fw.bin
               disable: false
             - name: Create OTA
               abortAfterFailed: false
-              command: python ${workspaceFolder}/pack/build_OTA.py ${workspaceFolder}/out ${workspaceFolder}/out/fw.bin
+              command: python pack/build_OTA.py out out/fw.bin
               disable: false
           asm-compiler:
             ASM_FLAGS: -mcpu=ck803 -g -pipe -D__NO_BOARD_INIT -DTXW4002ACK803
           beforeBuildTasks:
             - name: mkdir out
               abortAfterFailed: false
-              command: rm -rf "${workspaceFolder}/out" && mkdir "${workspaceFolder}/out"
+              command: rm -rf "out" && mkdir "out"
               disable: false
               stopBuildAfterFailed: true
           c/cpp-compiler:
