@@ -47,7 +47,8 @@
 #endif
 // #include "atcmd.c"
 
-static struct os_work main_wk;
+static struct os_work blink_wk;
+static struct os_work stats_wk;
 extern uint32_t srampool_start;
 extern uint32_t srampool_end;
 
@@ -66,7 +67,7 @@ static void halow_rx_handler(struct hgic_rx_info *info,
     statistics_radio_register_rx_package(len);
     int32_t res = tcp_server_send(data, len);
     if(res != 0){
-        os_printf("rf->tcp send error: %d\n", res);
+        //os_printf("rf->tcp send error: %d\n", res);
     }
 }
 
@@ -79,7 +80,7 @@ int32_t tcp_to_halow_send(const uint8_t* data, uint32_t len){
     }
     int32_t res = halow_tx(data, len);
     if(res != 0){
-        os_printf("tcp->rf send error: %d\n", res);
+        //os_printf("tcp->rf send error: %d\n", res);
         return res;
     }
     statistics_radio_register_tx_package(len);  
@@ -161,7 +162,23 @@ static int32 sys_blink_work(struct os_work *work) {
     static bool active = 0;
     active = !active;
     indication_led_main_set(active);
-    os_run_work_delay(&main_wk, active ? 20 : 4980);
+    os_run_work_delay(work, active ? 20 : 4980);
+    return 0;
+}
+
+static int32 sys_stats_work(struct os_work *work) {
+    const uint32_t buckets = 32;
+    struct os_task_info tsk_info_buff[32];
+    
+    uint32_t status[buckets];
+    sysheap_status(&sram_heap, status, buckets, 16);
+    
+    char tmp_str[32];
+    statistics_cpu_load_get(tmp_str, sizeof(tmp_str));
+    os_printf("CPU LOAD: %s\n", tmp_str);
+    statistics_heap_usage_get(tmp_str, sizeof(tmp_str));
+    os_printf("HEAP: %s\n", tmp_str);
+    os_run_work_delay(work, 2000);
     return 0;
 }
 
@@ -223,8 +240,15 @@ __init int main(void) {
     statistics_init();
     tcp_server_init(tcp_to_halow_send);
     telemetry_init();
-    OS_WORK_INIT(&main_wk, sys_blink_work,0);
-    os_run_work_delay(&main_wk, 1000);
+    OS_WORK_INIT(&blink_wk, sys_blink_work,0);
+    OS_WORK_INIT(&stats_wk, sys_stats_work,0);
+    os_run_work_delay(&blink_wk, 1000);
+    //os_run_work_delay(&stats_wk, 1000);
     sysheap_collect_init(&sram_heap, (uint32)&__sinit, (uint32)&__einit); // delete init code from heap
     return 0;
+}
+
+void assert_printf( char *msg, int line, char *file ){
+    os_printf("ASSERT: %s line=%d file=%s\n", msg, line, file);
+    while (1){}
 }
