@@ -64,7 +64,7 @@
 
 /* Debug */
 #define HALOW_DBG_LEVEL         0
-#define TX_BUFFER_SIZE          (8*1024)
+#define TX_BUFFER_SIZE          (1460*2)
 
 //#define HALOW_DEBUG
 #ifdef HALOW_DEBUG
