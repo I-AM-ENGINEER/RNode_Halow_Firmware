@@ -1345,7 +1345,13 @@ elf: $(objs) Makefile
 bin: elf Makefile
 postbuild: bin
 	@printf "$(COLOR_INF)postbuild ...$(COLOR_END)\n"
+<<<<<<< HEAD
 	$(COMPILER_DIR)/bin/csky-elfabiv2-objcopy -O binary build/Debug/TXW8301-PHY.elf build/Debug/TXW8301-PHY.bin
 	python pack/prepare_firmware.py build/Debug/TXW8301-PHY.bin -o out/fw.bin
 	python pack/build_OTA.py out out/fw.bin
+=======
+	csky-elfabiv2-objcopy -O binary build/Debug/TXW8301-PHY.elf build/Debug/TXW8301-PHY.bin
+	python3 pack/prepare_firmware.py build/Debug/TXW8301-PHY.bin -o out/fw.bin
+	python3 pack/build_OTA.py out out/fw.bin
+>>>>>>> 41443309595d2a26f48a4e41ac7f0f2f78b88ea0
 

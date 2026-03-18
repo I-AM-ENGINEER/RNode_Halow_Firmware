@@ -40,13 +40,8 @@ VPIP="$VENV_DIR/bin/pip"
 echo "[*] Upgrading pip/setuptools/wheel..."
 "$VPY" -m pip install --upgrade pip setuptools wheel
 
-if [[ -f "requirements.txt" ]]; then
-  echo "[*] Installing requirements.txt..."
-  "$VPIP" install -r requirements.txt
-fi
-
-echo "[*] Installing build deps (pyinstaller)..."
-"$VPIP" install --upgrade pyinstaller
+echo "[*] Installing build deps..."
+"$VPIP" install --upgrade -r requirements.txt pyinstaller
 
 # --- clean old outputs ---
 rm -rf "$DIST_DIR" "$BUILD_DIR" "${SPEC_NAME}.spec"
@@ -61,6 +56,8 @@ echo "[*] Building..."
   --add-data "modules:modules" \
   --add-data "embedded_fw:embedded_fw" \
   --collect-all scapy \
+  --collect-all tftpy \
+  --hidden-import tftpy \
   "$APP_PY"
 
 echo
@@ -72,4 +69,3 @@ echo "  - Scapy raw send/sniff may require root/capabilities."
 echo "  - If you want non-root run, you can do:"
 echo "      sudo setcap cap_net_raw,cap_net_admin=eip ./$DIST_DIR/$SPEC_NAME"
 echo
-
