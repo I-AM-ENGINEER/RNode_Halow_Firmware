@@ -320,6 +320,8 @@
                 setText('stat_mac', d.mac);
                 setText('stat_fwver', d.ver);
                 setText('stat_flashs', d.flashs);
+				setText('stat_cpu', d.cpu);
+				setText('stat_heap', d.heap);
             }
         } catch (err) {
             // ignore periodic fetch errors

@@ -541,7 +541,12 @@ int32_t web_api_dev_stat_get( const cJSON *in, cJSON *out ){
     (void)cJSON_AddStringToObject(out, "mac", s);
     snprintf(s, sizeof(s), "%d Mbit", flash0.size * 8 / 1024 / 1024);
     (void)cJSON_AddStringToObject(out, "flashs", s);
+    
+    statistics_cpu_load_get(s, sizeof(s));
+    (void)cJSON_AddStringToObject(out, "cpu", s);
 
+    statistics_heap_usage_get(s, sizeof(s));
+    (void)cJSON_AddStringToObject(out, "heap", s);
     return WEB_API_RC_OK;
 }
 

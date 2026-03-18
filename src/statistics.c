@@ -12,6 +12,8 @@
 #define stat_debug(fmt, ...)  do { } while (0)
 #endif
 
+extern __bobj uint64 cpu_loading_tick;
+
 volatile statistics_radio_t g_stat_radio;
 
 static struct os_task g_stat_task;
@@ -35,6 +37,74 @@ void statistics_radio_reset(void){
     g_stat_radio.tx_bytes = 0;
     g_stat_radio.rx_packets = 0;
     g_stat_radio.tx_packets = 0;
+}
+
+void statistics_cpu_load_get( char *return_str, uint32_t max_len ){
+    struct os_task_info tsk_info[2];
+    uint32 count;
+    uint32 diff_tick;
+    uint64 jiff;
+    uint32 idle_pct;
+    uint32 cpu_pct;
+
+    if (return_str == NULL || max_len == 0) {
+        return;
+    }
+
+    jiff = os_jiffies();
+    diff_tick = DIFF_JIFFIES(cpu_loading_tick, jiff);
+    cpu_loading_tick = jiff;
+
+    if (diff_tick == 0) {
+        os_snprintf(return_str, max_len, "0%%");
+        return;
+    }
+
+    count = os_task_runtime(tsk_info, 2);
+    if (count < 2) {
+        os_snprintf(return_str, max_len, "0%%");
+        return;
+    }
+
+    idle_pct = (tsk_info[1].time * 100U) / diff_tick;
+    if (idle_pct > 100U) {
+        idle_pct = 100U;
+    }
+
+    cpu_pct = 100U - idle_pct;
+    os_snprintf(return_str, max_len, "%u%%", cpu_pct);
+}
+
+void statistics_heap_usage_get( char *return_str, uint32_t max_len ){
+    uint32_t total;
+    uint32_t free;
+    uint32_t used;
+    uint32_t used_pct;
+
+    if (return_str == NULL || max_len == 0) {
+        return;
+    }
+
+    total = sysheap_totalsize(&sram_heap);
+    free  = sysheap_freesize(&sram_heap);
+
+    if (free > total) {
+        free = total;
+    }
+
+    if (total == 0) {
+        os_snprintf(return_str, max_len, "---");
+        return;
+    }
+
+    used = total - free;
+    used_pct = (used * 100U) / total;
+
+    os_snprintf(return_str, max_len,
+                "%u/%u KiB (%u%%)",
+                used / 1024,
+                total / 1024,
+                used_pct);
 }
 
 void statistics_uptime_get(char* return_str, uint32_t max_len){
