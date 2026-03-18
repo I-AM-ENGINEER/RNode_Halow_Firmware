@@ -125,15 +125,29 @@ static bool http_path_is_safe( const char *p ){
 /* Send helpers                                                               */
 /* -------------------------------------------------------------------------- */
 
+static err_t http_write_bytes( struct netconn *conn,
+                               const void *dataptr,
+                               size_t size ){
+    static size_t written = 0;
+    err_t err;
+
+    if (conn == NULL) {
+        return ERR_ARG;
+    }
+    err = netconn_write_partly(conn, dataptr, size, NETCONN_COPY, &written);
+    return err;
+}
+
 static void http_send_raw( struct netconn *nc,
                            int code,
                            const char *content_type,
                            const void *body,
                            size_t body_len ){
-    char *hdr;
+    char *hdr = NULL;
+    err_t err;
 
     if (nc == NULL) {
-        return;
+        goto exit;
     }
     if (content_type == NULL) {
         content_type = "application/octet-stream";
@@ -145,7 +159,8 @@ static void http_send_raw( struct netconn *nc,
 
     hdr = os_malloc(192);
     if (hdr == NULL) {
-        return;
+        httpd_debug("send_raw: malloc failed");
+        goto exit;
     }
 
     snprintf(hdr, 192,
@@ -159,11 +174,22 @@ static void http_send_raw( struct netconn *nc,
              content_type,
              (unsigned)body_len);
 
-    (void)netconn_write(nc, hdr, strlen(hdr), NETCONN_COPY);
-    if (body_len > 0) {
-        (void)netconn_write(nc, body, body_len, NETCONN_COPY);
+    err = http_write_bytes(nc, hdr, strlen(hdr));
+    if (err != ERR_OK) {
+        httpd_debug("send_raw: hdr write err=%d", err);
+        goto exit;
     }
-    os_free(hdr);
+
+    if (body_len > 0) {
+        err = http_write_bytes(nc, body, body_len);
+        if (err != ERR_OK) {
+            httpd_debug("send_raw: body write err=%d", err);
+        }
+    }
+exit:
+    if(hdr != NULL){
+        os_free(hdr);
+    }
 }
 
 static void http_send_text( struct netconn *nc, int code, const char *text ){
@@ -293,14 +319,15 @@ static int32_t http_get_content_length( const char *header, size_t header_len ){
 /* -------------------------------------------------------------------------- */
 
 static void http_serve_file( struct netconn *nc, const char *uri ){
-    char path[32];
+    char path[32] = {0};
     lfs_file_t f;
     lfs_ssize_t r;
-    int rc;
+    int32_t rc;
+    bool opened = false;
 
     if (nc == NULL || uri == NULL) {
         httpd_debug("serve_file: bad args nc=%p uri=%p", nc, uri);
-        return;
+        goto exit;
     }
 
     httpd_debug("serve_file: uri='%s'", uri);
@@ -308,7 +335,7 @@ static void http_serve_file( struct netconn *nc, const char *uri ){
     if (!http_path_is_safe(uri)) {
         httpd_debug("serve_file: unsafe path '%s'", uri);
         http_send_text(nc, 400, "bad path\n");
-        return;
+        goto exit;
     }
 
     if (strcmp(uri, "/") == 0) {
@@ -324,14 +351,16 @@ static void http_serve_file( struct netconn *nc, const char *uri ){
     if (rc < 0) {
         httpd_debug("serve_file: open failed rc=%d", rc);
         http_send_text(nc, 404, "not found\n");
-        return;
+        goto exit;
     }
+    opened = true;
 
     {
         char *hdr = os_malloc(128);
+        err_t err; 
         if (hdr == NULL) {
             httpd_debug("serve_file: malloc failed");
-            return;
+            goto exit;
         }
 
         snprintf(hdr, 128,
@@ -344,9 +373,12 @@ static void http_serve_file( struct netconn *nc, const char *uri ){
 
         httpd_debug("serve_file: send header type='%s'", http_content_type(path));
 
-        (void)netconn_write(nc, hdr, strlen(hdr), NETCONN_COPY);
-
+        err = http_write_bytes(nc, hdr, strlen(hdr));
         os_free(hdr);
+        if(err != ERR_OK){
+            httpd_debug("serve_file: write error=%d", err);
+            goto exit;
+        }
     }
 
     {
@@ -355,10 +387,11 @@ static void http_serve_file( struct netconn *nc, const char *uri ){
 
         if (chunk == NULL) {
             httpd_debug("serve_file: malloc failed");
-            return;
+            goto exit;
         }
 
         while (1) {
+            err_t err; 
             r = lfs_file_read(&g_lfs, &f, chunk, HTTP_FILE_CHUNK);
             if (r <= 0) {
                 httpd_debug("serve_file: read end r=%d total=%u", (int)r, total);
@@ -368,13 +401,19 @@ static void http_serve_file( struct netconn *nc, const char *uri ){
             total += r;
             httpd_debug("serve_file: send chunk %d", (int)r);
 
-            (void)netconn_write(nc, chunk, (size_t)r, NETCONN_COPY);
+            err = http_write_bytes(nc, chunk, (size_t)r);
+            if(err != ERR_OK){
+                httpd_debug("serve_file: write error=%d", err);
+                break;
+            }
         }
 
         os_free(chunk);
     }
-
-    (void)lfs_file_close(&g_lfs, &f);
+exit:
+    if (opened) {
+        (void)lfs_file_close(&g_lfs, &f);
+    }
 
     httpd_debug("serve_file: done '%s'", path);
 }
@@ -495,7 +534,7 @@ static void http_handle_one( struct netconn *nc ){
     memset(uri, 0, sizeof(uri));
 
     if (netconn_recv(nc, &nb) != ERR_OK || nb == NULL) {
-        goto end;
+        goto exit;
     }
 
     uint16_t first_len = 0;
@@ -510,12 +549,12 @@ static void http_handle_one( struct netconn *nc ){
     } while (netbuf_next(nb) >= 0);
 
     if (first_len == 0 || first_len > HTTP_REQ_MAX_LEN) {
-        goto end;
+        goto exit;
     }
 
     data = os_malloc(first_len);
     if (data == NULL) {
-        goto end;
+        goto exit;
     }
     data[first_len-1] = '\0';
 
@@ -533,7 +572,7 @@ static void http_handle_one( struct netconn *nc ){
     if (hdr_end == NULL) {
         httpd_debug("no header in first package");
         http_send_text(nc, 400, "bad request\n");
-        goto end;
+        goto exit;
     }
 
     header_len = (hdr_end - data) + 4;
@@ -543,7 +582,7 @@ static void http_handle_one( struct netconn *nc ){
     if (uri[0] == '\0' || method[0] == '\0') {
         httpd_debug("no uri or method");
         http_send_text(nc, 400, "bad request\n");
-        goto end;
+        goto exit;
     }
 
     content_len = http_get_content_length(data, header_len);
@@ -555,13 +594,13 @@ static void http_handle_one( struct netconn *nc ){
     if (total_need == 0 || total_need > HTTP_REQ_MAX_LEN) {
         httpd_debug("request too large");
         http_send_text(nc, 400, "request too large\n");
-        goto end;
+        goto exit;
     }
 
     if (total_need > data_len) {
         char *new_data = os_malloc(total_need);
         if (new_data == NULL) {
-            goto end;
+            goto exit;
         }
 
         memcpy(new_data, data, data_len);
@@ -577,7 +616,7 @@ static void http_handle_one( struct netconn *nc ){
             if (netconn_recv(nc, &nb) != ERR_OK || nb == NULL) {
                 httpd_debug("cant receive");
                 http_send_text(nc, 400, "incomplete body\n");
-                goto end;
+                goto exit;
             }
 
             netbuf_first(nb);
@@ -615,7 +654,7 @@ static void http_handle_one( struct netconn *nc ){
 
         if (body_len < content_len) {
             http_send_text(nc, 400, "incomplete body\n");
-            goto end;
+            goto exit;
         }
     } else {
         body = NULL;
@@ -630,12 +669,12 @@ static void http_handle_one( struct netconn *nc ){
 
     if (strncmp(uri, "/api/", 5) == 0) {
         http_handle_api(nc, method, uri, body, body_len);
-        goto end;
+        goto exit;
     }
 
     http_serve_file(nc, uri);
 
-end:
+exit:
     if (data) {
         os_free(data);
     }
@@ -653,6 +692,7 @@ static void http_server_task( void *arg ){
     
     listen = netconn_new(NETCONN_TCP);
     netconn_bind(listen, IP_ADDR_ANY, HTTP_PORT);
+    netconn_listen_with_backlog(listen, 4);
     netconn_listen(listen);
 
     httpd_debug("listening on port %d", HTTP_PORT);
@@ -670,12 +710,11 @@ static void http_server_task( void *arg ){
             }
             continue;
         }
-        
-        //ip4_addr_t client_ip = client->pcb.tcp->remote_ip;
 
         httpd_debug("client accepted nc=%p", client);
 
         netconn_set_recvtimeout(client, 3000);
+        netconn_set_sendtimeout(client, 3000);
 
         http_handle_one(client);
         netconn_close(client);
