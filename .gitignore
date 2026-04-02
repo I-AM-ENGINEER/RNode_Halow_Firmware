@@ -17,3 +17,5 @@
 __pycache__
 out
 flasher/OTA/downloads
+flasher/OTA/.venv/
+**/build/
