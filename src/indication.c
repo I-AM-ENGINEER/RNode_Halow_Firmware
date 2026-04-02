@@ -1,11 +1,6 @@
 #include "basic_include.h"
 #include "indication.h"
-
-#define BUTTON_PIN                      PA_7
-#define INDICATION_LED_CONNECT_PIN      PA_6
-#define INDICATION_LED_RSSI1_PIN        PA_8
-#define INDICATION_LED_RSSI2_PIN        PA_31
-#define INDICATION_LED_RSSI3_PIN        PA_30
+#include "pinout.h"
 
 static struct os_work led_rx_wk;
 
@@ -16,13 +11,13 @@ static int32 sys_blink_work(struct os_work *work) {
 
 void indication_init(void){
     OS_WORK_INIT(&led_rx_wk, sys_blink_work,0);
-    gpio_set_dir(BUTTON_PIN, GPIO_DIR_INPUT);
-    gpio_set_mode(BUTTON_PIN, GPIO_PULL_UP, GPIO_PULL_LEVEL_10K);
+    gpio_set_dir(BUTTON_PAIR_PIN, GPIO_DIR_INPUT);
+    gpio_set_mode(BUTTON_PAIR_PIN, GPIO_PULL_UP, GPIO_PULL_LEVEL_10K);
 
     gpio_set_dir(INDICATION_LED_CONNECT_PIN, GPIO_DIR_OUTPUT);
-    gpio_set_dir(INDICATION_LED_RSSI1_PIN, GPIO_DIR_OUTPUT);
-    gpio_set_dir(INDICATION_LED_RSSI2_PIN, GPIO_DIR_OUTPUT);
-    gpio_set_dir(INDICATION_LED_RSSI3_PIN, GPIO_DIR_OUTPUT);
+    //gpio_set_dir(INDICATION_LED_RSSI1_PIN, GPIO_DIR_OUTPUT);
+    //gpio_set_dir(INDICATION_LED_RSSI2_PIN, GPIO_DIR_OUTPUT);
+    //gpio_set_dir(INDICATION_LED_RSSI3_PIN, GPIO_DIR_OUTPUT);
     gpio_set_val(INDICATION_LED_CONNECT_PIN, 1);
     gpio_set_val(INDICATION_LED_RSSI1_PIN, 1);
     gpio_set_val(INDICATION_LED_RSSI2_PIN, 1);
@@ -30,7 +25,7 @@ void indication_init(void){
 }
 
 bool button_get(void){
-    return gpio_get_val(BUTTON_PIN) == 0;
+    return gpio_get_val(BUTTON_PAIR_PIN) == 0;
 }
 
 void indication_led_main_set(bool state){
