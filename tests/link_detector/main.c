@@ -99,8 +99,8 @@ static void trace_tcp_raw( const char *tag, const uint8_t *buf, uint32_t len ){
 #endif
 }
 
-static void log_link_event( const char *dir, const link_parser_packet_t *pkt ){
-    if( pkt->packet_type == LINK_PARSER_PACKET_LINKREQUEST ){
+static void log_link_event( const char *dir, const rns_link_parser_packet_t *pkt ){
+    if( pkt->packet_type == RNS_LINK_PARSER_PACKET_LINKREQUEST ){
         log_trace("[%s] LINK OPEN id=%02X%02X%02X%02X...",
             dir,
             pkt->link_id[0], pkt->link_id[1], pkt->link_id[2], pkt->link_id[3]
@@ -108,40 +108,40 @@ static void log_link_event( const char *dir, const link_parser_packet_t *pkt ){
         return;
     }
 
-    if( pkt->destination_type != LINK_PARSER_DESTINATION_LINK ){
+    if( pkt->destination_type != RNS_LINK_PARSER_DESTINATION_LINK ){
         return;
     }
 
     switch( pkt->context ){
-        case LINK_PARSER_CONTEXT_LRPROOF:
+        case RNS_LINK_PARSER_CONTEXT_LRPROOF:
             log_trace("[%s] LINK PROOF id=%02X%02X%02X%02X...",
                 dir,
                 pkt->link_id[0], pkt->link_id[1], pkt->link_id[2], pkt->link_id[3]
             );
             break;
 
-        case LINK_PARSER_CONTEXT_LRRTT:
+        case RNS_LINK_PARSER_CONTEXT_LRRTT:
             log_trace("[%s] LINK ACTIVE id=%02X%02X%02X%02X...",
                 dir,
                 pkt->link_id[0], pkt->link_id[1], pkt->link_id[2], pkt->link_id[3]
             );
             break;
 
-        case LINK_PARSER_CONTEXT_LINKIDENTIFY:
+        case RNS_LINK_PARSER_CONTEXT_LINKIDENTIFY:
             log_trace("[%s] LINK IDENTIFY id=%02X%02X%02X%02X...",
                 dir,
                 pkt->link_id[0], pkt->link_id[1], pkt->link_id[2], pkt->link_id[3]
             );
             break;
 
-        case LINK_PARSER_CONTEXT_KEEPALIVE:
+        case RNS_LINK_PARSER_CONTEXT_KEEPALIVE:
             log_trace("[%s] LINK KEEPALIVE id=%02X%02X%02X%02X...",
                 dir,
                 pkt->link_id[0], pkt->link_id[1], pkt->link_id[2], pkt->link_id[3]
             );
             break;
 
-        case LINK_PARSER_CONTEXT_LINKCLOSE:
+        case RNS_LINK_PARSER_CONTEXT_LINKCLOSE:
             log_trace("[%s] LINK CLOSE id=%02X%02X%02X%02X...",
                 dir,
                 pkt->link_id[0], pkt->link_id[1], pkt->link_id[2], pkt->link_id[3]
@@ -173,7 +173,7 @@ static inline bool send_all( int fd, const uint8_t *buf, uint32_t len ){
     return true;
 }
 
-static inline uint32_t link_request_get_mtu( const uint8_t *packet, const link_parser_packet_t *pkt ){
+static inline uint32_t link_request_get_mtu( const uint8_t *packet, const rns_link_parser_packet_t *pkt ){
     const size_t off = pkt->payload_offset + 64U;
     const uint32_t signalling =
         ((uint32_t)packet[off + 0] << 16U) |
@@ -183,12 +183,12 @@ static inline uint32_t link_request_get_mtu( const uint8_t *packet, const link_p
     return signalling & 0x1FFFFFU;
 }
 
-static inline uint8_t link_request_get_mode( const uint8_t *packet, const link_parser_packet_t *pkt ){
+static inline uint8_t link_request_get_mode( const uint8_t *packet, const rns_link_parser_packet_t *pkt ){
     const size_t off = pkt->payload_offset + 64U;
     return (uint8_t)((packet[off + 0] >> 5U) & 0x07U);
 }
 
-static inline void link_request_set_signalling( uint8_t *packet, const link_parser_packet_t *pkt, uint8_t mode, uint32_t mtu ){
+static inline void link_request_set_signalling( uint8_t *packet, const rns_link_parser_packet_t *pkt, uint8_t mode, uint32_t mtu ){
     const size_t off = pkt->payload_offset + 64U;
     const uint32_t signalling = (mtu & 0x1FFFFFU) | (((uint32_t)(mode & 0x07U)) << 21U);
 
@@ -198,15 +198,15 @@ static inline void link_request_set_signalling( uint8_t *packet, const link_pars
 }
 
 static inline void maybe_clamp_link_mtu( uint8_t *packet, uint16_t packet_len, const char *dir ){
-    link_parser_packet_t pkt;
+    rns_link_parser_packet_t pkt;
     uint32_t mtu;
     uint8_t mode;
 
-    if( !link_parser_parse(packet, packet_len, &pkt) ){
+    if( !rns_link_parser_parse(packet, packet_len, &pkt) ){
         return;
     }
 
-    if( pkt.packet_type != LINK_PARSER_PACKET_LINKREQUEST ){
+    if( pkt.packet_type != RNS_LINK_PARSER_PACKET_LINKREQUEST ){
         return;
     }
 
@@ -232,7 +232,7 @@ static void forward_packet( int dst_fd, const char *dir, const uint8_t *payload,
     uint8_t packet[RNS_STREAM_MAX_FRAME_SIZE];
     uint8_t *frame = NULL;
     uint32_t frame_len = 0;
-    link_parser_packet_t pkt;
+    rns_link_parser_packet_t pkt;
 
     if( payload_len > sizeof(packet) ){
         log_trace("[%s] packet too large: %u", dir, (unsigned)payload_len);
@@ -244,7 +244,7 @@ static void forward_packet( int dst_fd, const char *dir, const uint8_t *payload,
 
     maybe_clamp_link_mtu(packet, payload_len, dir);
 
-    if( link_parser_parse(packet, payload_len, &pkt) ){
+    if( rns_link_parser_parse(packet, payload_len, &pkt) ){
         if( pkt.has_link_id ){
             log_link_event(dir, &pkt);
         }

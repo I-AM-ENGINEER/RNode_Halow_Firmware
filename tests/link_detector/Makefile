@@ -13,7 +13,7 @@ SRCS = \
     ../../sdk/lib/logc/log.c \
 	../../sdk/lib/crypto/sha256.c
 
-OBJS = $(addprefix $(BUILD_DIR)/,$(SRCS:.c=.o))
+OBJS = $(addprefix $(BUILD_DIR)/,$(patsubst ../../%,%,$(SRCS:.c=.o)))
 
 TARGET = $(BUILD_DIR)/test_link_detector
 
@@ -24,6 +24,10 @@ $(TARGET): $(OBJS)
 	$(CC) $(OBJS) -o $(TARGET)
 
 $(BUILD_DIR)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%.o: ../../%.c
 	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
