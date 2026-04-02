@@ -1,3 +1,4 @@
+#define LOG_LOCAL_LEVEL LOG_TRACE
 #include "basic_include.h"
 #include "lib/lmac/lmac.h"
 #include "lib/skb/skb.h"
@@ -12,6 +13,7 @@
 #include "lib/umac/wifi_mgr.h"
 #include "lib/umac/wifi_cfg.h"
 #include "lib/common/atcmd.h"
+#include "lib/logc/log.h"
 #include "lwip/err.h"
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
@@ -62,12 +64,25 @@ static void halow_rx_handler(struct hgic_rx_info *info,
     if (data == NULL || len <= 0) {
         return;
     }
-    //os_printf("RX: %db\n", len);
+
+    //hexdump
+    // os_printf("rf->tcp hexdump (%u bytes):\n", (unsigned int)len);
+    // for(uint32_t i = 0; i < len; i++){
+    //     hgprintf("%02X ", data[i]);
+    //     if((i + 1) % 16 == 0){
+    //         hgprintf("\n");
+    //     }
+    // }
+    // if(len % 16 != 0){
+    //     os_printf("\n");
+    // }
+    
+    os_printf("rf->tcp: %db\n", len);
     indication_led_rx();
     statistics_radio_register_rx_package(len);
     int32_t res = tcp_server_send(data, len);
     if(res != 0){
-        //os_printf("rf->tcp send error: %d\n", res);
+        os_printf("rf->tcp send error: %d\n", res);
     }
 }
 
@@ -78,9 +93,23 @@ int32_t tcp_to_halow_send(const uint8_t* data, uint32_t len){
     if(len == 0){
         return -200;
     }
+
+    // hexdump
+    // os_printf("tcp->rf hexdump (%u bytes):\n", (unsigned int)len);
+    // for(uint32_t i = 0; i < len; i++){
+    //     hgprintf("%02X ", data[i]);
+    //     if((i + 1) % 16 == 0){
+    //         hgprintf("\n");
+    //     }
+    // }
+    // if(len % 16 != 0){
+    //     os_printf("\n");
+    // }
+
     int32_t res = halow_tx(data, len);
+    os_printf("tcp->rf: %db\n", len);
     if(res != 0){
-        //os_printf("tcp->rf send error: %d\n", res);
+        os_printf("tcp->rf send error: %d\n", res);
         return res;
     }
     statistics_radio_register_tx_package(len);  
@@ -168,7 +197,6 @@ static int32 sys_blink_work(struct os_work *work) {
 
 static int32 sys_stats_work(struct os_work *work) {
     const uint32_t buckets = 32;
-    struct os_task_info tsk_info_buff[32];
     
     uint32_t status[buckets];
     sysheap_status(&sram_heap, status, buckets, 16);
@@ -244,6 +272,7 @@ __init int main(void) {
     OS_WORK_INIT(&stats_wk, sys_stats_work,0);
     os_run_work_delay(&blink_wk, 1000);
     //os_run_work_delay(&stats_wk, 1000);
+    log_trace("log_test");
     sysheap_collect_init(&sram_heap, (uint32)&__sinit, (uint32)&__einit); // delete init code from heap
     return 0;
 }
