@@ -2,10 +2,7 @@
 #define __RNS_STREAM_H__
 
 #include <stdint.h>
-
-#ifndef RNS_STREAM_MAX_FRAME_SIZE
-#define RNS_STREAM_MAX_FRAME_SIZE 10000u
-#endif
+#include "rns/defines.h"
 
 typedef void (*rns_stream_frame_cb_t)(const uint8_t *payload, uint16_t payload_len);
 

@@ -1,5 +1,5 @@
-#define LOG_LOCAL_LEVEL LOG_TRACE
 #include "rns/stream_parser.h"
+#define LOG_LOCAL_LEVEL RNS_STREAM_PARSER_LOG_LEVEL
 #include "lib/logc/log.h"
 #include <string.h>
 #include <stdlib.h>
