@@ -409,7 +409,7 @@ int32_t halow_tx(const uint8_t *data, uint32_t len) {
 
     skb->priority = 0;
     skb->tx       = 1;
-    halow_lbt_wait_tx_allowed();
+    //halow_lbt_wait_tx_allowed();
     halow_get_tx_vacanted_bytes(skb->len);
     int32_t res = lmac_tx(g_ops, skb);
 	lmac_kick_tx_task();
