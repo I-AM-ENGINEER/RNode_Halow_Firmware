@@ -5,6 +5,8 @@
 
 Coverage map: https://map.rnode-halow.ru/
 
+Firmware flasher: https://github.com/I-AM-ENGINEER/RNode_Halow_OTA_Flasher
+
 ---
 
 ## English
@@ -21,13 +23,11 @@ The following is currently implemented:
 - OTA firmware update (unencrypted)
 - Confirmed compatibility with RNS and its extensions — Meshchat, Sideband
 - LBT (Listen Before Talk)
-- Airtime limiting
+- Airtime limiting (currently broken)
 
 ### What Is Currently Missing
 
-- Stability — the project is in early development
-- RNS stack — the device is a TCP modem only
-- USB and SDIO connection support not implemented
+- USB, UART, SPI connection support not implemented
 - The LMAC stack remains a mystery; ideally the proprietary libs would be replaced
 
 ### Default Parameters
@@ -37,23 +37,6 @@ The following is currently implemented:
 - **Power:** 17 dBm
 - **TCP Port:** 8001
 
-### Flashing
-
-> **WARNING!** Before flashing, it is recommended to disassemble one of the devices and dump the SPI flash. Do not cut power during the flashing process. For the first flash, the device must be on the same local network as your PC.
-
-1. Launch `RNode-HaLow Flasher.exe`
-2. Select the firmware version to install (it will be downloaded automatically from GitHub), or select a local firmware file
-3. Select the target device from the list; type `hgic` refers to devices with original firmware
-4. Start the flashing process. It doesn't always succeed on the first try — restart if needed
-5. Once `"OK flash done"` appears in the console, the firmware is written and the device can be disconnected
-
-<img width="968" height="1119" alt="image" src="https://github.com/user-attachments/assets/9a2c8310-06eb-45e2-8b96-3638ed505c0a" />
-
-
-### Initial Setup
-
-After flashing, the device obtains an IP address via DHCP. You can either double-click it in `RNode-HaLow Flasher.exe`, or navigate to the assigned IP in any browser.
-
 ### Dashboard
 
 - **RX/TX Bytes, Packets, Speed** — self-explanatory
@@ -62,6 +45,8 @@ After flashing, the device obtains an IP address via DHCP. You can either double
 - **Noise Floor Power Level** — approximate noise level
 
 ### Device Settings
+
+<img width="968" height="1119" alt="image" src="https://github.com/user-attachments/assets/9a2c8310-06eb-45e2-8b96-3638ed505c0a" />
 
 #### RF Settings
 
@@ -73,7 +58,7 @@ After flashing, the device obtains an IP address via DHCP. You can either double
 
 #### Listen Before Talk
 
-All devices support LBT by default. You can additionally limit the maximum airtime the device occupies to reduce collisions. 30–50% is optimal.
+All devices support LBT by default. (not work for now) You can additionally limit the maximum airtime the device occupies to reduce collisions. 30–50% is optimal.
 
 #### Network Settings
 
@@ -157,24 +142,6 @@ PHY WiFi - MCS0
 
 Порт TCP - 8001
 
-## Прошивка
-
-ВНИМАНИЕ! Перед прошивкой рекомендуется разобрать одно из устройств и снять дамп SPI флешки! Во время процесса прошивки питание не отключать. Для корректной первой прошивки устройство должно находиться в той же локальной сети, что и ПК
-
-0) Запустить [RNode-HaLow Flasher.exe](https://github.com/I-AM-ENGINEER/RNode_Halow_Firmware/releases/)
-1) Выбрать устанавливаемую версию, которая будет автоматически скачана с гитхаба, либо сам файл прошивки 
-2) Выбрать прошиваемое устройство из списка, тип hgic - устройства с оригинальной прошивкой
-3) Запустить процесс прошивки. Не всегда проходит с первого раза, иногда требуется перезапустить
-4) После появления в консоли сообщения "OK flash done" прошивка зашита и устройство можно отключать
-
-<img width="1400" height="1026" alt="image" src="https://github.com/user-attachments/assets/0e1b243b-f1b3-4c7e-a34e-79f845c163ed" />
-
-## Первичная настройка
-
-После прошивки устройство получает IP адрес по DHCP, можно либо 2 раза нажать на него в [RNode-HaLow Flasher.exe](https://github.com/I-AM-ENGINEER/RNode_Halow_Firmware/releases/), или перейти по указанному IP в любом браузере.
-
-<img width="968" height="1119" alt="image" src="https://github.com/user-attachments/assets/9a2c8310-06eb-45e2-8b96-3638ed505c0a" />
-
 ### Dashboard
 
 * RX/TX Bytes, packets, speed - понятно по названию
@@ -194,7 +161,7 @@ PHY WiFi - MCS0
 
 #### Listen Before Talk
 
-Все устройства по умолчанию поддерживают LBT, но дополнительно можно ограничить максимальное время, которое устройство будет занимать радиоэфир для уменьшения колизий. Оптимально 30-50%
+Все устройства по умолчанию поддерживают LBT, но дополнительно можно ограничить максимальное время (временно не работает), которое устройство будет занимать радиоэфир для уменьшения колизий. Оптимально 30-50%
 
 #### Network Settings
 
