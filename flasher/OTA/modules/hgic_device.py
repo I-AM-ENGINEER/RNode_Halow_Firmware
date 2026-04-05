@@ -73,11 +73,24 @@ class IfaceInfo:
     host_mac: str
 
 
+def _iface_is_up(iface: str) -> bool:
+    try:
+        with open(f"/sys/class/net/{iface}/flags") as f:
+            return bool(int(f.read().strip(), 16) & 0x1)
+    except Exception:
+        return True
+
+
+_IFACE_BLACKLIST = ["lo", "nflog", "nfqueue", "dbus-system", "dbus-session", "any"]
+
+
 def iter_ifaces() -> list[str]:
     out: list[str] = []
     for iface in get_if_list():
         lname = iface.lower()
-        if "loopback" in lname or lname == "lo":
+        if "loopback" in lname or lname in _IFACE_BLACKLIST:
+            continue
+        if not _iface_is_up(iface):
             continue
         out.append(iface)
     return out
@@ -99,6 +112,8 @@ class HgicDevice:
         sendp(frame, iface=self.iface, verbose=False)
 
     def send_broadcast(self, payload: bytes) -> None:
+        if not _iface_is_up(self.iface):
+            return
         frame = Ether(dst="ff:ff:ff:ff:ff:ff", src=self.host_mac, type=ETH_P_OTA) / Raw(load=payload)
         sendp(frame, iface=self.iface, verbose=False)
 

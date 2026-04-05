@@ -17,3 +17,6 @@
 __pycache__
 out
 flasher/OTA/downloads
+
+# venv files
+.venv
