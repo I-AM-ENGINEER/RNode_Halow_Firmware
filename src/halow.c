@@ -14,6 +14,7 @@
 #include "configdb.h"
 #include "sys_config.h"
 #include "lmac_ctx.h"
+#include "utils.h"
 
 #define HALOW_CONFIG_PREFIX             CONFIGDB_ADD_MODULE("halow")
 #define HALOW_CONFIG_ADD_CONFIG(name)   HALOW_CONFIG_PREFIX "." name
@@ -84,6 +85,8 @@ static uint16_t g_seq;
 static uint32_t g_tx_vacated_bytes = TX_BUFFER_SIZE;
 static struct os_semaphore g_tx_vacated_sem;
 
+extern void lmac_kick_tx_task( void );
+
 // Disable broadcast
 int32_t __wrap_lmac_send_bss_announcement(void){
     return 0;
@@ -121,7 +124,7 @@ static int32_t halow_lmac_rx(struct lmac_ops *ops,
         return 0;
     }
 
-    g_rx_cb(info, payload, payload_len);
+    g_rx_cb(info, hdr, payload, payload_len);
 
     return 0;
 }
@@ -308,9 +311,10 @@ static void halow_modem_set_default(void){
     lmac_set_dbg_levle(g_ops, HALOW_DBG_LEVEL);
 }
 
-static void lmac_watchdog_feed_task( void ){
+static int32_t lmac_watchdog_feed_work( struct os_work *work ){
     ah_lmac.phy_watchdog_flags &= ~0x01;
     os_run_work_delay(&lmac_wdt_wk, 100);
+    return 0;
 }
 
 bool halow_init(uint32_t rxbuf, uint32_t rxbuf_size,
@@ -350,7 +354,7 @@ bool halow_init(uint32_t rxbuf, uint32_t rxbuf_size,
     halow_config_apply(&config);
     halow_lbt_set_tx_as_deactive();
     
-    OS_WORK_INIT(&lmac_wdt_wk, lmac_watchdog_feed_task,0);
+    OS_WORK_INIT(&lmac_wdt_wk, lmac_watchdog_feed_work,0);
     os_run_work_delay(&lmac_wdt_wk, 10);
     return true;
 }
@@ -369,7 +373,7 @@ void halow_get_tx_vacanted_bytes(uint32_t bytes){
     }
 }
 
-int32_t halow_tx(const uint8_t *data, uint32_t len) {
+int32_t halow_tx(const uint8_t *data, uint32_t len, uint8_t destination_mac[6]) {
     if(g_ops == NULL){
         return -1;
     }
@@ -388,8 +392,8 @@ int32_t halow_tx(const uint8_t *data, uint32_t len) {
 
     hdr.frame_control = (uint16_t)(WLAN_FTYPE_DATA | WLAN_STYPE_DATA);
     mac_bcast(hdr.addr1);
-    mac_bcast(hdr.addr2);
-    mac_bcast(hdr.addr3);
+    get_mac(hdr.addr2);
+    memcpy(hdr.addr3, destination_mac, 6);
 
     g_seq++;
     hdr.seq_ctrl = (uint16_t)((g_seq & 0x0fff) << 4);

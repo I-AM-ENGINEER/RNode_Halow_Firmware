@@ -281,11 +281,11 @@ static void forward_packet( int dst_fd, const char *dir, const uint8_t *payload,
     free(frame);
 }
 
-static void on_frame_a( const uint8_t *payload, uint16_t payload_len ){
+static void on_frame_a( const uint8_t *payload, uint16_t payload_len, void *user ){
     forward_packet(g_fd_b, "A->B", payload, payload_len);
 }
 
-static void on_frame_b( const uint8_t *payload, uint16_t payload_len ){
+static void on_frame_b( const uint8_t *payload, uint16_t payload_len, void *user ){
     forward_packet(g_fd_a, "B->A", payload, payload_len);
 }
 
@@ -301,7 +301,7 @@ static inline int forward_once( int src_fd, rns_stream_decoder_t *decoder, const
     trace_tcp_raw(tag, buf, (uint32_t)rd);
 
     if( decoder != NULL ){
-        rns_stream_decoder_process(decoder, buf, (uint16_t)rd);
+        rns_stream_decoder_process(decoder, buf, (uint16_t)rd, NULL);
     }
 
     return g_stop ? -1 : 0;

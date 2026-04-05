@@ -122,5 +122,9 @@ int rns_link_parser_parse( const uint8_t *packet, size_t packet_len, rns_link_pa
         }
     }
 
+    out->valid =
+        (out->destination_type == RNS_DESTINATION_TYPE_LINK) ||
+        (out->packet_type == RNS_PACKET_TYPE_LINKREQUEST);
+
     return RNS_RET_OK;
 }

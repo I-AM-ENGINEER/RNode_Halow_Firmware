@@ -1,6 +1,7 @@
 #ifndef __HALOW_H_
 #define __HALOW_H_
 
+#include "lib/lmac/ieee802_11_defs.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -8,6 +9,7 @@ struct hgic_rx_info;
 
 typedef void (*halow_rx_cb)(
     struct hgic_rx_info *info,
+    struct ieee80211_hdr *hdr,
     const uint8_t *data,
     int32_t len);
 
@@ -23,7 +25,7 @@ bool halow_init(uint32_t rxbuf, uint32_t rxbuf_size,
                 uint32_t tdma_buf, uint32_t tdma_buf_size);
 
 void halow_set_rx_cb(halow_rx_cb cb);
-int32_t halow_tx(const uint8_t *data, uint32_t len);
+int32_t halow_tx(const uint8_t *data, uint32_t len, uint8_t destination_mac[6]);
 void halow_config_load(halow_config_t *cfg);
 void halow_config_save(const halow_config_t *cfg);
 void halow_config_apply(const halow_config_t *cfg);

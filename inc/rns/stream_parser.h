@@ -1,10 +1,10 @@
 #ifndef __RNS_STREAM_H__
 #define __RNS_STREAM_H__
 
-#include <stdint.h>
 #include "rns/defines.h"
+#include <stdint.h>
 
-typedef void (*rns_stream_frame_cb_t)(const uint8_t *payload, uint16_t payload_len);
+typedef void (*rns_stream_frame_cb_t)( const uint8_t *payload, uint16_t payload_len, void *user );
 
 typedef enum {
     RNS_STREAM_STATE_WAIT_FRAME_START = 0,
@@ -21,7 +21,7 @@ typedef struct {
 
 void rns_stream_decoder_init( rns_stream_decoder_t *decoder, rns_stream_frame_cb_t on_frame );
 void rns_stream_decoder_reset( rns_stream_decoder_t *decoder );
-void rns_stream_decoder_process( rns_stream_decoder_t *decoder, const uint8_t *data, uint16_t data_len );
+void rns_stream_decoder_process( rns_stream_decoder_t *decoder, const uint8_t *data, uint16_t data_len, void *user );
 
 int32_t rns_stream_encode_alloc(
     const uint8_t *payload,

@@ -91,6 +91,20 @@ typedef enum {
 
 typedef enum {
     RNS_CONTEXT_NONE            = 0x00U,
+    RNS_CONTEXT_RESOURCE        = 0x01U,
+    RNS_CONTEXT_RESOURCE_ADV    = 0x02U,
+    RNS_CONTEXT_RESOURCE_REQ    = 0x03U,
+    RNS_CONTEXT_RESOURCE_HMU    = 0x04U,
+    RNS_CONTEXT_RESOURCE_PRF    = 0x05U,
+    RNS_CONTEXT_RESOURCE_ICL    = 0x06U,
+    RNS_CONTEXT_RESOURCE_RCL    = 0x07U,
+    RNS_CONTEXT_CACHE_REQUEST   = 0x08U,
+    RNS_CONTEXT_REQUEST         = 0x09U,
+    RNS_CONTEXT_RESPONSE        = 0x0AU,
+    RNS_CONTEXT_PATH_RESPONSE   = 0x0BU,
+    RNS_CONTEXT_COMMAND         = 0x0CU,
+    RNS_CONTEXT_COMMAND_STATUS  = 0x0DU,
+    RNS_CONTEXT_CHANNEL         = 0x0EU,
     RNS_CONTEXT_KEEPALIVE       = 0xFAU,
     RNS_CONTEXT_LINKIDENTIFY    = 0xFBU,
     RNS_CONTEXT_LINKCLOSE       = 0xFCU,
@@ -107,6 +121,7 @@ typedef struct {
     uint16_t payload_len;
     uint8_t destination[RNS_TRUNCATED_HASH_LEN];
     uint8_t link_id[RNS_LINK_ID_LEN];
+    bool valid;
 } rns_link_packet_info_t;
 
 #endif // __RNS_DEFINES_H__

@@ -8,7 +8,7 @@
 #define RNS_STREAM_ESC       0x7Du
 #define RNS_STREAM_ESC_MASK  0x20u
 
-static void rns_stream_emit_frame( rns_stream_decoder_t *decoder ){
+static void rns_stream_emit_frame( rns_stream_decoder_t *decoder, void *user ){
     if( decoder == NULL || decoder->on_frame == NULL ){
         return;
     }
@@ -19,7 +19,7 @@ static void rns_stream_emit_frame( rns_stream_decoder_t *decoder ){
     }
 
     log_trace("frame received: payload_len=%u", (unsigned int)decoder->frame_len);
-    decoder->on_frame(decoder->frame_buffer, decoder->frame_len);
+    decoder->on_frame(decoder->frame_buffer, decoder->frame_len, user);
 }
 
 void rns_stream_decoder_init( rns_stream_decoder_t *decoder, rns_stream_frame_cb_t on_frame ){
@@ -40,7 +40,7 @@ void rns_stream_decoder_reset( rns_stream_decoder_t *decoder ){
     decoder->frame_len = 0u;
 }
 
-void rns_stream_decoder_process( rns_stream_decoder_t *decoder, const uint8_t *data, uint16_t data_len ){
+void rns_stream_decoder_process( rns_stream_decoder_t *decoder, const uint8_t *data, uint16_t data_len, void *user ){
     uint16_t i;
 
     if( decoder == NULL || data == NULL || data_len == 0u ){
@@ -63,7 +63,7 @@ void rns_stream_decoder_process( rns_stream_decoder_t *decoder, const uint8_t *d
                  decoder->state == RNS_STREAM_STATE_READ_ESCAPED_BYTE) &&
                 decoder->frame_len > 0u
             ){
-                rns_stream_emit_frame(decoder);
+                rns_stream_emit_frame(decoder, user);
             }
 
             decoder->state = RNS_STREAM_STATE_READ_FRAME;

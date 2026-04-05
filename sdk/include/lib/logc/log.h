@@ -20,6 +20,7 @@ typedef struct {
   const char *fmt;
   const char *file;
   struct tm *time;
+  time_t time_s;
   void *udata;
   int line;
   int level;
@@ -28,9 +29,18 @@ typedef struct {
 typedef void (*log_LogFn)(log_Event *ev);
 typedef void (*log_LockFn)(bool lock, void *udata);
 
-enum { LOG_TRACE, LOG_DEBUG, LOG_INFO, LOG_WARN, LOG_ERROR, LOG_FATAL };
+#define LOG_TRACE 0
+#define LOG_DEBUG 1
+#define LOG_INFO  2
+#define LOG_WARN  3
+#define LOG_ERROR 4
+#define LOG_FATAL 5
 
 #define LOG_USE_COLOR
+
+#ifndef LOG_BUF_SIZE
+#define LOG_BUF_SIZE 256
+#endif
 
 #define LOG_NONE 100
 

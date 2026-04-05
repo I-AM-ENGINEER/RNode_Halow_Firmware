@@ -23,6 +23,7 @@
 #include "lib/logc/log.h"
 
 #define MAX_CALLBACKS 32
+#include <time.h>
 
 typedef struct {
   log_LogFn fn;
@@ -51,21 +52,17 @@ static const char *level_colors[] = {
 
 
 static void stdout_callback(log_Event *ev) {
-  char buf[16];
-  buf[strftime(buf, sizeof(buf), "%H:%M:%S", ev->time)] = '\0';
 #ifdef LOG_USE_COLOR
-  fprintf(
-    ev->udata, "%s %s%-5s\x1b[0m \x1b[90m%s:%d:\x1b[0m ",
-    buf, level_colors[ev->level], level_strings[ev->level],
+  printf("[%ld] %s%-5s\x1b[0m \x1b[90m%s:%d:\x1b[0m ",
+    (long int)ev->time, level_colors[ev->level], level_strings[ev->level],
     ev->file, ev->line);
 #else
-  fprintf(
-    ev->udata, "%s %-5s %s:%d: ",
-    buf, level_strings[ev->level], ev->file, ev->line);
+  printf(
+    "[%ld] %-5s %s:%d: ",
+    (long int)ev->time, level_strings[ev->level], ev->file, ev->line);
 #endif
-  vfprintf(ev->udata, ev->fmt, ev->ap);
-  fprintf(ev->udata, "\n");
-  fflush(ev->udata);
+  vprintf(ev->fmt, ev->ap);
+  printf("\n");
 }
 
 
@@ -127,15 +124,10 @@ int log_add_fp(FILE *fp, int level) {
   return log_add_callback(file_callback, fp, level);
 }
 
-
-static void init_event(log_Event *ev, void *udata) {
-  if (!ev->time) {
-    time_t t = time(NULL);
-    ev->time = localtime(&t);
-  }
+static void init_event( log_Event *ev, void *udata ){
+  ev->time_s = time(NULL);
   ev->udata = udata;
 }
-
 
 void log_log(int level, const char *file, int line, const char *fmt, ...) {
   log_Event ev = {
@@ -147,12 +139,10 @@ void log_log(int level, const char *file, int line, const char *fmt, ...) {
 
   lock();
 
-  if (!L.quiet && level >= L.level) {
-    init_event(&ev, stderr);
-    va_start(ev.ap, fmt);
-    stdout_callback(&ev);
-    va_end(ev.ap);
-  }
+  init_event(&ev, NULL);
+  va_start(ev.ap, fmt);
+  stdout_callback(&ev);
+  va_end(ev.ap);
 
   for (int i = 0; i < MAX_CALLBACKS && L.callbacks[i].fn; i++) {
     Callback *cb = &L.callbacks[i];

@@ -1,4 +1,5 @@
 #define LOG_LOCAL_LEVEL LOG_TRACE
+#include "lib/logc/log.h"
 #include "basic_include.h"
 #include "lib/lmac/lmac.h"
 #include "lib/skb/skb.h"
@@ -13,7 +14,6 @@
 #include "lib/umac/wifi_mgr.h"
 #include "lib/umac/wifi_cfg.h"
 #include "lib/common/atcmd.h"
-#include "lib/logc/log.h"
 #include "lwip/err.h"
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
@@ -47,16 +47,149 @@
 #include "lib/lmac/lmac.h"
 #include "lib/common/dsleepdata.h"
 #endif
-// #include "atcmd.c"
+#include "rns/stream_parser.h"
+#include "rns/link_parser.h"
+#include "rns/link_db.h"
 
 static struct os_work blink_wk;
 static struct os_work stats_wk;
 extern uint32_t srampool_start;
 extern uint32_t srampool_end;
-
+static rns_stream_decoder_t tcp_rns_decoder;
+//static rns_link_packet_info_t tcp_rns_link_db;
 //extern void lmac_transceive_statics(uint8 en);
 
+#include <stdbool.h>
+#include <stdint.h>
+
+typedef struct {
+    bool none           :1;
+    bool resource       :1;
+    bool resource_adv   :1;
+    bool resource_req   :1;
+    bool resource_hmu   :1;
+    bool resource_prf   :1;
+    bool resource_icl   :1;
+    bool resource_rcl   :1;
+    bool cache_request  :1;
+    bool request        :1;
+    bool response       :1;
+    bool path_response  :1;
+    bool command        :1;
+    bool command_status :1;
+    bool channel        :1;
+    bool keepalive      :1;
+    bool linkidentify   :1;
+    bool linkclose      :1;
+    bool linkproof      :1;
+    bool lrrtt          :1;
+    bool lrproof        :1;
+    bool unknown        :1;
+} halow_ack_link_context_t;
+
+typedef struct {
+    halow_ack_link_context_t contexts_en;
+    uint8_t batch_size;
+    uint8_t retries_count;
+} halow_ack_config_t;
+
+static inline bool rns_link_ack_cfg_should_ack( const rns_link_ack_cfg_t *cfg, rns_context_t context ){
+    if( cfg == NULL ){
+        return false;
+    }
+
+    switch( context ){
+        case RNS_CONTEXT_NONE:           return cfg->none;
+        case RNS_CONTEXT_RESOURCE:       return cfg->resource;
+        case RNS_CONTEXT_RESOURCE_ADV:   return cfg->resource_adv;
+        case RNS_CONTEXT_RESOURCE_REQ:   return cfg->resource_req;
+        case RNS_CONTEXT_RESOURCE_HMU:   return cfg->resource_hmu;
+        case RNS_CONTEXT_RESOURCE_PRF:   return cfg->resource_prf;
+        case RNS_CONTEXT_RESOURCE_ICL:   return cfg->resource_icl;
+        case RNS_CONTEXT_RESOURCE_RCL:   return cfg->resource_rcl;
+        case RNS_CONTEXT_CACHE_REQUEST:  return cfg->cache_request;
+        case RNS_CONTEXT_REQUEST:        return cfg->request;
+        case RNS_CONTEXT_RESPONSE:       return cfg->response;
+        case RNS_CONTEXT_PATH_RESPONSE:  return cfg->path_response;
+        case RNS_CONTEXT_COMMAND:        return cfg->command;
+        case RNS_CONTEXT_COMMAND_STATUS: return cfg->command_status;
+        case RNS_CONTEXT_CHANNEL:        return cfg->channel;
+        case RNS_CONTEXT_KEEPALIVE:      return cfg->keepalive;
+        case RNS_CONTEXT_LINKIDENTIFY:   return cfg->linkidentify;
+        case RNS_CONTEXT_LINKCLOSE:      return cfg->linkclose;
+        case RNS_CONTEXT_LINKPROOF:      return cfg->linkproof;
+        case RNS_CONTEXT_LRRTT:          return cfg->lrrtt;
+        case RNS_CONTEXT_LRPROOF:        return cfg->lrproof;
+        default:                         return false;
+    }
+}
+
+typedef struct __attribute__((packed)) {
+    union {
+        struct __attribute__((packed)) {
+            uint8_t data      : 1;
+            uint8_t ack_only  : 1;
+            uint8_t retry     : 1;
+            uint8_t need_ack  : 1;
+            uint8_t _reserved : 2;
+            uint8_t version   : 2;
+        };
+        uint8_t flags;
+    };
+
+    uint8_t seq;
+    uint8_t ack;
+    uint8_t ack_bits;
+} halow_hdr_t;
+
+struct link_user_ctx {
+    const rns_link_db_link_t* link;
+    uint8_t remote_mac[6];
+};
+
+// TCP -> RF
+static void rns_tcp_rx_handler( const uint8_t *payload, uint16_t payload_len ){
+    rns_link_packet_info_t link_packet_info;
+    int32_t res;
+
+    log_trace("rns package received len=%d", payload_len);
+    statistics_radio_register_tx_package(payload_len);
+
+    res = rns_link_parser_parse(payload, payload_len, &link_packet_info);
+    if(res != 0){
+        log_warn("parse package link info error=%d", res);
+    }
+
+    if(link_packet_info.valid){
+        rns_link_db_link_t* link = NULL;
+        res = rns_link_db_package_register(&link_packet_info, RNS_PACKET_DIRECTION_TX);
+        if(res != 0){
+            log_warn("cant register link package res=%d", res);
+        }
+
+        link = rns_link_db_link_get(link_packet_info.link_id);
+        if(link == NULL){
+            log_warn("cant get link res=%d", res);
+        }
+
+        struct link_user_ctx *link_user = (struct link_user_ctx*)rns_link_db_link_user_get(link);
+        if(link_user == NULL){
+            link_user = calloc(0, sizeof(struct link_user_ctx));
+            rns_link_db_link_user_set(link, (void*)link_user);
+        }
+    }
+
+    uint8_t dst_mac[6];
+    memset(dst_mac, 0xFF, sizeof(dst_mac)); // broadcast
+    res = halow_tx(payload, payload_len, dst_mac);
+    if(res != 0){
+        log_warn("halow tx err=%d", res);
+    }
+}
+
+// RF -> TCP
 static void halow_rx_handler(struct hgic_rx_info *info,
+                             struct ieee80211_hdr *hdr,
                              const uint8 *data,
                              int32 len) {
     (void)info;
@@ -94,25 +227,7 @@ int32_t tcp_to_halow_send(const uint8_t* data, uint32_t len){
         return -200;
     }
 
-    // hexdump
-    // os_printf("tcp->rf hexdump (%u bytes):\n", (unsigned int)len);
-    // for(uint32_t i = 0; i < len; i++){
-    //     hgprintf("%02X ", data[i]);
-    //     if((i + 1) % 16 == 0){
-    //         hgprintf("\n");
-    //     }
-    // }
-    // if(len % 16 != 0){
-    //     os_printf("\n");
-    // }
-
-    int32_t res = halow_tx(data, len);
-    os_printf("tcp->rf: %db\n", len);
-    if(res != 0){
-        os_printf("tcp->rf send error: %d\n", res);
-        return res;
-    }
-    statistics_radio_register_tx_package(len);  
+    rns_stream_decoder_process(&tcp_rns_decoder, data, (uint16_t)len, NULL);
     return 0;
 }
 
@@ -243,6 +358,14 @@ bool boot_recovery_check( void ){
     return false;
 }
 
+static void test_vprintf( const char *fmt, ... ){
+    va_list ap;
+
+    va_start(ap, fmt);
+    vfprintf(stdout, fmt, ap);
+    va_end(ap);
+}
+
 __init int main(void) {
     extern uint32 __sinit, __einit;
     mcu_watchdog_timeout(5);
@@ -268,11 +391,15 @@ __init int main(void) {
     statistics_init();
     tcp_server_init(tcp_to_halow_send);
     telemetry_init();
+    rns_stream_decoder_init(&tcp_rns_decoder, rns_tcp_rx_handler);
     OS_WORK_INIT(&blink_wk, sys_blink_work,0);
     OS_WORK_INIT(&stats_wk, sys_stats_work,0);
     os_run_work_delay(&blink_wk, 1000);
     //os_run_work_delay(&stats_wk, 1000);
-    log_trace("log_test");
+    test_vprintf("vfprintf OK %d %s\n", 123, "test");
+    //log_log(LOG_FATAL, __FILE__, __LINE__, "log_test!!!!\n\n\n!!!!!!\n\n!!!");
+    log_fatal("log_test!!!!\n\n\n!!!!!!\n\n!!!");
+    printf("!!!!!!!!!!!!!!!!!!!!");
     sysheap_collect_init(&sram_heap, (uint32)&__sinit, (uint32)&__einit); // delete init code from heap
     return 0;
 }

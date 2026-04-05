@@ -4,17 +4,17 @@
 
 #include "rns/link_db.h"
 
-static link_db_t g_link_db = {
+static rns_link_db_t g_link_db = {
     .buckets = {
         [0 ...(RNS_DB_HASH_SIZE - 1)] = RNS_DB_INDEX_NONE
     }
 };
 
-int32_t link_db_timestamp_s( void ){
+int32_t rns_link_db_timestamp_s( void ){
     return (int32_t)time(NULL);
 }
 
-static uint16_t link_db_hash_id( const uint8_t id[RNS_LINK_ID_LEN] ){
+static uint16_t rns_link_db_hash_id( const uint8_t id[RNS_LINK_ID_LEN] ){
     uint32_t hash = 2166136261u;
     uint32_t i;
 
@@ -26,11 +26,11 @@ static uint16_t link_db_hash_id( const uint8_t id[RNS_LINK_ID_LEN] ){
     return (uint16_t)(hash % RNS_DB_HASH_SIZE);
 }
 
-static int32_t link_db_find_index_by_id( const uint8_t id[RNS_LINK_ID_LEN] ){
+static int32_t rns_link_db_find_index_by_id( const uint8_t id[RNS_LINK_ID_LEN] ){
     uint16_t bucket_idx;
     uint8_t index;
 
-    bucket_idx = link_db_hash_id(id);
+    bucket_idx = rns_link_db_hash_id(id);
     index = g_link_db.buckets[bucket_idx];
 
     while( index != RNS_DB_INDEX_NONE ){
@@ -48,7 +48,7 @@ static int32_t link_db_find_index_by_id( const uint8_t id[RNS_LINK_ID_LEN] ){
     return -1;
 }
 
-static int32_t link_db_find_free_slot( void ){
+static int32_t rns_link_db_find_free_slot( void ){
     uint32_t i;
 
     if( g_link_db.links_count >= RNS_DB_MAX_LINK_COUNT ){
@@ -64,8 +64,8 @@ static int32_t link_db_find_free_slot( void ){
     return -1;
 }
 
-static void link_db_remove_index( uint8_t index ){
-    link_db_link_t *link;
+static void rns_link_db_remove_index( uint8_t index ){
+    rns_link_db_link_t *link;
     uint16_t bucket_idx;
     uint8_t cur;
 
@@ -75,7 +75,7 @@ static void link_db_remove_index( uint8_t index ){
         return;
     }
 
-    bucket_idx = link_db_hash_id(link->id);
+    bucket_idx = rns_link_db_hash_id(link->id);
     cur = g_link_db.buckets[bucket_idx];
 
     if( cur == index ){
@@ -103,8 +103,8 @@ static void link_db_remove_index( uint8_t index ){
     }
 }
 
-int32_t link_db_register_pkg( const rns_link_packet_info_t *pkg, rns_packet_direction_t direction ){
-    link_db_link_t *link;
+int32_t rns_link_db_package_register( const rns_link_packet_info_t *pkg, rns_packet_direction_t direction ){
+    rns_link_db_link_t *link;
     int32_t index;
     int32_t slot;
     int32_t now_s;
@@ -114,12 +114,12 @@ int32_t link_db_register_pkg( const rns_link_packet_info_t *pkg, rns_packet_dire
         return RNS_RET_NULLPTR;
     }
 
-    now_s = link_db_timestamp_s();
-    index = link_db_find_index_by_id(pkg->link_id);
+    now_s = rns_link_db_timestamp_s();
+    index = rns_link_db_find_index_by_id(pkg->link_id);
 
     if( pkg->context == RNS_CONTEXT_LINKCLOSE ){
         if( index >= 0 ){
-            link_db_remove_index((uint8_t)index);
+            rns_link_db_remove_index((uint8_t)index);
         }
 
         return RNS_RET_OK;
@@ -132,12 +132,12 @@ int32_t link_db_register_pkg( const rns_link_packet_info_t *pkg, rns_packet_dire
             return RNS_RET_NO_SLOT;
         }
     }else{
-        slot = link_db_find_free_slot();
+        slot = rns_link_db_find_free_slot();
         if( slot < 0 ){
             return RNS_RET_NO_SLOT;
         }
 
-        link = malloc(sizeof(link_db_link_t));
+        link = malloc(sizeof(rns_link_db_link_t));
         if( link == NULL ){
             return RNS_RET_NO_MEMORY;
         }
@@ -152,7 +152,7 @@ int32_t link_db_register_pkg( const rns_link_packet_info_t *pkg, rns_packet_dire
         link->hops = pkg->hops;
         link->state = RNS_LINK_STATE_CLOSED;
 
-        bucket_idx = link_db_hash_id(link->id);
+        bucket_idx = rns_link_db_hash_id(link->id);
         link->hash_next = g_link_db.buckets[bucket_idx];
         g_link_db.links[slot] = link;
         g_link_db.buckets[bucket_idx] = (uint8_t)slot;
@@ -191,14 +191,14 @@ int32_t link_db_register_pkg( const rns_link_packet_info_t *pkg, rns_packet_dire
     return RNS_RET_OK;
 }
 
-const link_db_link_t* link_db_get_link( const uint8_t id[RNS_LINK_ID_LEN] ){
+rns_link_db_link_t* rns_link_db_link_get( const uint8_t id[RNS_LINK_ID_LEN] ){
     int32_t index;
 
     if( id == NULL ){
         return NULL;
     }
 
-    index = link_db_find_index_by_id(id);
+    index = rns_link_db_find_index_by_id(id);
     if( index < 0 ){
         return NULL;
     }
@@ -206,11 +206,11 @@ const link_db_link_t* link_db_get_link( const uint8_t id[RNS_LINK_ID_LEN] ){
     return g_link_db.links[index];
 }
 
-uint8_t link_db_get_links_count( void ){
+uint8_t rns_link_db_link_count_get( void ){
     return g_link_db.links_count;
 }
 
-link_db_link_t* link_db_get_link_by_index( uint32_t index ){
+rns_link_db_link_t* rns_link_db_link_get_by_index( uint32_t index ){
     uint32_t i;
     uint32_t pos = 0;
 
@@ -227,4 +227,35 @@ link_db_link_t* link_db_get_link_by_index( uint32_t index ){
     }
 
     return NULL;
+}
+
+void rns_link_db_link_remove( rns_link_db_link_t *link ) {
+    uint32_t i;
+
+    if (link == NULL) {
+        return;
+    }
+
+    for (i = 0; i < RNS_DB_MAX_LINK_COUNT; i++) {
+        if (g_link_db.links[i] == link) {
+            rns_link_db_remove_index((uint8_t)i);
+            return;
+        }
+    }
+}
+
+void *rns_link_db_link_user_get( const rns_link_db_link_t *link ){
+    if (link == NULL) {
+        return NULL;
+    }
+
+    return link->user;
+}
+
+void rns_link_db_link_user_set( rns_link_db_link_t *link, void *user ){
+    if (link == NULL) {
+        return;
+    }
+
+    link->user = user;
 }
