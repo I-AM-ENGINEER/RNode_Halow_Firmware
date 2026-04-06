@@ -665,6 +665,10 @@ void halow_lbt_config_load( halow_lbt_config_t *cfg ){
     configdb_get_i8 (HALOW_LBT_CONFIG_UTIL_MAX_NAME,       (int8_t*)&cfg->util_max_percent);
     configdb_get_i32(HALOW_LBT_CONFIG_UTIL_REFILL_MS_NAME, (int32_t*)&cfg->util_refill_window_ms);
     configdb_get_i16(HALOW_LBT_CONFIG_UTIL_BUCKET_MS_NAME, (int16_t*)&cfg->util_bucket_capacity_ms);
+
+    // Disable LBT artime limit
+    cfg->util_max_percent = 100;
+    cfg->util_enabled = false;
 }
 
 void halow_lbt_wait_tx_allowed(void){

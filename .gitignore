@@ -17,5 +17,11 @@
 __pycache__
 out
 flasher/OTA/downloads
+<<<<<<< HEAD
 flasher/OTA/.venv/
 **/build/
+=======
+
+# venv files
+.venv
+>>>>>>> main
