@@ -74,7 +74,6 @@ targets:
       - csky/csi_kernel/rhino/core/include
       - sdk/lib/net/libcurl
       - src/atcmd.c
-      - sdk/lib/crypto
       - sdk/lib/usb_app
       - src/deep_sleep_placeholder.c
       - <virtual_root>/libcore.S
@@ -88,6 +87,11 @@ targets:
       - sdk/lib/microReticulum/microReticulum/examples
       - sdk/lib/microReticulum/microReticulum/boards
       - sdk/lib/microReticulum/Crypro/examples
+      - sdk/lib/crypto/mbedtls
+      - sdk/lib/crypto/openssl
+      - sdk/lib/crypto/sha256.c
+    settings:
+      debugger: cortex-debug
     toolchain: ANY_GCC
     toolchainConfigMap:
       ANY_GCC:
