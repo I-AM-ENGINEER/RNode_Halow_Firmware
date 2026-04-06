@@ -89,6 +89,7 @@ targets:
       - sdk/lib/microReticulum/Crypro/examples
       - sdk/lib/crypto/mbedtls
       - sdk/lib/crypto/openssl
+      - sdk/lib/crypto/sha256.c
     settings:
       debugger: cortex-debug
     toolchain: ANY_GCC
