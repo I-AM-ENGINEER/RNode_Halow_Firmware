@@ -23,6 +23,7 @@
 #include "telemetry.h"
 #include "hal/spi_nor.h"
 #include "ota.h"
+#include "nearby_detect.h"
 
 /* -------------------------------------------------------------------------- */
 /* Change version                                                             */
@@ -846,4 +847,73 @@ int32_t web_api_default_reset( const cJSON *in, cJSON *out ){
     ota_reset_to_default();
     device_reboot();
     return 0;
+}
+
+int32_t web_api_nearby_modems_get( const cJSON *in, cJSON *out ){
+    cJSON *arr = NULL;
+    cJSON *row = NULL;
+    nearby_modem_t *m;
+    char mac[13];
+    uint32_t i;
+
+    (void)in;
+
+    if (out == NULL) {
+        return WEB_API_RC_BAD_REQUEST;
+    }
+
+    arr = cJSON_AddArrayToObject(out, "d");
+    if (arr == NULL) {
+        return WEB_API_RC_INTERNAL;
+    }
+
+    for (i = 0; i < nearby_modem_count_get(); i++) {
+        m = nearby_modem_get_by_index(i);
+        if (m == NULL) {
+            continue;
+        }
+
+        snprintf(
+            mac,
+            sizeof(mac),
+            "%02X%02X%02X%02X%02X%02X",
+            m->mac[0], m->mac[1], m->mac[2],
+            m->mac[3], m->mac[4], m->mac[5]
+        );
+
+        row = cJSON_CreateArray();
+        if (row == NULL) {
+            return WEB_API_RC_INTERNAL;
+        }
+
+        int32_t age = (int32_t)(time(NULL) - m->lastrx_timestamp_s);
+        if (age < 0) {
+            age = 0;
+        }
+
+        cJSON_AddItemToArray(row, cJSON_CreateString(mac));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)m->last_rssi));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)m->mcs));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)m->rx_packets));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)m->rx_bytes));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)age));
+
+        cJSON_AddItemToArray(arr, row);
+    }
+
+    return WEB_API_RC_OK;
+}
+
+int32_t web_api_reticulum_links_get( const cJSON *in, cJSON *out ){
+    (void)in;
+
+    if (out == NULL) {
+        return WEB_API_RC_BAD_REQUEST;
+    }
+
+    if (cJSON_AddArrayToObject(out, "d") == NULL) {
+        return WEB_API_RC_INTERNAL;
+    }
+
+    return WEB_API_RC_OK;
 }

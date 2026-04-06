@@ -11,6 +11,8 @@
         <button type="button" data-tab="dashboard" class="active">Dashboard</button>
         <button type="button" data-tab="settings">Device Settings</button>
         <button type="button" data-tab="telemetry">Telemetry</button>
+        <button type="button" data-tab="nearby">Nearby modems</button>
+        <button type="button" data-tab="reticulum">Reticulum</button>
         <button type="button" data-tab="firmware">Firmware Update</button>
     </nav>
 
@@ -324,6 +326,117 @@
                 <div class="panel-actions panel-actions-wrap">
                     <button type="button" id="save_telemetry" disabled>Save</button>
                     <button type="button" id="telemetry_send_btn" class="secondary">Send now</button>
+                </div>
+            </div>
+        </section>
+
+
+        <section id="nearby" class="tab-content">
+            <div class="panel">
+                <h3>Nearby modems</h3>
+
+                <div class="nearby-toolbar">
+                    <label class="toggle-label nearby-auto-label">
+                        <span>Auto refresh</span>
+                        <input type="checkbox" id="nearby_auto" checked>
+                    </label>
+                    <label class="nearby-period-label">
+                        <span>Period (s)</span>
+                        <input type="number" id="nearby_period" min="1" step="1" value="5">
+                    </label>
+                    <div class="panel-actions nearby-actions">
+                        <button type="button" id="nearby_refresh" class="secondary">Refresh now</button>
+                    </div>
+                </div>
+
+                <table class="stats-table nearby-summary-table">
+                    <tbody>
+                    <tr><th>Device MAC</th><td id="nearby_self_mac">--</td></tr>
+                    <tr><th>Heard devices</th><td id="nearby_count">--</td></tr>
+                    </tbody>
+                </table>
+
+                <div class="nearby-table-wrap">
+                    <table class="stats-table nearby-table">
+                        <thead>
+                            <tr>
+                                <th>MAC</th>
+                                <th>Last RX RSSI</th>
+                                <th>MCS</th>
+                                <th>RX Packets</th>
+                                <th>RX Bytes</th>
+                                <th>RX bit/s</th>
+                                <th>Last seen</th>
+                            </tr>
+                        </thead>
+                        <tbody id="nearby_table_body">
+                            <tr><td colspan="7">--</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="panel-actions panel-actions-wrap nearby-paging">
+                    <button type="button" id="nearby_prev" class="secondary">Prev</button>
+                    <span id="nearby_page_info">Page 1 / 1</span>
+                    <button type="button" id="nearby_next" class="secondary">Next</button>
+                </div>
+            </div>
+        </section>
+
+
+        <section id="reticulum" class="tab-content">
+            <div class="panel">
+                <h3>Reticulum</h3>
+
+                <div class="nearby-toolbar">
+                    <label class="toggle-label nearby-auto-label">
+                        <span>Auto refresh</span>
+                        <input type="checkbox" id="reticulum_auto" checked>
+                    </label>
+                    <label class="nearby-period-label">
+                        <span>Period (s)</span>
+                        <input type="number" id="reticulum_period" min="1" step="1" value="5">
+                    </label>
+                    <div class="panel-actions nearby-actions">
+                        <button type="button" id="reticulum_refresh" class="secondary">Refresh now</button>
+                    </div>
+                </div>
+
+                <table class="stats-table nearby-summary-table">
+                    <tbody>
+                    <tr><th>Links</th><td id="reticulum_count">--</td></tr>
+                    </tbody>
+                </table>
+
+                <div class="nearby-table-wrap">
+                    <table class="stats-table reticulum-table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Remote MAC</th>
+                                <th>Destination</th>
+                                <th>State</th>
+                                <th>RX bytes</th>
+                                <th>TX bytes</th>
+                                <th>RX packets</th>
+                                <th>TX packets</th>
+                                <th>Last RX</th>
+                                <th>Last TX</th>
+                                <th>RX bit/s</th>
+                                <th>TX bit/s</th>
+                                <th>MTU</th>
+                            </tr>
+                        </thead>
+                        <tbody id="reticulum_table_body">
+                            <tr><td colspan="13">--</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="panel-actions panel-actions-wrap nearby-paging">
+                    <button type="button" id="reticulum_prev" class="secondary">Prev</button>
+                    <span id="reticulum_page_info">Page 1 / 1</span>
+                    <button type="button" id="reticulum_next" class="secondary">Next</button>
                 </div>
             </div>
         </section>

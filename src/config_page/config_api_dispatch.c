@@ -74,6 +74,8 @@ static const web_api_route_t s_api_routes[] = {
     //{ "stat_reset",  web_api_stat_reset,  NULL },
     { "get_stat",           web_api_stat_get,               NULL                        },
     { "get_all",            web_api_all_get,                NULL                        },
+    { "get_nearby_modems",  web_api_nearby_modems_get,      NULL                        },
+    { "get_reticulum_links",web_api_reticulum_links_get,    NULL                        },
     { "halow_cfg",          web_api_halow_cfg_get,          web_api_halow_cfg_post      },
     { "lbt_cfg",            web_api_lbt_cfg_get,            web_api_lbt_cfg_post        },
     { "net_cfg",            web_api_net_cfg_get,            web_api_net_cfg_post        },

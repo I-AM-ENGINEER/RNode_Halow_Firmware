@@ -27,11 +27,12 @@ typedef struct lmac_ops lmac_ops_t;
 #define LMAC_PHY_WD_RX_ACTIVE     (1U << 2)
 #define LMAC_PHY_WD_SCAN_TIMER    (1U << 3)
 
-typedef struct skb_list {
+/**/
+typedef struct _skb_list {
     struct sk_buff *head;
     struct sk_buff *tail;
     uint32_t        count;
-} skb_list_t;
+} _skb_list_t;
 
 typedef struct lmac_ctx {
     /* 0x000 */
@@ -363,14 +364,14 @@ typedef struct lmac_ah_tx_ctx {
     struct os_semaphore tx_sem;
     struct os_semaphore tx_status_sem;
 
-    skb_list_t          tx_q;
-    skb_list_t          txsq;
-    skb_list_t          aux_q;
-    skb_list_t          ac_q[4];
+    _skb_list_t          tx_q;
+    _skb_list_t          txsq;
+    _skb_list_t          aux_q;
+    _skb_list_t          ac_q[4];
 
     uint8_t             ac_state[4][0x120];    /* 0x0b8..0x537 */
 
-    skb_list_t          stat_q;
+    _skb_list_t          stat_q;
 
     uint8_t             rsv_544[0x6ac - 0x544];
     uint8_t             ce_rate_0;

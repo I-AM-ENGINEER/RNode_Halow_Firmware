@@ -318,3 +318,199 @@ fieldset:disabled textarea {
     color: #666;
     line-height: 1.45;
 }
+
+
+.nearby-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 0.75rem;
+    margin-bottom: 1rem;
+}
+
+.nearby-auto-label,
+.nearby-period-label {
+    margin-bottom: 0;
+    flex: 0 0 auto;
+}
+
+.nearby-toolbar label span {
+    flex: 0 0 auto;
+    width: auto;
+}
+
+.nearby-auto-label {
+    justify-content: flex-start;
+    gap: 0.5rem;
+}
+
+.nearby-auto-label input[type="checkbox"] {
+    flex: 0 0 auto;
+    width: auto;
+    max-width: none;
+    margin-left: 0;
+}
+
+.nearby-period-label span {
+    flex: 0 0 auto;
+}
+
+.nearby-period-label input {
+    flex: 0 0 90px;
+    width: 90px;
+}
+
+.nearby-actions {
+    margin-top: 0;
+    margin-left: auto;
+}
+
+.nearby-summary-table {
+    margin-bottom: 1rem;
+}
+
+.nearby-summary-table th {
+    width: 1%;
+    white-space: nowrap;
+}
+
+.nearby-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+}
+
+.nearby-table {
+    width: max-content;
+    min-width: 100%;
+    margin-bottom: 0;
+}
+
+.nearby-table th,
+.nearby-table td {
+    white-space: nowrap;
+}
+
+.nearby-table thead th {
+    width: auto;
+    border-bottom: 1px solid #ddd;
+    color: #333;
+}
+
+.nearby-table thead th:first-child,
+.nearby-table tbody td:first-child {
+    width: 1%;
+}
+
+.nearby-table tbody td {
+    width: auto;
+}
+
+.nearby-paging {
+    align-items: center;
+}
+
+#nearby_page_info {
+    min-width: 110px;
+    text-align: center;
+    color: #555;
+}
+
+
+.reticulum-table {
+    width: max-content;
+    min-width: 100%;
+    margin-bottom: 0;
+}
+
+.reticulum-table th,
+.reticulum-table td {
+    white-space: nowrap;
+}
+
+.reticulum-table thead th {
+    width: auto;
+    border-bottom: 1px solid #ddd;
+    color: #333;
+}
+
+.reticulum-table thead th:first-child,
+.reticulum-table tbody td:first-child {
+    width: 1%;
+}
+
+#reticulum_page_info {
+    min-width: 110px;
+    text-align: center;
+    color: #555;
+}
+
+
+label input:not([type="checkbox"]),
+label select,
+label textarea {
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+}
+
+label input[type="checkbox"] {
+    width: auto;
+    max-width: none;
+}
+
+@media (max-width: 720px) {
+    main {
+        padding: 0.75rem;
+    }
+
+    .panel {
+        padding: 0.8rem;
+    }
+
+    label:not(.toggle-label) {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.35rem;
+    }
+
+    label:not(.toggle-label) span {
+        flex: 0 0 auto;
+        width: 100%;
+    }
+
+    .panel-actions {
+        justify-content: stretch;
+    }
+
+    .panel-actions button {
+        flex: 1 1 auto;
+    }
+
+    .nearby-toolbar {
+        align-items: stretch;
+    }
+
+    .nearby-toolbar label {
+        width: auto;
+        max-width: 100%;
+    }
+
+    .nearby-toolbar label span {
+        width: auto;
+    }
+
+    .nearby-auto-label {
+        justify-content: flex-start;
+        flex: 0 0 auto;
+    }
+
+    .nearby-period-label {
+        flex: 0 0 auto;
+    }
+
+    .nearby-actions {
+        margin-left: 0;
+        width: 100%;
+    }
+}
+

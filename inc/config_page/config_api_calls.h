@@ -35,6 +35,8 @@ int32_t web_api_online_ota_post( const cJSON *in, cJSON *out );
 
 int32_t web_api_stat_get( const cJSON *in, cJSON *out );
 int32_t web_api_all_get( const cJSON *in, cJSON *out );
+int32_t web_api_nearby_modems_get( const cJSON *in, cJSON *out );
+int32_t web_api_reticulum_links_get( const cJSON *in, cJSON *out );
 
 int32_t web_api_stat_reset( const cJSON *in, cJSON *out );
 int32_t web_api_ota_begin_post( const cJSON *in, cJSON *out );

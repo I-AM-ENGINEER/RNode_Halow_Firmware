@@ -16,14 +16,44 @@
         tcp: '',
         telemetry: ''
     };
+    const DASHBOARD_REFRESH_MS = 1000;
+    const NEARBY_PAGE_SIZE = 20;
+    const RETICULUM_PAGE_SIZE = 20;
+    const dashboardState = {
+        active: false,
+        timer: null,
+        loading: false
+    };
+    const nearbyState = {
+        auto: true,
+        periodMs: 5000,
+        page: 0,
+        total: 0,
+        timer: null,
+        loading: false,
+        active: false,
+        speedCache: new Map()
+    };
+    const reticulumState = {
+        auto: true,
+        periodMs: 5000,
+        page: 0,
+        total: 0,
+        timer: null,
+        loading: false,
+        active: false,
+        speedCache: new Map()
+    };
 
     document.addEventListener('DOMContentLoaded', () => {
         setupTabs();
         setupHandlers();
         setupDirtyTracking();
         loadAll();
-        updateStats();
-        setInterval(updateStats, 1000);
+        updateNearbyUi();
+        updateReticulumUi();
+        handleTabActivated('dashboard');
+        startLiveAgeTicker();
     });
 
     function jsonSnapshot(obj) {
@@ -169,6 +199,7 @@
                 document.querySelectorAll('.tab-content').forEach(sec => sec.classList.remove('active'));
                 const activeSec = document.getElementById(tabName);
                 if (activeSec) { activeSec.classList.add('active'); }
+                handleTabActivated(tabName);
             });
         });
     }
@@ -200,6 +231,18 @@
         document.getElementById('telemetry_lon').addEventListener('change', () => validateTelemetryForm({ silent: true }));
 
         document.getElementById('stat_reset_btn').addEventListener('click', resetStats);
+
+        document.getElementById('nearby_auto').addEventListener('change', handleNearbyAutoChange);
+        document.getElementById('nearby_period').addEventListener('change', handleNearbyPeriodChange);
+        document.getElementById('nearby_refresh').addEventListener('click', () => refreshNearby(true));
+        document.getElementById('nearby_prev').addEventListener('click', () => changeNearbyPage(-1));
+        document.getElementById('nearby_next').addEventListener('click', () => changeNearbyPage(1));
+
+        document.getElementById('reticulum_auto').addEventListener('change', handleReticulumAutoChange);
+        document.getElementById('reticulum_period').addEventListener('change', handleReticulumPeriodChange);
+        document.getElementById('reticulum_refresh').addEventListener('click', () => refreshReticulum(true));
+        document.getElementById('reticulum_prev').addEventListener('click', () => changeReticulumPage(-1));
+        document.getElementById('reticulum_next').addEventListener('click', () => changeReticulumPage(1));
 
         document.getElementById('fw_file').addEventListener('change', updateFwDisabled);
         document.getElementById('fw_flash').addEventListener('click', fwFlash);
@@ -325,6 +368,627 @@
             }
         } catch (err) {
             // ignore periodic fetch errors
+        }
+    }
+
+
+    function stopDashboardTimer() {
+        if (dashboardState.timer !== null) {
+            clearTimeout(dashboardState.timer);
+            dashboardState.timer = null;
+        }
+    }
+
+    function scheduleDashboardRefresh() {
+        stopDashboardTimer();
+        if (!dashboardState.active) {
+            return;
+        }
+        dashboardState.timer = setTimeout(() => {
+            refreshDashboard(false);
+        }, DASHBOARD_REFRESH_MS);
+    }
+
+    async function refreshDashboard(force) {
+        if (!dashboardState.active && !force) {
+            return;
+        }
+
+        if (dashboardState.loading) {
+            return;
+        }
+
+        stopDashboardTimer();
+        dashboardState.loading = true;
+
+        try {
+            await updateStats();
+        } finally {
+            dashboardState.loading = false;
+            scheduleDashboardRefresh();
+        }
+    }
+
+    function handleTabActivated(tabName) {
+        dashboardState.active = (tabName === 'dashboard');
+        nearbyState.active = (tabName === 'nearby');
+        reticulumState.active = (tabName === 'reticulum');
+
+        if (dashboardState.active) {
+            refreshDashboard(true);
+        } else {
+            stopDashboardTimer();
+        }
+
+        if (nearbyState.active) {
+            refreshNearby(true);
+        } else {
+            stopNearbyTimer();
+        }
+
+        if (reticulumState.active) {
+            refreshReticulum(true);
+        } else {
+            stopReticulumTimer();
+        }
+    }
+
+    function stopNearbyTimer() {
+        if (nearbyState.timer !== null) {
+            clearTimeout(nearbyState.timer);
+            nearbyState.timer = null;
+        }
+    }
+
+    function scheduleNearbyRefresh() {
+        stopNearbyTimer();
+        if (!nearbyState.active || !nearbyState.auto) {
+            return;
+        }
+        nearbyState.timer = setTimeout(() => {
+            refreshNearby(false);
+        }, nearbyState.periodMs);
+    }
+
+    function updateNearbyUi() {
+        const autoEl = document.getElementById('nearby_auto');
+        const periodEl = document.getElementById('nearby_period');
+        const prevEl = document.getElementById('nearby_prev');
+        const nextEl = document.getElementById('nearby_next');
+        const pageInfoEl = document.getElementById('nearby_page_info');
+        const totalPages = Math.max(1, Math.ceil((nearbyState.total || 0) / NEARBY_PAGE_SIZE));
+
+        if (autoEl) {
+            autoEl.checked = nearbyState.auto;
+        }
+
+        if (periodEl) {
+            periodEl.value = String(Math.max(1, Math.round(nearbyState.periodMs / 1000)));
+            periodEl.disabled = !nearbyState.auto;
+        }
+
+        if (prevEl) {
+            prevEl.disabled = nearbyState.loading || nearbyState.page <= 0;
+        }
+
+        if (nextEl) {
+            nextEl.disabled = nearbyState.loading || nearbyState.page >= (totalPages - 1);
+        }
+
+        if (pageInfoEl) {
+            pageInfoEl.textContent = 'Page ' + (totalPages === 0 ? 0 : nearbyState.page + 1) + ' / ' + totalPages;
+        }
+    }
+
+    function normalizeNearbyPeriodMs(raw) {
+        const sec = parseInt(raw, 10);
+        if (!Number.isFinite(sec) || sec < 1) {
+            return 5000;
+        }
+        return sec * 1000;
+    }
+
+    function handleNearbyAutoChange() {
+        nearbyState.auto = document.getElementById('nearby_auto').checked;
+        updateNearbyUi();
+        if (nearbyState.auto) {
+            scheduleNearbyRefresh();
+        } else {
+            stopNearbyTimer();
+        }
+    }
+
+    function handleNearbyPeriodChange() {
+        nearbyState.periodMs = normalizeNearbyPeriodMs(document.getElementById('nearby_period').value);
+        updateNearbyUi();
+        scheduleNearbyRefresh();
+    }
+
+    function changeNearbyPage(delta) {
+        const totalPages = Math.max(1, Math.ceil((nearbyState.total || 0) / NEARBY_PAGE_SIZE));
+        const nextPage = Math.min(Math.max(nearbyState.page + delta, 0), totalPages - 1);
+        if (nextPage === nearbyState.page) {
+            return;
+        }
+        nearbyState.page = nextPage;
+        updateNearbyUi();
+        refreshNearby(true);
+    }
+
+    function normalizeNearbyMcs(value) {
+        if (value === undefined || value === null || value === '') {
+            return '--';
+        }
+
+        if (typeof value === 'string') {
+            const match = value.match(/-?\d+/);
+            if (match) {
+                return match[0];
+            }
+        }
+
+        return String(value);
+    }
+
+
+    function tickAgeCells() {
+        document.querySelectorAll('[data-age-seconds]').forEach(el => {
+            const age = parseInt(el.dataset.ageSeconds, 10);
+            if (!Number.isFinite(age) || age < 0) {
+                el.textContent = '--';
+                return;
+            }
+
+            const nextAge = age + 1;
+            el.dataset.ageSeconds = String(nextAge);
+            el.textContent = formatDurationCompact(nextAge);
+        });
+    }
+
+    function startLiveAgeTicker() {
+        setInterval(tickAgeCells, 1000);
+    }
+
+
+    function formatMac(value) {
+        if (typeof value !== 'string') {
+            return value ?? '--';
+        }
+
+        const hex = value.replace(/[^0-9a-fA-F]/g, '').toUpperCase();
+        if (hex.length !== 12) {
+            return value;
+        }
+
+        return hex.match(/.{1,2}/g).join(':');
+    }
+
+    function formatNearbyBitrate(bitsPerSecond) {
+        if (!Number.isFinite(bitsPerSecond) || bitsPerSecond < 0) {
+            return '--';
+        }
+
+        return String(Math.round(bitsPerSecond));
+    }
+
+    function formatNearbyLastSeen(seconds) {
+        return formatDurationCompact(seconds);
+    }
+
+    function parseNearbyRow(row) {
+        if (Array.isArray(row)) {
+            return {
+                mac: row[0],
+                rssi: row[1],
+                mcs: row[2],
+                packets: row[3],
+                bytes: row[4],
+                lastSeen: row[5]
+            };
+        }
+
+        return {
+            mac: row?.m ?? row?.mac,
+            rssi: row?.r ?? row?.rssi,
+            mcs: row?.s ?? row?.mcs,
+            packets: row?.p ?? row?.rx_packets,
+            bytes: row?.b ?? row?.rx_bytes,
+            lastSeen: row?.l ?? row?.last_seen
+        };
+    }
+
+    function calcNearbyBitrate(mac, bytes) {
+        const nowMs = Date.now();
+        const rxBytes = Number(bytes);
+
+        if (!mac || !Number.isFinite(rxBytes) || rxBytes < 0) {
+            return '--';
+        }
+
+        const prev = nearbyState.speedCache.get(mac);
+        nearbyState.speedCache.set(mac, { bytes: rxBytes, tsMs: nowMs });
+
+        if (!prev) {
+            return '--';
+        }
+
+        const deltaBytes = rxBytes - prev.bytes;
+        const deltaMs = nowMs - prev.tsMs;
+
+        if (deltaBytes < 0 || deltaMs <= 0) {
+            return '--';
+        }
+
+        return formatNearbyBitrate((deltaBytes * 8000) / deltaMs);
+    }
+
+    function renderNearbyRows(rows) {
+        const body = document.getElementById('nearby_table_body');
+        if (!body) { return; }
+
+        body.innerHTML = '';
+
+        if (!rows.length) {
+            const tr = document.createElement('tr');
+            const td = document.createElement('td');
+            td.colSpan = 7;
+            td.textContent = 'No devices';
+            tr.appendChild(td);
+            body.appendChild(tr);
+            return;
+        }
+
+        rows.forEach(srcRow => {
+            const row = parseNearbyRow(srcRow);
+            const tr = document.createElement('tr');
+            const values = [
+                formatMac(row.mac),
+                row.rssi,
+                normalizeNearbyMcs(row.mcs),
+                row.packets,
+                row.bytes,
+                calcNearbyBitrate(row.mac, row.bytes)
+            ];
+
+            values.forEach(value => {
+                const td = document.createElement('td');
+                td.textContent = (value !== undefined && value !== null && value !== '') ? value : '--';
+                tr.appendChild(td);
+            });
+
+            const ageTd = document.createElement('td');
+            const age = Number(row.lastSeen);
+            if (Number.isFinite(age) && age >= 0) {
+                ageTd.dataset.ageSeconds = String(Math.floor(age));
+                ageTd.textContent = formatNearbyLastSeen(age);
+            } else {
+                ageTd.textContent = '--';
+            }
+            tr.appendChild(ageTd);
+
+            body.appendChild(tr);
+        });
+    }
+
+    async function refreshNearby(force) {
+        if (!nearbyState.active && !force) {
+            return;
+        }
+
+        if (nearbyState.loading) {
+            return;
+        }
+
+        stopNearbyTimer();
+        nearbyState.loading = true;
+        updateNearbyUi();
+
+        try {
+            for (let attempt = 0; attempt < 2; attempt++) {
+                const url = '/api/get_nearby_modems?p=' + nearbyState.page + '&n=' + NEARBY_PAGE_SIZE;
+                const res = await fetch(url, { cache: 'no-store' });
+                if (!res.ok) {
+                    return;
+                }
+
+                const data = await res.json();
+                const total = Number(data?.c ?? data?.count ?? data?.total ?? 0);
+                const totalPages = Math.max(1, Math.ceil(total / NEARBY_PAGE_SIZE));
+
+                if (nearbyState.page >= totalPages) {
+                    nearbyState.page = totalPages - 1;
+                    nearbyState.total = total;
+                    continue;
+                }
+
+                nearbyState.total = total;
+                setText('nearby_self_mac', formatMac(data?.m ?? data?.mac ?? data?.self_mac ?? document.getElementById('stat_mac')?.textContent));
+                setText('nearby_count', total);
+                renderNearbyRows(Array.isArray(data?.d) ? data.d : (Array.isArray(data?.devices) ? data.devices : []));
+                return;
+            }
+        } catch (err) {
+            // ignore nearby fetch errors
+        } finally {
+            nearbyState.loading = false;
+            updateNearbyUi();
+            scheduleNearbyRefresh();
+        }
+    }
+
+    function stopReticulumTimer() {
+        if (reticulumState.timer !== null) {
+            clearTimeout(reticulumState.timer);
+            reticulumState.timer = null;
+        }
+    }
+
+    function scheduleReticulumRefresh() {
+        stopReticulumTimer();
+        if (!reticulumState.active || !reticulumState.auto) {
+            return;
+        }
+        reticulumState.timer = setTimeout(() => {
+            refreshReticulum(false);
+        }, reticulumState.periodMs);
+    }
+
+    function updateReticulumUi() {
+        const autoEl = document.getElementById('reticulum_auto');
+        const periodEl = document.getElementById('reticulum_period');
+        const prevEl = document.getElementById('reticulum_prev');
+        const nextEl = document.getElementById('reticulum_next');
+        const pageInfoEl = document.getElementById('reticulum_page_info');
+        const totalPages = Math.max(1, Math.ceil((reticulumState.total || 0) / RETICULUM_PAGE_SIZE));
+
+        if (autoEl) {
+            autoEl.checked = reticulumState.auto;
+        }
+
+        if (periodEl) {
+            periodEl.value = String(Math.max(1, Math.round(reticulumState.periodMs / 1000)));
+            periodEl.disabled = !reticulumState.auto;
+        }
+
+        if (prevEl) {
+            prevEl.disabled = reticulumState.loading || reticulumState.page <= 0;
+        }
+
+        if (nextEl) {
+            nextEl.disabled = reticulumState.loading || reticulumState.page >= (totalPages - 1);
+        }
+
+        if (pageInfoEl) {
+            pageInfoEl.textContent = 'Page ' + (totalPages === 0 ? 0 : reticulumState.page + 1) + ' / ' + totalPages;
+        }
+    }
+
+    function normalizeReticulumPeriodMs(raw) {
+        const sec = parseInt(raw, 10);
+        if (!Number.isFinite(sec) || sec < 1) {
+            return 5000;
+        }
+        return sec * 1000;
+    }
+
+    function handleReticulumAutoChange() {
+        reticulumState.auto = document.getElementById('reticulum_auto').checked;
+        updateReticulumUi();
+        if (reticulumState.auto) {
+            scheduleReticulumRefresh();
+        } else {
+            stopReticulumTimer();
+        }
+    }
+
+    function handleReticulumPeriodChange() {
+        reticulumState.periodMs = normalizeReticulumPeriodMs(document.getElementById('reticulum_period').value);
+        updateReticulumUi();
+        scheduleReticulumRefresh();
+    }
+
+    function changeReticulumPage(delta) {
+        const totalPages = Math.max(1, Math.ceil((reticulumState.total || 0) / RETICULUM_PAGE_SIZE));
+        const nextPage = Math.min(Math.max(reticulumState.page + delta, 0), totalPages - 1);
+        if (nextPage === reticulumState.page) {
+            return;
+        }
+        reticulumState.page = nextPage;
+        updateReticulumUi();
+        refreshReticulum(true);
+    }
+
+    function formatDurationCompact(seconds) {
+        const total = Number(seconds);
+        if (!Number.isFinite(total) || total < 0) {
+            return '--';
+        }
+
+        let remain = Math.floor(total);
+        const h = Math.floor(remain / 3600);
+        remain -= h * 3600;
+        const m = Math.floor(remain / 60);
+        const s = remain - (m * 60);
+
+        const parts = [];
+        if (h > 0) {
+            parts.push(h + 'h');
+        }
+        if (m > 0 || h > 0) {
+            parts.push(m + 'm');
+        }
+        parts.push(s + 's');
+        return parts.join(' ');
+    }
+
+    function parseReticulumRow(row) {
+        if (Array.isArray(row)) {
+            return {
+                id: row[0],
+                remoteMac: row[1],
+                destination: row[2],
+                state: row[3],
+                rxBytes: row[4],
+                txBytes: row[5],
+                rxPackets: row[6],
+                txPackets: row[7],
+                lastRx: row[8],
+                lastTx: row[9],
+                mtu: row[10]
+            };
+        }
+
+        return {
+            id: row?.i ?? row?.id,
+            remoteMac: row?.m ?? row?.remote_mac,
+            destination: row?.d ?? row?.destination,
+            state: row?.s ?? row?.state,
+            rxBytes: row?.rb ?? row?.rx_bytes,
+            txBytes: row?.tb ?? row?.tx_bytes,
+            rxPackets: row?.rp ?? row?.rx_packets,
+            txPackets: row?.tp ?? row?.tx_packets,
+            lastRx: row?.lr ?? row?.last_rx,
+            lastTx: row?.lt ?? row?.last_tx,
+            mtu: row?.u ?? row?.mtu
+        };
+    }
+
+    function calcReticulumBitrate(key, bytes) {
+        const nowMs = Date.now();
+        const numBytes = Number(bytes);
+
+        if (!key || !Number.isFinite(numBytes) || numBytes < 0) {
+            return '--';
+        }
+
+        const prev = reticulumState.speedCache.get(key);
+        reticulumState.speedCache.set(key, { bytes: numBytes, tsMs: nowMs });
+
+        if (!prev) {
+            return '--';
+        }
+
+        const deltaBytes = numBytes - prev.bytes;
+        const deltaMs = nowMs - prev.tsMs;
+
+        if (deltaBytes < 0 || deltaMs <= 0) {
+            return '--';
+        }
+
+        return String(Math.round((deltaBytes * 8000) / deltaMs));
+    }
+
+    function renderReticulumRows(rows) {
+        const body = document.getElementById('reticulum_table_body');
+        if (!body) { return; }
+
+        body.innerHTML = '';
+
+        if (!rows.length) {
+            const tr = document.createElement('tr');
+            const td = document.createElement('td');
+            td.colSpan = 13;
+            td.textContent = 'No links';
+            tr.appendChild(td);
+            body.appendChild(tr);
+            return;
+        }
+
+        rows.forEach(srcRow => {
+            const row = parseReticulumRow(srcRow);
+            const idKey = String(row.id ?? row.remoteMac ?? row.destination ?? '');
+            const rxRate = calcReticulumBitrate('rx:' + idKey, row.rxBytes);
+            const txRate = calcReticulumBitrate('tx:' + idKey, row.txBytes);
+            const tr = document.createElement('tr');
+            const values = [
+                row.id,
+                row.remoteMac,
+                row.destination,
+                row.state,
+                row.rxBytes,
+                row.txBytes,
+                row.rxPackets,
+                row.txPackets
+            ];
+
+            values.forEach(value => {
+                const td = document.createElement('td');
+                td.textContent = (value !== undefined && value !== null && value !== '') ? value : '--';
+                tr.appendChild(td);
+            });
+
+            const lastRxTd = document.createElement('td');
+            const lastRx = Number(row.lastRx);
+            if (Number.isFinite(lastRx) && lastRx >= 0) {
+                lastRxTd.dataset.ageSeconds = String(Math.floor(lastRx));
+                lastRxTd.textContent = formatDurationCompact(lastRx);
+            } else {
+                lastRxTd.textContent = '--';
+            }
+            tr.appendChild(lastRxTd);
+
+            const lastTxTd = document.createElement('td');
+            const lastTx = Number(row.lastTx);
+            if (Number.isFinite(lastTx) && lastTx >= 0) {
+                lastTxTd.dataset.ageSeconds = String(Math.floor(lastTx));
+                lastTxTd.textContent = formatDurationCompact(lastTx);
+            } else {
+                lastTxTd.textContent = '--';
+            }
+            tr.appendChild(lastTxTd);
+
+            [rxRate, txRate, row.mtu].forEach(value => {
+                const td = document.createElement('td');
+                td.textContent = (value !== undefined && value !== null && value !== '') ? value : '--';
+                tr.appendChild(td);
+            });
+
+            body.appendChild(tr);
+        });
+    }
+
+    async function refreshReticulum(force) {
+        if (!reticulumState.active && !force) {
+            return;
+        }
+
+        if (reticulumState.loading) {
+            return;
+        }
+
+        stopReticulumTimer();
+        reticulumState.loading = true;
+        updateReticulumUi();
+
+        try {
+            for (let attempt = 0; attempt < 2; attempt++) {
+                const url = '/api/get_reticulum_links?p=' + reticulumState.page + '&n=' + RETICULUM_PAGE_SIZE;
+                const res = await fetch(url, { cache: 'no-store' });
+                if (!res.ok) {
+                    return;
+                }
+
+                const data = await res.json();
+                const total = Number(data?.c ?? data?.count ?? data?.total ?? 0);
+                const totalPages = Math.max(1, Math.ceil(total / RETICULUM_PAGE_SIZE));
+
+                if (reticulumState.page >= totalPages) {
+                    reticulumState.page = totalPages - 1;
+                    reticulumState.total = total;
+                    continue;
+                }
+
+                reticulumState.total = total;
+                setText('reticulum_count', total);
+                renderReticulumRows(Array.isArray(data?.d) ? data.d : (Array.isArray(data?.links) ? data.links : []));
+                return;
+            }
+        } catch (err) {
+            // ignore reticulum fetch errors
+        } finally {
+            reticulumState.loading = false;
+            updateReticulumUi();
+            scheduleReticulumRefresh();
         }
     }
 

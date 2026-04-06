@@ -2490,6 +2490,9 @@ Board: txw4002a
         <FileOption/>
       </File>
     </VirtualDirectory>
+    <File Name="../src/nearby_detect.c">
+      <FileOption/>
+    </File>
   </VirtualDirectory>
   <BuildConfigs>
     <BuildConfig Name="BuildSet">

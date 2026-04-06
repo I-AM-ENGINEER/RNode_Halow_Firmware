@@ -50,6 +50,7 @@
 #include "rns/stream_parser.h"
 #include "rns/link_parser.h"
 #include "rns/link_db.h"
+#include "nearby_detect.h"
 
 static struct os_work blink_wk;
 static struct os_work stats_wk;
@@ -93,7 +94,7 @@ typedef struct {
     uint8_t retries_count;
 } halow_ack_config_t;
 
-static inline bool rns_link_ack_cfg_should_ack( const rns_link_ack_cfg_t *cfg, rns_context_t context ){
+static inline bool rns_link_ack_cfg_should_ack( const halow_ack_link_context_t *cfg, rns_context_t context ){
     if( cfg == NULL ){
         return false;
     }
@@ -210,12 +211,21 @@ static void halow_rx_handler(struct hgic_rx_info *info,
     //     os_printf("\n");
     // }
     
-    os_printf("rf->tcp: %db\n", len);
+    //log_trace("rf->tcp: MAC: %02X:%02X:%02X:%02X:%02X:%02X signal=%d len=%db" , hdr->addr2[0], hdr->addr2[1], hdr->addr2[2], hdr->addr2[3], hdr->addr2[4], hdr->addr2[5], info->signal, len);
+    nearby_modem_package_info_t modem_pkg_info = {
+        .len = len,
+        .mcs = info->mcs,
+        .rssi = info->signal,
+        .timestamp_s = (uint32_t)time(NULL)
+    };
+    memcpy(modem_pkg_info.mac, hdr->addr2, 6);
+
+    nearby_modem_package_register(&modem_pkg_info);
     indication_led_rx();
     statistics_radio_register_rx_package(len);
     int32_t res = tcp_server_send(data, len);
     if(res != 0){
-        os_printf("rf->tcp send error: %d\n", res);
+        log_info("rf->tcp send error: %d\n", res);
     }
 }
 
