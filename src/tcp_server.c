@@ -9,6 +9,7 @@
 #include "lwip/netbuf.h"
 #include "lwip/api.h"
 #include "lib/lwrb/lwrb.h"
+#include "net_ip.h"
 #include <string.h>
 
 //#define TCP_SERVER_DEBUG
@@ -250,6 +251,7 @@ static void tcp_server_task( void *arg ){
     err_t err;
     
     (void)arg;
+	//net_ip_wait_ready();
 
     tcps_debug("server start");
 

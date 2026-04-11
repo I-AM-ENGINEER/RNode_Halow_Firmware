@@ -6,7 +6,7 @@
 #include "lwip/tcpip.h"
 #include "sys_config.h"
 
-//#define NET_IP_DEBUG
+#define NET_IP_DEBUG
 
 #ifdef NET_IP_DEBUG
 #define nip_debug(fmt, ...)  os_printf("[NET_IP] " fmt "\r\n", ##__VA_ARGS__)
@@ -206,4 +206,18 @@ int32_t net_ip_init(void){
     net_ip_config_save(&net_ip_config);
     net_ip_config_apply(&net_ip_config);
     return 0;
+}
+
+void net_ip_wait_ready( void ){
+    while (1) {
+        struct netif *n = netif_default;
+
+        if (n != NULL) {
+            if (netif_is_up(n) && netif_is_link_up(n) && !ip4_addr_isany_val(*netif_ip4_addr(n))){
+                return;
+            }
+        }
+
+        os_sleep_ms(100);
+    }
 }

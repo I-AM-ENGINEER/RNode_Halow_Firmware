@@ -134,6 +134,7 @@ typedef int64_t   s64_t;
 #endif
 typedef uintptr_t mem_ptr_t;
 #endif
+typedef void * sio_fd_t;
 
 /** Define this to 1 in arch/cc.h of your port if your compiler does not provide
  * the inttypes.h header. You need to define the format strings listed in
@@ -409,6 +410,9 @@ extern "C" {
 #endif
 
 extern u32_t sys_now(void);
+extern void sio_send(u8_t c, sio_fd_t fd);
+extern sio_fd_t sio_open(u8_t devnum);
+extern u32_t sio_read(sio_fd_t fd, u8_t *data, u32_t len);
 #define LWIP_RAND() sys_now()
 
 /**

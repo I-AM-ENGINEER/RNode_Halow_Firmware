@@ -73,6 +73,7 @@ extern "C" {
 
 err_t slipif_init(struct netif * netif);
 void slipif_poll(struct netif *netif);
+void slipif_rxbyte_input(struct netif *netif, u8_t c);
 #if SLIP_RX_FROM_ISR
 void slipif_process_rxqueue(struct netif *netif);
 void slipif_received_byte(struct netif *netif, u8_t data);

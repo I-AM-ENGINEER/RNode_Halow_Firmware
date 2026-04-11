@@ -2,7 +2,7 @@
 #define __SYS_CONFIG_H__
 
 #define PROJECT_TYPE           PRO_TYPE_WNB
-#define FW_VERSION              "1.3.1"
+#define FW_VERSION              "2.0.0b"
 #define FW_FULL_VERSION         FW_VERSION " (" __DATE__ " " __TIME__ ")"
 
 #define IP_SOF_BROADCAST       1
@@ -53,9 +53,7 @@
 #define SKB_POOL_ADDR     (WIFI_RX_BUFF_ADDR + WIFI_RX_BUFF_SIZE)
 #define SKB_POOL_SIZE     (SRAM_POOL_START + SRAM_POOL_SIZE - SKB_POOL_ADDR)
 
-#define DEFAULT_SYS_CLK   64000000UL // options: 32M/48M/72M/144M, and 16*N from 64M to 128M
-
-#define GMAC_ENABLE       1
+#define DEFAULT_SYS_CLK   (128000000UL) // options: 32M/48M/72M/144M, and 16*N from 64M to 128M
 
 #define AUTO_ETHERNET_PHY
 
@@ -70,16 +68,30 @@
 #define HG_GMAC_MDC_PIN PA_11
 #endif
 
-#define NET_IP_CONFIG_MODE_DEF        (NET_IP_MODE_DHCP)
-#define NET_IP_CONFIG_IP_DEF          PP_HTONL(LWIP_MAKEU32(192, 168, 42, 42))
-#define NET_IP_CONFIG_MASK_DEF        PP_HTONL(LWIP_MAKEU32(255, 255, 255, 0))
-#define NET_IP_CONFIG_GW_DEF          PP_HTONL(LWIP_MAKEU32(0, 0, 0, 0))
 
-#define HALOW_CONFIG_CENTRAL_FREQ_DEF (8665)
-#define HALOW_CONFIG_POWER_DEF        (17)
-#define HALOW_CONFIG_BANDWIDTH_DEF    (1)
-#define HALOW_CONFIG_MCS_DEF          (0)
-#define HALOW_CONFIG_SPOWER_EN_DEF    (false)
+// SLIP static ip only
+#define SLIP_CONFIG_UART_DEVICE                 (uart1)
+#define SLIP_CONFIG_RX_BUF_SIZE                 (2048)
+#define SLIP_CONFIG_IP_ADDR_DEF                 PP_HTONL(LWIP_MAKEU32(192,168,7,2))
+#define SLIP_CONFIG_IP_MASK_DEF                 PP_HTONL(LWIP_MAKEU32(255,255,255,255))
+#define SLIP_CONFIG_IP_GW_DEF                   PP_HTONL(LWIP_MAKEU32(192,168,7,1))
+#define SLIP_RX_FROM_ISR                        (0)
+#define SLIP_USE_RX_THREAD                      (0)
+
+#define NET_IP_CONFIG_MODE_DEF                  (NET_IP_MODE_DHCP)
+#define NET_IP_CONFIG_IP_DEF                    PP_HTONL(LWIP_MAKEU32(192, 168, 42, 42))
+#define NET_IP_CONFIG_MASK_DEF                  PP_HTONL(LWIP_MAKEU32(255, 255, 255, 0))
+#define NET_IP_CONFIG_GW_DEF                    PP_HTONL(LWIP_MAKEU32(0, 0, 0, 0))
+
+#define NETLOG_CONFIG
+#define NETLOG_CONFIG_IP_DEF                    PP_HTONL(LWIP_MAKEU32(192,168,7,1))
+#define NETLOG_CONFIG_PORT_DEF                  (5000)
+
+#define HALOW_CONFIG_CENTRAL_FREQ_DEF           (8665)
+#define HALOW_CONFIG_POWER_DEF                  (14)
+#define HALOW_CONFIG_BANDWIDTH_DEF              (1)
+#define HALOW_CONFIG_MCS_DEF                    (0)
+#define HALOW_CONFIG_SPOWER_EN_DEF              (false)
 
 #define HALOW_LBT_CONFIG_EN_DEF                 (true)
 #define HALOW_LBT_CONFIG_NSWS_DEF               (256)
@@ -96,13 +108,13 @@
 #define HALOW_LBT_CONFIG_UTIL_REFILL_MS_DEF     (1000)
 #define HALOW_LBT_CONFIG_UTIL_BUCKET_MS_DEF     (200)
 
-#define TCP_SERVER_PORT               (8001)
-#define TCP_SERVER_MTU                (TCP_MSS)
+#define TCP_SERVER_PORT                         (8001)
+#define TCP_SERVER_MTU                          (TCP_MSS)
 
-#define TCP_SERVER_CONFIG_ENABLED_DEF               (true)
-#define TCP_SERVER_CONFIG_PORT_DEF                  (8001)
-#define TCP_SERVER_CONFIG_WHITELIST_IP_DEF          PP_HTONL(LWIP_MAKEU32(0, 0, 0, 0))
-#define TCP_SERVER_CONFIG_WHITELIST_MASK_DEF        PP_HTONL(LWIP_MAKEU32(0, 0, 0, 0))
+#define TCP_SERVER_CONFIG_ENABLED_DEF           (true)
+#define TCP_SERVER_CONFIG_PORT_DEF              (8001)
+#define TCP_SERVER_CONFIG_WHITELIST_IP_DEF      PP_HTONL(LWIP_MAKEU32(0, 0, 0, 0))
+#define TCP_SERVER_CONFIG_WHITELIST_MASK_DEF    PP_HTONL(LWIP_MAKEU32(0, 0, 0, 0))
 
 #define CONFIG_PAGE_TASK_PRIO                   (OS_TASK_PRIORITY_ABOVE_NORMAL)
 #define CONFIG_PAGE_TASK_STACK                  (2*1024)
@@ -120,6 +132,10 @@
 
 #define TCPIP_THREAD_PRIO                       (OS_TASK_PRIORITY_ABOVE_NORMAL + 5)
 #define TCPIP_THREAD_STACKSIZE                  (2*1024)
+
+#define UART_SLIP_TASK_PRIO                     (OS_TASK_PRIORITY_ABOVE_NORMAL + 4)
+#define UART_SLIP_TASK_STACK                    (2*1024)
+
 // #define ANT_CTRL_PIN PB_1 // 网桥用PB1来做双天线选择
 
 #endif

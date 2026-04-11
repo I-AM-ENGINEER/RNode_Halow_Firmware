@@ -688,12 +688,10 @@ static void http_server_task( void *arg ){
     err_t err;
 
     (void)arg;
-
     
     listen = netconn_new(NETCONN_TCP);
     netconn_bind(listen, IP_ADDR_ANY, HTTP_PORT);
     netconn_listen_with_backlog(listen, 4);
-    netconn_listen(listen);
 
     httpd_debug("listening on port %d", HTTP_PORT);
 

@@ -21,12 +21,14 @@
 #include "lwip/ip_addr.h"
 #include "lwip/tcpip.h"
 #include "netif/ethernetif.h"
+#include "netif/slipif.h"
 #include "lib/net/skmonitor/skmonitor.h"
 #include "lib/lmac/lmac_def.h"
 #include "halow.h"
 #include "halow_lbt.h"
 #include "tcp_server.h"
 #include "hal/spi_nor.h"
+#include "hal/uart.h"
 #include <lib/fal/fal.h>
 #include <lib/flashdb/flashdb.h>
 #include "littelfs_port.h"
@@ -51,6 +53,7 @@
 #include "rns/link_parser.h"
 #include "rns/link_db.h"
 #include "nearby_detect.h"
+#include "uart_slip.h"
 
 static struct os_work blink_wk;
 static struct os_work stats_wk;
@@ -59,6 +62,7 @@ extern uint32_t srampool_end;
 static rns_stream_decoder_t tcp_rns_decoder;
 //static rns_link_packet_info_t tcp_rns_link_db;
 //extern void lmac_transceive_statics(uint8 en);
+extern struct hguart uart1;
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -252,8 +256,8 @@ __init static void sys_network_init(void) {
     uint8_t mac[6];
     get_mac(mac);
     ndev = (struct netdev *)dev_get(HG_GMAC_DEVID);
-    netdev_set_macaddr(ndev, mac);
     if (ndev) {
+		netdev_set_macaddr(ndev, mac);
         lwip_netif_add(ndev, "e0", NULL, NULL, NULL);
         lwip_netif_set_default(ndev);
         
@@ -312,14 +316,6 @@ static void boot_counter_update(void){
     printf("Boot counter = %d\n", pwr_on_cnt);
 }
 
-static int32 sys_blink_work(struct os_work *work) {
-    static bool active = 0;
-    active = !active;
-    indication_led_main_set(active);
-    os_run_work_delay(work, active ? 20 : 4980);
-    return 0;
-}
-
 static int32 sys_stats_work(struct os_work *work) {
     const uint32_t buckets = 32;
     
@@ -368,17 +364,73 @@ bool boot_recovery_check( void ){
     return false;
 }
 
-static void test_vprintf( const char *fmt, ... ){
-    va_list ap;
+/*
+static struct netif slip_netif;
+static struct udp_pcb *slip_dbg_pcb = NULL;
+static ip_addr_t slip_dbg_dst;
+static uint32_t slip_dbg_cnt = 0;
 
-    va_start(ap, fmt);
-    vfprintf(stdout, fmt, ap);
-    va_end(ap);
+static void uart_slip_debug_send_now( void ){
+    struct pbuf *p;
+    char buf[64];
+    int len;
+
+    len = snprintf(buf, sizeof(buf), "slip dbg %lu", (unsigned long)slip_dbg_cnt++);
+    if (len <= 0) {
+        return;
+    }
+
+    p = pbuf_alloc(PBUF_TRANSPORT, (u16_t)len, PBUF_RAM);
+    if (p == NULL) {
+        log_error("slip dbg: pbuf_alloc failed");
+        return;
+    }
+
+    memcpy(p->payload, buf, (size_t)len);
+    udp_sendto(slip_dbg_pcb, p, &slip_dbg_dst, 5000);
+    pbuf_free(p);
+}
+
+static void uart_slip_debug_send_cb( void *arg ){
+    (void)arg;
+    uart_slip_debug_send_now();
+}
+
+void uart_slip_init( void ){
+    ip4_addr_t ipaddr, netmask, gw;
+
+    IP4_ADDR(&ipaddr,  192,168,7,2);
+    IP4_ADDR(&netmask, 255,255,255,255);
+    IP4_ADDR(&gw,      192,168,7,1);
+
+#if NO_SYS
+    netif_add(&slip_netif, &ipaddr, &netmask, &gw, NULL, slipif_init, ip_input);
+#else
+    netif_add(&slip_netif, &ipaddr, &netmask, &gw, NULL, slipif_init, tcpip_input);
+#endif
+
+    netif_set_up(&slip_netif);
+    netif_set_link_up(&slip_netif);
+    slip_dbg_pcb = udp_new();
+    IP4_ADDR(ip_2_ip4(&slip_dbg_dst), 192, 168, 7, 1);
+}
+*/
+
+static int32 sys_blink_work(struct os_work *work) {
+    static bool active = 0;
+    active = !active;
+    //nearby_modem_print_table();
+    indication_led_main_set(active);
+    //uart_slip_debug_send_now();
+    //tcpip_callback(uart_slip_debug_send_cb, NULL);
+    //os_run_work_delay(work, active ? 20 : 4980);
+    os_run_work_delay(work, 5000);
+    return 0;
 }
 
 __init int main(void) {
     extern uint32 __sinit, __einit;
-    mcu_watchdog_timeout(5);
+    mcu_watchdog_timeout(0);
     sys_event_init(32);
     sys_event_take(0xffffffff, sys_event_hdl, 0);
     indication_init();
@@ -395,6 +447,7 @@ __init int main(void) {
     halow_lbt_init();
     halow_set_rx_cb(halow_rx_handler);
     sys_network_init();
+    uart_slip_init();
     config_page_init(); 
     tftp_server_init();
     net_ip_init();
@@ -406,10 +459,7 @@ __init int main(void) {
     OS_WORK_INIT(&stats_wk, sys_stats_work,0);
     os_run_work_delay(&blink_wk, 1000);
     //os_run_work_delay(&stats_wk, 1000);
-    test_vprintf("vfprintf OK %d %s\n", 123, "test");
     //log_log(LOG_FATAL, __FILE__, __LINE__, "log_test!!!!\n\n\n!!!!!!\n\n!!!");
-    log_fatal("log_test!!!!\n\n\n!!!!!!\n\n!!!");
-    printf("!!!!!!!!!!!!!!!!!!!!");
     sysheap_collect_init(&sram_heap, (uint32)&__sinit, (uint32)&__einit); // delete init code from heap
     return 0;
 }

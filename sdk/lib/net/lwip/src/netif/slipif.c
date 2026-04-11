@@ -306,7 +306,7 @@ slipif_rxbyte(struct netif *netif, u8_t c)
  * @param netif The lwip network interface structure for this slipif
  * @param c received character
  */
-static void
+inline void
 slipif_rxbyte_input(struct netif *netif, u8_t c)
 {
   struct pbuf *p;

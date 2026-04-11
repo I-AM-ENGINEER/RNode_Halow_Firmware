@@ -15,6 +15,7 @@ typedef struct {
     ip4_addr_t gw;
 } net_ip_config_t;
 
+void net_ip_wait_ready( void );
 int32_t net_ip_init(void);
 void net_ip_config_load(net_ip_config_t *cfg);
 void net_ip_config_save(const net_ip_config_t *cfg);
