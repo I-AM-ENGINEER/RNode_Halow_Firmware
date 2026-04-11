@@ -211,6 +211,17 @@ int32_t configdb_set_blob(const char *key, const void *buf, size_t size){
         return -1;
     }
 
+    tmp = os_malloc(size);
+    if( tmp != NULL ){
+        if( configdb_get_blob(key, tmp, size) == 0 ){
+            if( memcmp(tmp, buf, size) == 0 ){
+                os_free(tmp);
+                return 0;
+            }
+        }
+        os_free(tmp);
+    }
+
     dbp = configdb_grab();
     if (dbp == NULL) {
         return -2;
