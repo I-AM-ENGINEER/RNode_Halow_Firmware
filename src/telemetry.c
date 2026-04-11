@@ -404,7 +404,11 @@ void telemetry_send ( void ){
         g_telemetry_ctx.err = ERR_OK;
         g_telemetry_ctx.st = MQTT_CONNECT_DISCONNECTED;
 
-        tlm_debug("dns query: host='%s'", cfg.domain);
+        if(ipaddr_aton(cfg.domain, &ip)){
+            log_debug("host is IP: %s", cfg.domain);
+            err = ERR_OK;
+        } else {
+            log_debug("dns query: host='%s'", cfg.domain);
         err = dns_gethostbyname(cfg.domain, &ip, telemetry_dns_cb, NULL);
 
         if (err == ERR_INPROGRESS) {
