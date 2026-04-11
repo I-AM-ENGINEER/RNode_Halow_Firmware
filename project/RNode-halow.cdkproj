@@ -2540,7 +2540,7 @@ Board: txw4002a
     <File Name="../src/nearby_detect.c">
       <FileOption/>
     </File>
-    <File Name="../src/uart_slip.c">
+    <File Name="../src/net_log.c">
       <FileOption/>
     </File>
   </VirtualDirectory>

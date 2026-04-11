@@ -69,6 +69,13 @@
 #endif
 
 
+
+#define MQTT_RETRIES                            (3)
+#define MQTT_DNS_TO_MS                          (5000)
+#define MQTT_CONN_TO_MS                         (8000)
+#define MQTT_PUB_TO_MS                          (8000)
+#define MQTT_RETRY_MS                           (500)
+
 // SLIP static ip only
 #define SLIP_CONFIG_UART_DEVICE                 (uart1)
 #define SLIP_CONFIG_RX_BUF_SIZE                 (2048)
@@ -83,9 +90,9 @@
 #define NET_IP_CONFIG_MASK_DEF                  PP_HTONL(LWIP_MAKEU32(255, 255, 255, 0))
 #define NET_IP_CONFIG_GW_DEF                    PP_HTONL(LWIP_MAKEU32(0, 0, 0, 0))
 
-#define NETLOG_CONFIG
-#define NETLOG_CONFIG_IP_DEF                    PP_HTONL(LWIP_MAKEU32(192,168,7,1))
-#define NETLOG_CONFIG_PORT_DEF                  (5000)
+#define NET_LOG_CONFIG_EN_DEF                   (true)
+#define NET_LOG_CONFIG_IP_DEF                   PP_HTONL(LWIP_MAKEU32(192,168,7,1))
+#define NET_LOG_CONFIG_PORT_DEF                 (5000)
 
 #define HALOW_CONFIG_CENTRAL_FREQ_DEF           (8665)
 #define HALOW_CONFIG_POWER_DEF                  (14)
@@ -112,7 +119,7 @@
 #define TCP_SERVER_MTU                          (TCP_MSS)
 
 #define TCP_SERVER_CONFIG_ENABLED_DEF           (true)
-#define TCP_SERVER_CONFIG_PORT_DEF              (8001)
+#define TCP_SERVER_CONFIG_PORT_DEF              (4242)
 #define TCP_SERVER_CONFIG_WHITELIST_IP_DEF      PP_HTONL(LWIP_MAKEU32(0, 0, 0, 0))
 #define TCP_SERVER_CONFIG_WHITELIST_MASK_DEF    PP_HTONL(LWIP_MAKEU32(0, 0, 0, 0))
 
@@ -136,6 +143,22 @@
 #define UART_SLIP_TASK_PRIO                     (OS_TASK_PRIORITY_ABOVE_NORMAL + 4)
 #define UART_SLIP_TASK_STACK                    (2*1024)
 
-// #define ANT_CTRL_PIN PB_1 // 网桥用PB1来做双天线选择
+#define LOG_LEVEL_CONFIGDB                      (LOG_DEBUG)
+#define LOG_LEVEL_LITTLEFS                      (LOG_TRACE)
+#define LOG_LEVEL_NET_IP                        (LOG_TRACE)
+#define LOG_LEVEL_CONFIG_API_CALLS              (LOG_TRACE)
+#define LOG_LEVEL_CONFIG_API_DISPATCH           (LOG_TRACE)
+#define LOG_LEVEL_CONFIG_API_OTA                (LOG_TRACE)
+#define LOG_LEVEL_CONFIG_PAGE                   (LOG_TRACE)
+#define LOG_LEVEL_TFTP_SERVER                   (LOG_TRACE)
+#define LOG_LEVEL_STATISTICS                    (LOG_TRACE)
+#define LOG_LEVEL_TCP_SERVER                    (LOG_TRACE)
+#define LOG_LEVEL_TELEMETRY                     (LOG_TRACE)
+#define LOG_LEVEL_RNS_STREAM_PARSER             (LOG_TRACE)
+#define LOG_LEVEL_FAL_PORT                      (LOG_INFO)
+#define LOG_LEVEL_RNS_LINK_PARSER               (LOG_TRACE)
+
+#define RNS_STREAM_PARSER_LOG_LEVEL LOG_LEVEL_RNS_STREAM_PARSER
+#define RNS_LINK_PARSER_LOG_LEVEL LOG_LEVEL_RNS_LINK_PARSER
 
 #endif

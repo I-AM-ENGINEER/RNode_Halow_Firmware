@@ -1,158 +1,122 @@
-/*
- * Copyright (c) 2020 rxi
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to
- * deal in the Software without restriction, including without limitation the
- * rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
- * sell copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
- * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
- * IN THE SOFTWARE.
- */
+#define NANOPRINTF_IMPLEMENTATION
+
+#define NANOPRINTF_USE_FIELD_WIDTH_FORMAT_SPECIFIERS 1
+#define NANOPRINTF_USE_PRECISION_FORMAT_SPECIFIERS 0
+#define NANOPRINTF_USE_FLOAT_FORMAT_SPECIFIERS 0
+#define NANOPRINTF_USE_LARGE_FORMAT_SPECIFIERS 1
+#define NANOPRINTF_USE_SMALL_FORMAT_SPECIFIERS 1
+#define NANOPRINTF_USE_BINARY_FORMAT_SPECIFIERS 0
+#define NANOPRINTF_USE_WRITEBACK_FORMAT_SPECIFIERS 0
+#define NANOPRINTF_USE_ALT_FORM_FLAG 0
+#define NANOPRINTF_USE_FLOAT_SINGLE_PRECISION 0
 
 #include "lib/logc/log.h"
+#include "lib/logc/nanoprintf.h"
+#include "net_log.h"
 
-#define MAX_CALLBACKS 32
-#include <time.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stddef.h>
 
-typedef struct {
-  log_LogFn fn;
-  void *udata;
-  int level;
-} Callback;
+extern int64_t get_time_ms( void );
 
 static struct {
-  void *udata;
-  log_LockFn lock;
-  int level;
-  bool quiet;
-  Callback callbacks[MAX_CALLBACKS];
+    void *udata;
+    log_LockFn lock;
 } L;
 
-
 static const char *level_strings[] = {
-  "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"
+    "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"
 };
 
 #ifdef LOG_USE_COLOR
 static const char *level_colors[] = {
-  "\x1b[94m", "\x1b[36m", "\x1b[32m", "\x1b[33m", "\x1b[31m", "\x1b[35m"
+    "\x1b[94m", "\x1b[36m", "\x1b[32m", "\x1b[33m", "\x1b[31m", "\x1b[35m"
 };
 #endif
 
+static void lock( void ){
+    if( L.lock ){
+        L.lock(true, L.udata);
+    }
+}
 
-static void stdout_callback(log_Event *ev) {
+static void unlock( void ){
+    if( L.lock ){
+        L.lock(false, L.udata);
+    }
+}
+
+const char *log_level_string( int level ){
+    return level_strings[level];
+}
+
+void log_set_lock( log_LockFn fn, void *udata ){
+    L.lock = fn;
+    L.udata = udata;
+}
+
+void log_log( int level, const char *file, int line, const char *fmt, ... ){
+    char buf[LOG_BUF_SIZE];
+    int n;
+    int m;
+    va_list ap;
+    int64_t time_ms;
+
+    lock();
+
+    time_ms = get_time_ms();
+
 #ifdef LOG_USE_COLOR
-  printf("[%ld] %s%-5s\x1b[0m \x1b[90m%s:%d:\x1b[0m ",
-    (long int)ev->time, level_colors[ev->level], level_strings[ev->level],
-    ev->file, ev->line);
+    n = npf_snprintf(buf, sizeof(buf),
+                     "[%lld] %s%-5s\x1b[0m \x1b[90m%s:%d:\x1b[0m ",
+                     (long long)time_ms,
+                     level_colors[level],
+                     level_strings[level],
+                     file,
+                     line);
 #else
-  printf(
-    "[%ld] %-5s %s:%d: ",
-    (long int)ev->time, level_strings[ev->level], ev->file, ev->line);
+    n = npf_snprintf(buf, sizeof(buf),
+                     "[%lld] %-5s %s:%d: ",
+                     (long long)time_ms,
+                     level_strings[level],
+                     file,
+                     line);
 #endif
-  vprintf(ev->fmt, ev->ap);
-  printf("\n");
-}
 
-
-static void file_callback(log_Event *ev) {
-  char buf[64];
-  buf[strftime(buf, sizeof(buf), "%Y-%m-%d %H:%M:%S", ev->time)] = '\0';
-  fprintf(
-    ev->udata, "%s %-5s %s:%d: ",
-    buf, level_strings[ev->level], ev->file, ev->line);
-  vfprintf(ev->udata, ev->fmt, ev->ap);
-  fprintf(ev->udata, "\n");
-  fflush(ev->udata);
-}
-
-
-static void lock(void)   {
-  if (L.lock) { L.lock(true, L.udata); }
-}
-
-
-static void unlock(void) {
-  if (L.lock) { L.lock(false, L.udata); }
-}
-
-
-const char* log_level_string(int level) {
-  return level_strings[level];
-}
-
-
-void log_set_lock(log_LockFn fn, void *udata) {
-  L.lock = fn;
-  L.udata = udata;
-}
-
-
-void log_set_level(int level) {
-  L.level = level;
-}
-
-
-void log_set_quiet(bool enable) {
-  L.quiet = enable;
-}
-
-
-int log_add_callback(log_LogFn fn, void *udata, int level) {
-  for (int i = 0; i < MAX_CALLBACKS; i++) {
-    if (!L.callbacks[i].fn) {
-      L.callbacks[i] = (Callback) { fn, udata, level };
-      return 0;
+    if( n < 0 ){
+        unlock();
+        return;
     }
-  }
-  return -1;
-}
 
-
-int log_add_fp(FILE *fp, int level) {
-  return log_add_callback(file_callback, fp, level);
-}
-
-static void init_event( log_Event *ev, void *udata ){
-  ev->time_s = time(NULL);
-  ev->udata = udata;
-}
-
-void log_log(int level, const char *file, int line, const char *fmt, ...) {
-  log_Event ev = {
-    .fmt   = fmt,
-    .file  = file,
-    .line  = line,
-    .level = level,
-  };
-
-  lock();
-
-  init_event(&ev, NULL);
-  va_start(ev.ap, fmt);
-  stdout_callback(&ev);
-  va_end(ev.ap);
-
-  for (int i = 0; i < MAX_CALLBACKS && L.callbacks[i].fn; i++) {
-    Callback *cb = &L.callbacks[i];
-    if (level >= cb->level) {
-      init_event(&ev, cb->udata);
-      va_start(ev.ap, fmt);
-      cb->fn(&ev);
-      va_end(ev.ap);
+    if( n >= (int)sizeof(buf) ){
+        n = (int)sizeof(buf) - 1;
     }
-  }
 
-  unlock();
+    va_start(ap, fmt);
+
+    if( n < (int)sizeof(buf) - 1 ){
+        m = npf_vsnprintf(buf + n, sizeof(buf) - (size_t)n, fmt, ap);
+        if( m > 0 ){
+            n += m;
+            if( n >= (int)sizeof(buf) ){
+                n = (int)sizeof(buf) - 1;
+            }
+        }
+    }
+
+    va_end(ap);
+
+    if( n < (int)sizeof(buf) - 1 ){
+        buf[n++] = '\n';
+        buf[n] = 0;
+    } else {
+        buf[sizeof(buf) - 2] = '\n';
+        buf[sizeof(buf) - 1] = 0;
+        n = (int)sizeof(buf) - 1;
+    }
+
+    net_log_send(buf, (uint16_t)n);
+
+    unlock();
 }

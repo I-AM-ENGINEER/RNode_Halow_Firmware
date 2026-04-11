@@ -54,6 +54,7 @@
 #include "rns/link_db.h"
 #include "nearby_detect.h"
 #include "uart_slip.h"
+#include "net_log.h"
 
 static struct os_work blink_wk;
 static struct os_work stats_wk;
@@ -252,6 +253,8 @@ __init static void sys_network_init(void) {
 
     tcpip_init(NULL, NULL);
     sock_monitor_init();
+    uart_slip_init();
+    net_log_init_early();
 
     uint8_t mac[6];
     get_mac(mac);
@@ -267,10 +270,9 @@ __init static void sys_network_init(void) {
             nif->hostname = hostname;
         }
 
-        //lwip_netif_set_dhcp2("e0", 1);
-        os_printf("add e0 interface!\r\n");
+        log_info("add e0 interface\r\n");
     }else{
-        os_printf("Ethernet GMAC not found!");
+        log_error("Ethernet GMAC not found");
     }
 }
 
@@ -282,7 +284,7 @@ sysevt_hdl_res sys_event_hdl(uint32 event_id, uint32 data, uint32 priv) {
             nif = netif_find("e0");
             ip = *netif_ip4_addr(nif);
 
-            hgprintf("DHCP new ip assign: %u.%u.%u.%u\r\n",
+            log_info("DHCP new ip assign: %u.%u.%u.%u\r\n",
                      ip4_addr1(&ip),
                      ip4_addr2(&ip),
                      ip4_addr3(&ip),
@@ -313,7 +315,7 @@ static void boot_counter_update(void){
     configdb_get_i32("pwr_on_cnt", &pwr_on_cnt);
     pwr_on_cnt++;
     configdb_set_i32("pwr_on_cnt", &pwr_on_cnt);
-    printf("Boot counter = %d\n", pwr_on_cnt);
+    log_info("Boot counter = %d\n", pwr_on_cnt);
 }
 
 static int32 sys_stats_work(struct os_work *work) {
@@ -324,9 +326,9 @@ static int32 sys_stats_work(struct os_work *work) {
     
     char tmp_str[32];
     statistics_cpu_load_get(tmp_str, sizeof(tmp_str));
-    os_printf("CPU LOAD: %s\n", tmp_str);
+    log_debug("CPU LOAD: %s", tmp_str);
     statistics_heap_usage_get(tmp_str, sizeof(tmp_str));
-    os_printf("HEAP: %s\n", tmp_str);
+    log_debug("HEAP: %s", tmp_str);
     os_run_work_delay(work, 2000);
     return 0;
 }
@@ -416,15 +418,15 @@ void uart_slip_init( void ){
 }
 */
 
+//const char test_str[] = "1234567890\r\n"; 
+
 static int32 sys_blink_work(struct os_work *work) {
     static bool active = 0;
     active = !active;
     //nearby_modem_print_table();
     indication_led_main_set(active);
-    //uart_slip_debug_send_now();
-    //tcpip_callback(uart_slip_debug_send_cb, NULL);
     //os_run_work_delay(work, active ? 20 : 4980);
-    os_run_work_delay(work, 5000);
+    os_run_work_delay(work, 1000);
     return 0;
 }
 
@@ -435,22 +437,21 @@ __init int main(void) {
     sys_event_take(0xffffffff, sys_event_hdl, 0);
     indication_init();
     fal_init();
+    sys_network_init();
     if(boot_recovery_check()){
-        sys_network_init();
         return 0;
     }
     configdb_init();
+    net_log_init();
     littlefs_init();
     boot_counter_update();
     skbpool_init(SKB_POOL_ADDR, (uint32)SKB_POOL_SIZE, 90, 0);
     halow_init(WIFI_RX_BUFF_ADDR, WIFI_RX_BUFF_SIZE, TDMA_BUFF_ADDR, TDMA_BUFF_SIZE);
     halow_lbt_init();
     halow_set_rx_cb(halow_rx_handler);
-    sys_network_init();
-    uart_slip_init();
+    net_ip_init();
     config_page_init(); 
     tftp_server_init();
-    net_ip_init();
     statistics_init();
     tcp_server_init(tcp_to_halow_send);
     telemetry_init();
@@ -459,12 +460,12 @@ __init int main(void) {
     OS_WORK_INIT(&stats_wk, sys_stats_work,0);
     os_run_work_delay(&blink_wk, 1000);
     //os_run_work_delay(&stats_wk, 1000);
-    //log_log(LOG_FATAL, __FILE__, __LINE__, "log_test!!!!\n\n\n!!!!!!\n\n!!!");
+    log_info("Init done");
     sysheap_collect_init(&sram_heap, (uint32)&__sinit, (uint32)&__einit); // delete init code from heap
     return 0;
 }
 
 void assert_printf( char *msg, int line, char *file ){
-    os_printf("ASSERT: %s line=%d file=%s\n", msg, line, file);
+    log_fatal("ASSERT: %s line=%d file=%s", msg, line, file);
     while (1){}
 }

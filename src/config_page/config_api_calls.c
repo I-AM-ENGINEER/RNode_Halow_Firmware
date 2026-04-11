@@ -1,3 +1,5 @@
+#include "sys_config.h"
+#define LOG_LOCAL_LEVEL LOG_LEVEL_CONFIG_API_CALLS
 
 #include "basic_include.h"
 
@@ -24,6 +26,7 @@
 #include "hal/spi_nor.h"
 #include "ota.h"
 #include "nearby_detect.h"
+#include "lib/logc/log.h"
 
 /* -------------------------------------------------------------------------- */
 /* Change version                                                             */
@@ -35,6 +38,7 @@ extern struct spi_nor_flash flash0;
 
 void web_api_notify_change( void ){
     s_change_version++;
+    log_trace("api change version=%lu", (unsigned long)s_change_version);
 }
 
 uint32_t web_api_change_version( void ){
@@ -192,6 +196,7 @@ int32_t web_api_halow_cfg_post( const cJSON *in, cJSON *out ){
     double d;
 
     if (in == NULL || !cJSON_IsObject(in) || out == NULL) {
+        log_warn("halow_cfg_post bad json");
         return api_err(out, WEB_API_RC_BAD_REQUEST, "bad json");
     }
 
@@ -208,7 +213,7 @@ int32_t web_api_halow_cfg_post( const cJSON *in, cJSON *out ){
             cfg.bandwidth = (int8_t)bw;
         }
 
-        os_printf("bndw(json) = %s -> %d\r\n", s, bw);
+        log_debug("halow_cfg bandwidth json='%s' -> %d", s, bw);
     }
     
     j = cJSON_GetObjectItemCaseSensitive(in, "mcs_index");
@@ -238,6 +243,7 @@ int32_t web_api_halow_cfg_post( const cJSON *in, cJSON *out ){
     halow_config_apply(&cfg);
     halow_config_save(&cfg);
 
+    log_debug("halow_cfg updated");
     web_api_notify_change();
 
     return web_api_halow_cfg_get(NULL, out);
@@ -285,6 +291,7 @@ int32_t web_api_net_cfg_post( const cJSON *in, cJSON *out ){
     char mask[16];
 
     if (in == NULL || !cJSON_IsObject(in) || out == NULL) {
+        log_warn("net_cfg_post bad json");
         return api_err(out, WEB_API_RC_BAD_REQUEST, "bad json");
     }
 
@@ -302,12 +309,15 @@ int32_t web_api_net_cfg_post( const cJSON *in, cJSON *out ){
 
     if (cfg.mode == NET_IP_MODE_STATIC) {
         if (!ip4addr_aton(ip, &cfg.ip)) {
+            log_warn("net_cfg_post bad ip_address '%s'", ip);
             return api_err(out, WEB_API_RC_BAD_REQUEST, "bad ip_address");
         }
         if (!ip4addr_aton(mask, &cfg.mask)) {
+            log_warn("net_cfg_post bad netmask '%s'", mask);
             return api_err(out, WEB_API_RC_BAD_REQUEST, "bad netmask");
         }
         if (!ip4addr_aton(gw, &cfg.gw)) {
+            log_warn("net_cfg_post bad gw_address '%s'", gw);
             return api_err(out, WEB_API_RC_BAD_REQUEST, "bad gw_address");
         }
     }
@@ -315,6 +325,7 @@ int32_t web_api_net_cfg_post( const cJSON *in, cJSON *out ){
     net_ip_config_apply(&cfg);
     net_ip_config_save(&cfg);
 
+    log_debug("net_cfg updated dhcp=%d", dhcp ? 1 : 0);
     web_api_notify_change();
 
     return web_api_net_cfg_get(NULL, out);
@@ -367,6 +378,7 @@ int32_t web_api_tcp_server_cfg_post( const cJSON *in, cJSON *out ){
     ip4_addr_t mask;
 
     if (in == NULL || !cJSON_IsObject(in) || out == NULL) {
+        log_warn("tcp_server_cfg_post bad json");
         return api_err(out, WEB_API_RC_BAD_REQUEST, "bad json");
     }
 
@@ -395,6 +407,9 @@ int32_t web_api_tcp_server_cfg_post( const cJSON *in, cJSON *out ){
     tcp_server_config_apply(&cfg);
     tcp_server_config_save(&cfg);
 
+    log_debug("tcp_server_cfg updated enable=%d port=%u",
+              cfg.enabled ? 1 : 0,
+              (unsigned)cfg.port);
     web_api_notify_change();
 
     return web_api_tcp_server_cfg_get(NULL, out);
@@ -461,6 +476,7 @@ int32_t web_api_lbt_cfg_post( const cJSON *in, cJSON *out ){
     int v;
 
     if (in == NULL || !cJSON_IsObject(in) || out == NULL) {
+        log_warn("lbt_cfg_post bad json");
         return api_err(out, WEB_API_RC_BAD_REQUEST, "bad json");
     }
 
@@ -489,6 +505,7 @@ int32_t web_api_lbt_cfg_post( const cJSON *in, cJSON *out ){
     halow_lbt_config_apply(&cfg);
     halow_lbt_config_save(&cfg);
 
+    log_debug("lbt_cfg updated");
     web_api_notify_change();
     //return web_api_lbt_cfg_get(NULL, out);
     return web_api_halow_cfg_get(NULL, out);
@@ -704,6 +721,7 @@ int32_t web_api_telemetry_cfg_post( const cJSON *in, cJSON *out ){
     char lxmf_hex[33];
 
     if (in == NULL || !cJSON_IsObject(in) || out == NULL) {
+        log_warn("telemetry_cfg_post bad json");
         return api_err(out, WEB_API_RC_BAD_REQUEST, "bad json");
     }
 
@@ -735,11 +753,20 @@ int32_t web_api_telemetry_cfg_post( const cJSON *in, cJSON *out ){
 
     telemetry_config_save(&cfg);
 
+    log_debug("telemetry_cfg updated en=%d ext=%d prd=%lu port=%u",
+              cfg.enabled ? 1 : 0,
+              cfg.extended_enabled ? 1 : 0,
+              (unsigned long)cfg.send_period_s,
+              (unsigned)cfg.port);
     web_api_notify_change();
     return web_api_telemetry_cfg_get(NULL, out);
 }
 
 int32_t web_api_telemetry_send_post( const cJSON *in, cJSON *out ){
+    (void)in;
+    (void)out;
+
+    log_debug("telemetry_send");
     telemetry_send_now();
     return 0;
 }
@@ -839,11 +866,19 @@ fail:
 }
 
 int32_t web_api_reboot_post( const cJSON *in, cJSON *out ){
+    (void)in;
+    (void)out;
+
+    log_warn("api reboot");
     device_reboot();
     return 0;
 }
 
 int32_t web_api_default_reset( const cJSON *in, cJSON *out ){
+    (void)in;
+    (void)out;
+
+    log_warn("api default reset");
     ota_reset_to_default();
     device_reboot();
     return 0;

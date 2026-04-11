@@ -1,3 +1,6 @@
+#include "sys_config.h"
+#define LOG_LOCAL_LEVEL LOG_LEVEL_TELEMETRY
+
 #include "telemetry.h"
 #include "lwip/netif.h"
 #include "lwip/apps/mqtt.h"
@@ -7,12 +10,10 @@
 
 #include "configdb.h"
 #include "halow.h"
-#include "sys_config.h"
 #include "statistics.h"
 #include "utils.h"
 #include "cJSON.h"
-
-//#define TELEMETRY_DEBUG
+#include "lib/logc/log.h"
 
 #define TELEMETRY_CONFIG_PREFIX                 CONFIGDB_ADD_MODULE("tlm")
 #define TELEMETRY_CONFIG_ADD_CONFIG(name)       TELEMETRY_CONFIG_PREFIX "." name
@@ -31,14 +32,46 @@
 #define TELEMETRY_CONFIG_DIRECTION_NAME       TELEMETRY_CONFIG_ADD_CONFIG("dir")
 #define TELEMETRY_CONFIG_LXMF_NAME            TELEMETRY_CONFIG_ADD_CONFIG("lxmf")
 
-#ifdef TELEMETRY_DEBUG
-#define tlm_debug(fmt, ...)  os_printf("[TLM] " fmt "\r\n", ##__VA_ARGS__)
-#else
-#define tlm_debug(fmt, ...)  do { } while (0)
-#endif
-
 extern struct netif *netif_default;
 static struct os_work telemetry_work;
+
+static struct {
+    sys_sem_t sem;
+    ip_addr_t ip;
+    volatile bool done;
+    volatile err_t err;
+    volatile mqtt_connection_status_t st;
+} g_telemetry_ctx;
+
+static void telemetry_config_log_trace( const char *tag, const telemetry_config_t *cfg ){
+    if(cfg == NULL){
+        return;
+    }
+
+    log_trace("%s en=%d ext=%d period=%lu domain='%s' topic='%s' port=%u",
+              tag ? tag : "CFG",
+              cfg->enabled ? 1 : 0,
+              cfg->extended_enabled ? 1 : 0,
+              (unsigned long)cfg->send_period_s,
+              cfg->domain,
+              cfg->topic,
+              (unsigned)cfg->port);
+}
+
+static void telemetry_config_log_debug( const char *tag, const telemetry_config_t *cfg ){
+    if(cfg == NULL){
+        return;
+    }
+
+    log_debug("%s en=%d ext=%d period=%lu domain='%s' topic='%s' port=%u",
+              tag ? tag : "CFG",
+              cfg->enabled ? 1 : 0,
+              cfg->extended_enabled ? 1 : 0,
+              (unsigned long)cfg->send_period_s,
+              cfg->domain,
+              cfg->topic,
+              (unsigned)cfg->port);
+}
 
 static uint32_t telemetry_get_id( void ){
     static uint32_t id;
@@ -150,6 +183,7 @@ void telemetry_config_load( telemetry_config_t *cfg ){
     cfg->topic[sizeof(cfg->topic) - 1] = '\0';
     
     telemetry_config_sanitize(cfg);
+    telemetry_config_log_trace("LOAD", cfg);
 }
 
 void telemetry_config_save( telemetry_config_t *cfg ){
@@ -173,6 +207,8 @@ void telemetry_config_save( telemetry_config_t *cfg ){
     configdb_set_blob(TELEMETRY_CONFIG_PASS_NAME,       cfg->password, sizeof(cfg->password));
     configdb_set_blob(TELEMETRY_CONFIG_TOPIC_NAME,      cfg->topic,    sizeof(cfg->topic));
     configdb_set_blob(TELEMETRY_CONFIG_LXMF_NAME,       cfg->lxmf,     sizeof(cfg->lxmf));
+
+    telemetry_config_log_debug("SAVE", cfg);
 }
 
 static struct telemetry_pkg_ext telemetry_build_pkg_ext(){
@@ -258,29 +294,15 @@ static void telemetry_pkg_ext_json_add( cJSON *j, const struct telemetry_pkg_ext
     cJSON_AddNumberToObject(j, "rx_p", (double)pkg->rx_packets);
 }
 
-#define MQTT_RETRIES     3
-#define MQTT_DNS_TO_MS   5000
-#define MQTT_CONN_TO_MS  8000
-#define MQTT_PUB_TO_MS   8000
-#define MQTT_RETRY_MS    500
-
-static struct {
-    sys_sem_t sem;
-    ip_addr_t ip;
-    volatile bool done;
-    volatile err_t err;
-    volatile mqtt_connection_status_t st;
-} g_telemetry_ctx;
-
 static void telemetry_dns_cb ( const char *name, const ip_addr_t *ipaddr, void *arg ){
     (void)arg;
 
     if (ipaddr != NULL) {
-        tlm_debug("dns cb: name=%s resolved", (name != NULL) ? name : "(null)");
+        log_debug("dns cb: name=%s resolved", (name != NULL) ? name : "(null)");
         ip_addr_copy(g_telemetry_ctx.ip, *ipaddr);
         g_telemetry_ctx.err = ERR_OK;
     } else {
-        tlm_debug("dns cb: name=%s resolve failed", (name != NULL) ? name : "(null)");
+        log_warn("dns cb: name=%s resolve failed", (name != NULL) ? name : "(null)");
         g_telemetry_ctx.err = ERR_VAL;
     }
 
@@ -292,7 +314,7 @@ static void telemetry_conn_cb ( mqtt_client_t *client, void *arg, mqtt_connectio
     (void)client;
     (void)arg;
 
-    tlm_debug("mqtt conn cb: status=%d", (int)status);
+    log_debug("mqtt conn cb: status=%d", (int)status);
 
     g_telemetry_ctx.st = status;
     g_telemetry_ctx.done = true;
@@ -302,7 +324,7 @@ static void telemetry_conn_cb ( mqtt_client_t *client, void *arg, mqtt_connectio
 static void telemetry_pub_cb ( void *arg, err_t err ){
     (void)arg;
 
-    tlm_debug("mqtt pub cb: err=%d", (int)err);
+    log_debug("mqtt pub cb: err=%d", (int)err);
 
     g_telemetry_ctx.err = err;
     g_telemetry_ctx.done = true;
@@ -312,21 +334,20 @@ static void telemetry_pub_cb ( void *arg, err_t err ){
 static bool telemetry_wait( uint32_t timeout_ms ){
     uint32_t start = sys_now();
 
-    tlm_debug("wait start: timeout=%lu ms", (unsigned long)timeout_ms);
+    log_trace("wait start: timeout=%lu ms", (unsigned long)timeout_ms);
 
     while (!g_telemetry_ctx.done) {
         uint32_t dt = sys_now() - start;
 
         if (dt >= timeout_ms) {
-            tlm_debug("wait timeout: dt=%lu ms", (unsigned long)dt);
+            log_warn("wait timeout: dt=%lu ms", (unsigned long)dt);
             return false;
         }
 
-        tlm_debug("wait sem: remain=%lu ms", (unsigned long)(timeout_ms - dt));
         sys_arch_sem_wait(&g_telemetry_ctx.sem, timeout_ms - dt);
     }
 
-    tlm_debug("wait done: err=%d st=%d", (int)g_telemetry_ctx.err, (int)g_telemetry_ctx.st);
+    log_trace("wait done: err=%d st=%d", (int)g_telemetry_ctx.err, (int)g_telemetry_ctx.st);
     return true;
 }
 
@@ -341,31 +362,25 @@ void telemetry_send ( void ){
     int i;
     char cid[24];
 
-    tlm_debug("send begin");
+    log_debug("send begin");
 
     telemetry_config_load(&cfg);
-    tlm_debug("cfg: enabled=%d domain='%s' topic='%s' port=%u period=%lu ext=%d",
-              cfg.enabled ? 1 : 0,
-              cfg.domain,
-              cfg.topic,
-              (unsigned)cfg.port,
-              (unsigned long)cfg.send_period_s,
-              cfg.extended_enabled ? 1 : 0);
+    telemetry_config_log_trace("SEND_CFG", &cfg);
 
     if (!cfg.enabled || !cfg.domain[0] || !cfg.topic[0]) {
-        tlm_debug("send skip: invalid config");
+        log_debug("send skip: invalid config");
         return;
     }
 
     j = cJSON_CreateObject();
     if (j == NULL) {
-        tlm_debug("json create failed");
+        log_error("json create failed");
         return;
     }
 
     {
         struct telemetry_pkg pkg = telemetry_build_pkg();
-        tlm_debug("pkg built: id=%lu name='%s' fw='%s'",
+        log_trace("pkg built: id=%lu name='%s' fw='%s'",
                   (unsigned long)pkg.id,
                   pkg.name,
                   pkg.firmware_ver);
@@ -374,22 +389,21 @@ void telemetry_send ( void ){
 
     if (cfg.extended_enabled) {
         struct telemetry_pkg_ext ext = telemetry_build_pkg_ext();
-        tlm_debug("extended pkg built");
+        log_trace("extended pkg built");
         telemetry_pkg_ext_json_add(j, &ext);
     }
 
     json = cJSON_PrintUnformatted(j);
     if (json == NULL) {
-        tlm_debug("json print failed");
+        log_error("json print failed");
         cJSON_Delete(j);
         return;
     }
 
-    tlm_debug("json ready: len=%lu", (unsigned long)strlen(json));
-    tlm_debug("json: %s", json);
+    log_trace("json ready: len=%lu", (unsigned long)strlen(json));
 
     if (sys_sem_new(&g_telemetry_ctx.sem, 0) != ERR_OK) {
-        tlm_debug("sem create failed");
+        log_error("sem create failed");
         cJSON_free(json);
         cJSON_Delete(j);
         return;
@@ -398,7 +412,7 @@ void telemetry_send ( void ){
     for (i = 0; i < MQTT_RETRIES; i++) {
         memset(&ci, 0, sizeof(ci));
 
-        tlm_debug("attempt %d/%d", i + 1, MQTT_RETRIES);
+        log_debug("attempt %d/%d", i + 1, MQTT_RETRIES);
 
         g_telemetry_ctx.done = false;
         g_telemetry_ctx.err = ERR_OK;
@@ -409,32 +423,33 @@ void telemetry_send ( void ){
             err = ERR_OK;
         } else {
             log_debug("dns query: host='%s'", cfg.domain);
-        err = dns_gethostbyname(cfg.domain, &ip, telemetry_dns_cb, NULL);
+            err = dns_gethostbyname(cfg.domain, &ip, telemetry_dns_cb, NULL);
+        }
 
         if (err == ERR_INPROGRESS) {
-            tlm_debug("dns pending");
+            log_trace("dns pending");
             if (!telemetry_wait(MQTT_DNS_TO_MS)) {
-                tlm_debug("dns wait timeout");
+                log_warn("dns wait timeout");
                 goto fail;
             }
 
             if (g_telemetry_ctx.err != ERR_OK) {
-                tlm_debug("dns failed after callback: err=%d", (int)g_telemetry_ctx.err);
+                log_warn("dns failed after callback: err=%d", (int)g_telemetry_ctx.err);
                 goto fail;
             }
 
             ip_addr_copy(ip, g_telemetry_ctx.ip);
-            tlm_debug("dns resolved asynchronously");
+            log_debug("dns resolved asynchronously");
         } else if (err != ERR_OK) {
-            tlm_debug("dns_gethostbyname failed immediately: err=%d", (int)err);
+            log_warn("dns_gethostbyname failed immediately: err=%d", (int)err);
             goto fail;
         } else {
-            tlm_debug("dns resolved immediately");
+            log_debug("dns resolved immediately or IP used");
         }
 
         client = mqtt_client_new();
         if (client == NULL) {
-            tlm_debug("mqtt_client_new failed");
+            log_error("mqtt_client_new failed");
             goto fail;
         }
 
@@ -444,7 +459,7 @@ void telemetry_send ( void ){
         ci.client_pass = cfg.password[0] ? cfg.password : NULL;
         ci.keep_alive = 30;
 
-        tlm_debug("mqtt connect: cid='%s' port=%u user=%s",
+        log_debug("mqtt connect: cid='%s' port=%u user=%s",
                   cid,
                   (unsigned)(cfg.port ? cfg.port : MQTT_PORT),
                   ci.client_user != NULL ? ci.client_user : "(null)");
@@ -457,21 +472,21 @@ void telemetry_send ( void ){
                                   NULL,
                                   &ci);
         if (err != ERR_OK) {
-            tlm_debug("mqtt_client_connect failed: err=%d", (int)err);
+            log_warn("mqtt_client_connect failed: err=%d", (int)err);
             goto fail;
         }
 
         if (!telemetry_wait(MQTT_CONN_TO_MS)) {
-            tlm_debug("mqtt connect wait timeout");
+            log_warn("mqtt connect wait timeout");
             goto fail;
         }
 
         if (g_telemetry_ctx.st != MQTT_CONNECT_ACCEPTED) {
-            tlm_debug("mqtt connect rejected: status=%d", (int)g_telemetry_ctx.st);
+            log_warn("mqtt connect rejected: status=%d", (int)g_telemetry_ctx.st);
             goto fail;
         }
 
-        tlm_debug("mqtt connected");
+        log_debug("mqtt connected");
 
         g_telemetry_ctx.done = false;
         err = mqtt_publish(client,
@@ -483,23 +498,23 @@ void telemetry_send ( void ){
                            telemetry_pub_cb,
                            NULL);
         if (err != ERR_OK) {
-            tlm_debug("mqtt_publish failed immediately: err=%d", (int)err);
+            log_warn("mqtt_publish failed immediately: err=%d", (int)err);
             goto fail;
         }
 
-        tlm_debug("mqtt publish started: topic='%s' qos=1 retain=0", cfg.topic);
+        log_debug("mqtt publish started: topic='%s'", cfg.topic);
 
         if (!telemetry_wait(MQTT_PUB_TO_MS)) {
-            tlm_debug("mqtt publish wait timeout");
+            log_warn("mqtt publish wait timeout");
             goto fail;
         }
 
         if (g_telemetry_ctx.err != ERR_OK) {
-            tlm_debug("mqtt publish failed in callback: err=%d", (int)g_telemetry_ctx.err);
+            log_warn("mqtt publish failed in callback: err=%d", (int)g_telemetry_ctx.err);
             goto fail;
         }
 
-        tlm_debug("mqtt publish success");
+        log_info("mqtt publish success");
 
         mqtt_disconnect(client);
         mqtt_client_free(client);
@@ -507,26 +522,24 @@ void telemetry_send ( void ){
         cJSON_free(json);
         cJSON_Delete(j);
 
-        tlm_debug("send done");
+        log_debug("send done");
         return;
 
 fail:
-        tlm_debug("attempt %d failed", i + 1);
+        log_warn("attempt %d failed", i + 1);
 
         if (client != NULL) {
-            tlm_debug("mqtt disconnect/free client");
             mqtt_disconnect(client);
             mqtt_client_free(client);
             client = NULL;
         }
 
         if ((i + 1) < MQTT_RETRIES) {
-            tlm_debug("retry delay: %lu ms", (unsigned long)MQTT_RETRY_MS);
             sys_msleep(MQTT_RETRY_MS);
         }
     }
 
-    tlm_debug("send failed after all retries");
+    log_error("send failed after all retries");
 
     sys_sem_free(&g_telemetry_ctx.sem);
     cJSON_free(json);
@@ -538,15 +551,15 @@ static int32 telemetry_work_handler( struct os_work *work ){
 
     (void)work;
 
-    tlm_debug("work handler begin");
+    log_trace("work handler begin");
     telemetry_send();
 
     telemetry_config_load(&cfg);
     if (cfg.enabled) {
-        tlm_debug("work re-schedule: %lu s", (unsigned long)cfg.send_period_s);
+        log_debug("work re-schedule: %lu s", (unsigned long)cfg.send_period_s);
         os_run_work_delay(&telemetry_work, cfg.send_period_s * 1000LU);
     } else {
-        tlm_debug("work not re-scheduled: telemetry disabled");
+        log_debug("work not re-scheduled: telemetry disabled");
     }
 
     return 0;
@@ -555,7 +568,7 @@ static int32 telemetry_work_handler( struct os_work *work ){
 void telemetry_init( void ){
     telemetry_config_t cfg;
 
-    tlm_debug("init begin");
+    log_debug("init begin");
 
     OS_WORK_INIT(&telemetry_work, telemetry_work_handler, TELEMETRY_WORK_PRIO);
 
@@ -563,22 +576,18 @@ void telemetry_init( void ){
     telemetry_config_load(&cfg);
     telemetry_config_save(&cfg);
 
-    tlm_debug("init cfg: enabled=%d period=%lu domain='%s' topic='%s'",
-              cfg.enabled ? 1 : 0,
-              (unsigned long)cfg.send_period_s,
-              cfg.domain,
-              cfg.topic);
+    telemetry_config_log_debug("INIT", &cfg);
 
     if (cfg.enabled) {
-        tlm_debug("init schedule first send after 5 s");
+        log_debug("init schedule first send after 5 s");
         os_run_work_delay(&telemetry_work, 5000LU);
     } else {
-        tlm_debug("init: telemetry disabled");
+        log_debug("init: telemetry disabled");
     }
 }
 
 void telemetry_send_now( void ){
-    tlm_debug("send_now");
+    log_debug("send_now");
     os_work_cancle(&telemetry_work, 1);
     os_run_work(&telemetry_work);
 }

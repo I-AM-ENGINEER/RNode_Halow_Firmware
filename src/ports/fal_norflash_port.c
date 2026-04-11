@@ -1,21 +1,18 @@
+#include "sys_config.h"
+#define LOG_LOCAL_LEVEL LOG_LEVEL_FAL_PORT
+
 #include "basic_include.h"
 #include <lib/fal/fal.h>
 #include <lib/fal/fal_def.h>
 
 #include "hal/spi_nor.h"
+#include "lib/logc/log.h"
 #include <stdint.h>
 #include <stddef.h>
 
 extern struct spi_nor_flash flash0;
 #define FLASH_START_ADDR   0U
 #define FLASH_END_ADDR     flash0.size
-
-//#define FAL_PORT_DEBUG
-#ifdef FAL_PORT_DEBUG
-#define fal_port_dbg(fmt, ...) os_printf("[FLASH] " fmt "\r\n", ##__VA_ARGS__)
-#else
-#define fal_port_dbg(fmt, ...) do { } while (0)
-#endif
 
 #define ALIGN_UP(x,a)     (((x)+(a)-1U)/(a)*(a))
 #define ALIGN_DOWN(x,a)   ((x)/(a)*(a))
@@ -51,7 +48,7 @@ static int init(void){
     uint32_t size;
 
     if (spi_nor_open(&flash0) != 0) {
-        fal_port_dbg("spi_nor_open failed");
+        log_error("spi_nor_open failed");
         return -1;
     }
 
@@ -59,18 +56,18 @@ static int init(void){
 
     jedec_id = (jedec[0] << 16) | (jedec[1] << 8) | jedec[2];
 
-    fal_port_dbg("JEDEC ID: %02X %02X %02X (0x%06X)",
+    log_debug("JEDEC ID: %02X %02X %02X (0x%06X)",
               jedec[0], jedec[1], jedec[2], jedec_id);
 
     size = spi_nor_size_from_jedec(jedec_id);
 
     if (size == 0) {
-        fal_port_dbg("Unknown flash size from JEDEC");
+        log_error("Unknown flash size from JEDEC");
         spi_nor_close(&flash0);
         return -1;
     }
 
-    fal_port_dbg("Flash size detected: %u bytes", size);
+    log_info("Flash size detected: %u bytes", size);
 
     flash0.size        = size;
     flash0.sector_size = 0x1000;
@@ -86,13 +83,15 @@ static int init(void){
 
 static int read(long offset, uint8_t *buf, size_t size){
     uint32_t addr = (uint32_t)offset + FLASH_START_ADDR;
-    fal_port_dbg("read: addr=0x%08X size=%u", addr, size);
+
+    log_trace("read: addr=0x%08X size=%u", addr, size);
+
     if (!buf || !size) {
-        fal_port_dbg("read buff NULL");
+        log_warn("read buff NULL");
         return 0;
     }
     if (addr + size > FLASH_END_ADDR) {
-        fal_port_dbg("read outside sector!");
+        log_error("read outside sector");
         return -1;
     }
 
@@ -113,7 +112,7 @@ static int need_erase(const uint8_t *p, uint32_t len){
 }
 
 static void program_pages(uint32_t addr, const uint8_t *buf, uint32_t size){
-    fal_port_dbg("program_pages: addr=0x%08X size=%u", addr, size);
+    log_trace("program_pages: addr=0x%08X size=%u", addr, size);
     uint32_t page = page_size();
 
     while (size) {
@@ -123,7 +122,7 @@ static void program_pages(uint32_t addr, const uint8_t *buf, uint32_t size){
             chunk = size;
         }
 
-        fal_port_dbg("  write page chunk: addr=0x%08X size=%u", addr, chunk);
+        log_trace("write page chunk: addr=0x%08X size=%u", addr, chunk);
         spi_nor_write(&flash0, addr, (uint8_t *)buf, chunk);
 
         addr += chunk;
@@ -134,7 +133,7 @@ static void program_pages(uint32_t addr, const uint8_t *buf, uint32_t size){
 
 static int write_one_sector(uint32_t sector_addr, uint32_t addr,
                             const uint8_t *buf, uint32_t size){
-    fal_port_dbg("write_one_sector: sect=0x%08X addr=0x%08X size=%u",
+    log_trace("write_one_sector: sect=0x%08X addr=0x%08X size=%u",
               sector_addr, addr, size);
     uint32_t sect = sector_size();
     uint32_t off  = addr - sector_addr;
@@ -142,11 +141,11 @@ static int write_one_sector(uint32_t sector_addr, uint32_t addr,
     static uint8_t sect_buf[4U * 1024U];
 
     if (sect != sizeof(sect_buf)) {
-        fal_port_dbg("sector size mismatch");
+        log_error("sector size mismatch");
         return -2;
     }
     if (off + size > sect) {
-        fal_port_dbg("write outside sector!");
+        log_error("write outside sector");
         return -1;
     }
 
@@ -161,6 +160,7 @@ static int write_one_sector(uint32_t sector_addr, uint32_t addr,
         sect_buf[off + i] = buf[i];
     }
 
+    log_debug("erase-before-write sector 0x%08X", sector_addr);
     spi_nor_sector_erase(&flash0, sector_addr);
     program_pages(sector_addr, sect_buf, sect);
 
@@ -172,12 +172,14 @@ static int write(long offset, const uint8_t *buf, size_t size){
     uint32_t end  = addr + (uint32_t)size;
     uint32_t sect = sector_size();
 
+    log_trace("write: addr=0x%08X size=%u", addr, size);
+
     if (!buf || !size) {
-        fal_port_dbg("write: null buffer or zero size");
+        log_warn("write: null buffer or zero size");
         return 0;
     }
     if (end > FLASH_END_ADDR || addr < FLASH_START_ADDR) {
-        fal_port_dbg("write: out of range");
+        log_error("write: out of range");
         return -1;
     }
 
@@ -204,18 +206,18 @@ static int write(long offset, const uint8_t *buf, size_t size){
 }
 
 static int erase(long offset, size_t size){
-    fal_port_dbg("erase: off=%ld size=%u", offset, size);
+    log_trace("erase: off=%ld size=%u", offset, size);
 
     uint32_t addr = (uint32_t)offset + FLASH_START_ADDR;
     uint32_t end  = addr + (uint32_t)size;
     uint32_t sect = sector_size();
 
     if (!size) {
-        fal_port_dbg("erase: zero size");
+        log_warn("erase: zero size");
         return 0;
     }
     if (end > FLASH_END_ADDR || addr < FLASH_START_ADDR) {
-        fal_port_dbg("erase: out of range");
+        log_error("erase: out of range");
         return -1;
     }
 
@@ -225,7 +227,7 @@ static int erase(long offset, size_t size){
     spi_nor_open(&flash0);
 
     while (cur < end_up) {
-        fal_port_dbg("  erase sector 0x%08X", cur);
+        log_debug("erase sector 0x%08X", cur);
         spi_nor_sector_erase(&flash0, cur);
         cur += sect;
     }

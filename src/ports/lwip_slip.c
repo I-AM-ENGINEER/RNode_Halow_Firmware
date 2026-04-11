@@ -110,17 +110,24 @@ sio_fd_t sio_open( u8_t devnum ){
         0
     );
 
+    log_debug("sio_open");
     return (sio_fd_t)g_slip_uart;
 }
 
 static void uart_slip_task( void *arg ){
     uint8_t byte;
+    uint32_t overflow_prev = 0;
 
     (void)arg;
 
     while( 1 ){
         while( slip_rb_get(&byte) ){
             slipif_rxbyte_input(&slip_netif, byte);
+        }
+
+        if( slip_rb_overflow != overflow_prev ){
+            overflow_prev = slip_rb_overflow;
+            log_warn("slip rb overflow=%lu", (unsigned long)overflow_prev);
         }
 
         os_sleep_ms(1);
@@ -158,5 +165,5 @@ void uart_slip_init( void ){
     os_task_set_priority(&slip_task, UART_SLIP_TASK_PRIO);
     os_task_run(&slip_task);
 
-    log_debug("slip init done");
+    log_info("slip init done");
 }

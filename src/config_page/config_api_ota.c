@@ -1,3 +1,6 @@
+#include "sys_config.h"
+#define LOG_LOCAL_LEVEL LOG_LEVEL_CONFIG_API_OTA
+
 #include "config_page/config_api_calls.h"
 
 #include <stdbool.h>
@@ -10,6 +13,7 @@
 #include "lwip/ip4_addr.h"
 #include "lib/littlefs/lfs.h"
 #include "ota.h"
+#include "lib/logc/log.h"
 
 #define OTA_TMP_BIN_MAX    2048
 
@@ -80,21 +84,32 @@ int32_t web_api_ota_begin_post( const cJSON *in, cJSON *out ){
     uint32_t size;
     uint32_t crc;
 
-    if (in == NULL) { 
-        return -1; 
+    (void)out;
+
+    if (in == NULL) {
+        log_warn("ota_begin: in null");
+        return -1;
     }
 
     j_size = cJSON_GetObjectItemCaseSensitive((cJSON *)in, "size");
     j_crc  = cJSON_GetObjectItemCaseSensitive((cJSON *)in, "crc32");
-    if (!cJSON_IsNumber(j_size) || !cJSON_IsNumber(j_crc)) { 
-        return -1; 
+    if (!cJSON_IsNumber(j_size) || !cJSON_IsNumber(j_crc)) {
+        log_warn("ota_begin: bad json");
+        return -1;
     }
 
     size = (uint32_t)j_size->valuedouble;
     crc  = (uint32_t)j_crc->valuedouble;
 
+    log_debug("ota_begin size=%lu crc=0x%08lx",
+              (unsigned long)size,
+              (unsigned long)crc);
+
     if (ota_lfs_begin(size, crc) != 0) {
-        return -1; 
+        log_error("ota_begin failed size=%lu crc=0x%08lx",
+                  (unsigned long)size,
+                  (unsigned long)crc);
+        return -1;
     }
     return 0;
 }
@@ -113,12 +128,14 @@ int32_t web_api_ota_chunk_post( const cJSON *in, cJSON *out ){
     (void)out;
 
     if (in == NULL) {
+        log_warn("ota_chunk: in null");
         return -1;
     }
 
     j_off = cJSON_GetObjectItemCaseSensitive((cJSON *)in, "off");
     j_b64 = cJSON_GetObjectItemCaseSensitive((cJSON *)in, "b64");
     if (!cJSON_IsNumber(j_off) || !cJSON_IsString(j_b64)) {
+        log_warn("ota_chunk: bad json");
         return -2;
     }
 
@@ -126,44 +143,67 @@ int32_t web_api_ota_chunk_post( const cJSON *in, cJSON *out ){
     b64 = j_b64->valuestring;
 
     b64_len = strlen(b64);
-    tmp_cap = (b64_len / 4u) * 3u + 3u;  // worst-case decoded size
+    tmp_cap = (b64_len / 4u) * 3u + 3u;
     if (tmp_cap == 0u || tmp_cap > (size_t)OTA_TMP_BIN_MAX) {
+        log_warn("ota_chunk: bad tmp_cap=%lu off=%lu",
+                 (unsigned long)tmp_cap,
+                 (unsigned long)off);
         return -3;
     }
 
     tmp = (uint8_t *)os_malloc((uint32_t)tmp_cap);
     if (tmp == NULL) {
+        log_error("ota_chunk: oom cap=%lu off=%lu",
+                  (unsigned long)tmp_cap,
+                  (unsigned long)off);
         return -4;
     }
 
     if (b64_decode(b64, tmp, (uint32_t)tmp_cap, &n) != 0) {
+        log_warn("ota_chunk: b64 decode failed off=%lu", (unsigned long)off);
         os_free(tmp);
         return -5;
     }
 
     if (ota_lfs_write(off, tmp, n) != 0) {
+        log_error("ota_chunk: write failed off=%lu len=%lu",
+                  (unsigned long)off,
+                  (unsigned long)n);
         os_free(tmp);
         return -6;
     }
+
+    log_trace("ota_chunk off=%lu len=%lu",
+              (unsigned long)off,
+              (unsigned long)n);
 
     os_free(tmp);
     return 0;
 }
 
 int32_t web_api_ota_end_post( const cJSON *in, cJSON *out ){
-    if (ota_lfs_end() != 0) { 
-        return -1; 
+    (void)in;
+    (void)out;
+
+    if (ota_lfs_end() != 0) {
+        log_error("ota_end failed");
+        return -1;
     }
+
+    log_debug("ota_end ok");
     return 0;
 }
 
 int32_t web_api_ota_write_post( const cJSON *in, cJSON *out ){
-    if(ota_lfs_upgrade_from_tar() != 0){
+    (void)in;
+    (void)out;
+
+    log_debug("ota_write start");
+
+    if( ota_lfs_upgrade_from_tar() != 0 ){
+        log_error("ota_write failed");
         return -1;
     }
 
-    //if (ota_write_firmware_from_file() != 0) {
-    //    return -2; 
-    //}
     return 0;
 }

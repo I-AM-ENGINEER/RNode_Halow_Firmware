@@ -1,3 +1,5 @@
+#include "sys_config.h"
+#define LOG_LOCAL_LEVEL LOG_LEVEL_CONFIG_API_DISPATCH
 
 #include "basic_include.h"
 
@@ -7,6 +9,7 @@
 
 #include "config_page/config_api_dispatch.h"
 #include "config_page/config_api_calls.h"
+#include "lib/logc/log.h"
 
 typedef int32_t (*web_api_cb_t)( const cJSON *in, cJSON *out );
 
@@ -125,22 +128,27 @@ int32_t web_api_dispatch( const char *method,
     const char *endpoint;
     const web_api_route_t *r;
     web_api_cb_t cb;
+    int32_t rc;
 
     if (method == NULL || uri == NULL || out_json == NULL) {
+        log_warn("dispatch bad args");
         return WEB_API_RC_BAD_REQUEST;
     }
     if (!cJSON_IsObject(out_json)) {
+        log_warn("dispatch out_json not object");
         return WEB_API_RC_BAD_REQUEST;
     }
 
     endpoint = api_uri_to_endpoint(uri, ep, sizeof(ep));
     if (endpoint == NULL) {
+        log_warn("dispatch bad uri='%s'", uri);
         api_set_err(out_json, "bad uri");
         return WEB_API_RC_BAD_REQUEST;
     }
 
     r = api_find_route(endpoint);
     if (r == NULL) {
+        log_warn("dispatch api not found method=%s ep=%s", method, endpoint);
         api_set_err(out_json, "api not found");
         return WEB_API_RC_NOT_FOUND;
     }
@@ -152,14 +160,21 @@ int32_t web_api_dispatch( const char *method,
     } else if (strcmp(method, "POST") == 0) {
         cb = r->post_cb;
     } else {
+        log_warn("dispatch method not allowed method=%s ep=%s", method, endpoint);
         api_set_err(out_json, "method not allowed");
         return WEB_API_RC_METHOD_NOT_ALLOWED;
     }
 
     if (cb == NULL) {
+        log_warn("dispatch no handler method=%s ep=%s", method, endpoint);
         api_set_err(out_json, "method not allowed");
         return WEB_API_RC_METHOD_NOT_ALLOWED;
     }
 
-    return cb(in_json, out_json);
+    log_trace("dispatch method=%s ep=%s", method, endpoint);
+    rc = cb(in_json, out_json);
+    if (rc != WEB_API_RC_OK) {
+        log_warn("dispatch rc=%ld method=%s ep=%s", (long)rc, method, endpoint);
+    }
+    return rc;
 }

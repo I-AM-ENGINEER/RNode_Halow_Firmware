@@ -14,7 +14,7 @@ typedef struct {
     ip4_addr_t whitelist_mask;
 } tcp_server_config_t;
 
-int32_t tcp_server_init(tcp_server_rx_cb_t cb);
+void tcp_server_init(tcp_server_rx_cb_t cb);
 int32_t tcp_server_send(const uint8_t *data, uint32_t len);
 void tcp_server_config_load(tcp_server_config_t *cfg);
 void tcp_server_config_save(const tcp_server_config_t *cfg);
