@@ -13,12 +13,12 @@
         halow: '',
         lbt: '',
         net: '',
+        slip: '',
+        log: '',
         tcp: '',
         telemetry: ''
     };
     const DASHBOARD_REFRESH_MS = 1000;
-    const NEARBY_PAGE_SIZE = 20;
-    const RETICULUM_PAGE_SIZE = 20;
     const dashboardState = {
         active: false,
         timer: null,
@@ -27,8 +27,6 @@
     const nearbyState = {
         auto: true,
         periodMs: 5000,
-        page: 0,
-        total: 0,
         timer: null,
         loading: false,
         active: false,
@@ -37,8 +35,6 @@
     const reticulumState = {
         auto: true,
         periodMs: 5000,
-        page: 0,
-        total: 0,
         timer: null,
         loading: false,
         active: false,
@@ -65,8 +61,7 @@
             power_dbm: parseFloat(document.getElementById('halow_power_dbm').value),
             central_freq: parseFloat(document.getElementById('halow_central_freq').value),
             mcs_index: document.getElementById('halow_mcs_index').value,
-            bandwidth: document.getElementById('halow_bandwidth').value,
-            super_power: document.getElementById('halow_super_power').checked
+            bandwidth: document.getElementById('halow_bandwidth').value
         };
     }
 
@@ -83,6 +78,28 @@
             ip_address: document.getElementById('net_ip_address').value,
             gw_address: document.getElementById('net_gw_address').value,
             netmask: document.getElementById('net_netmask').value
+        };
+    }
+
+    function readSlipForm() {
+        const ip = document.getElementById('slip_ip_address').value;
+        const gw = document.getElementById('slip_gw_address').value;
+
+        return {
+            enable: document.getElementById('slip_enable').checked,
+            baud: parseInt(document.getElementById('slip_baud').value, 10),
+            ip: ip,
+            gw: gw,
+            ip_address: ip,
+            gw_address: gw
+        };
+    }
+
+    function readLogForm() {
+        return {
+            udp_enable: document.getElementById('log_udp_enable').checked,
+            host: document.getElementById('log_udp_host').value,
+            port: parseInt(document.getElementById('log_udp_port').value, 10)
         };
     }
 
@@ -120,6 +137,8 @@
         if (group === 'halow') { current = jsonSnapshot(readHalowForm()); btn = document.getElementById('save_halow'); }
         if (group === 'lbt') { current = jsonSnapshot(readLbtForm()); btn = document.getElementById('save_lbt'); }
         if (group === 'net') { current = jsonSnapshot(readNetForm()); btn = document.getElementById('save_net'); }
+        if (group === 'slip') { current = jsonSnapshot(readSlipForm()); btn = document.getElementById('save_slip'); }
+        if (group === 'log') { current = jsonSnapshot(readLogForm()); btn = document.getElementById('save_log'); }
         if (group === 'tcp') { current = jsonSnapshot(readTcpForm()); btn = document.getElementById('save_tcp'); }
         if (group === 'telemetry') {
             current = jsonSnapshot(readTelemetryForm());
@@ -140,6 +159,8 @@
         if (group === 'halow') { baselines.halow = jsonSnapshot(readHalowForm()); }
         if (group === 'lbt') { baselines.lbt = jsonSnapshot(readLbtForm()); }
         if (group === 'net') { baselines.net = jsonSnapshot(readNetForm()); }
+        if (group === 'slip') { baselines.slip = jsonSnapshot(readSlipForm()); }
+        if (group === 'log') { baselines.log = jsonSnapshot(readLogForm()); }
         if (group === 'tcp') { baselines.tcp = jsonSnapshot(readTcpForm()); }
         if (group === 'telemetry') { baselines.telemetry = jsonSnapshot(readTelemetryForm()); }
         updateSaveButton(group);
@@ -149,15 +170,19 @@
         snapshotGroup('halow');
         snapshotGroup('lbt');
         snapshotGroup('net');
+        snapshotGroup('slip');
+        snapshotGroup('log');
         snapshotGroup('tcp');
         snapshotGroup('telemetry');
     }
 
     function setupDirtyTracking() {
         const map = [
-            { group: 'halow', btn: 'save_halow', ids: ['halow_power_dbm', 'halow_central_freq', 'halow_mcs_index', 'halow_bandwidth', 'halow_super_power'] },
+            { group: 'halow', btn: 'save_halow', ids: ['halow_power_dbm', 'halow_central_freq', 'halow_mcs_index', 'halow_bandwidth'] },
             { group: 'lbt', btn: 'save_lbt', ids: ['lbt_uen', 'lbt_umax'] },
             { group: 'net', btn: 'save_net', ids: ['net_dhcp', 'net_ip_address', 'net_gw_address', 'net_netmask'] },
+            { group: 'slip', btn: 'save_slip', ids: ['slip_enable', 'slip_baud', 'slip_ip_address', 'slip_gw_address'] },
+            { group: 'log', btn: 'save_log', ids: ['log_udp_enable', 'log_udp_host', 'log_udp_port'] },
             { group: 'tcp', btn: 'save_tcp', ids: ['tcp_enable', 'tcp_port', 'tcp_whitelist'] },
             {
                 group: 'telemetry',
@@ -214,6 +239,12 @@
         document.getElementById('net_dhcp').addEventListener('change', updateNetDisabled);
         document.getElementById('save_net').addEventListener('click', saveNet);
 
+        document.getElementById('slip_enable').addEventListener('change', updateSlipDisabled);
+        document.getElementById('save_slip').addEventListener('click', saveSlip);
+
+        document.getElementById('log_udp_enable').addEventListener('change', updateLogDisabled);
+        document.getElementById('save_log').addEventListener('click', saveLog);
+
         document.getElementById('tcp_enable').addEventListener('change', updateTcpDisabled);
         document.getElementById('save_tcp').addEventListener('click', saveTcp);
 
@@ -235,14 +266,10 @@
         document.getElementById('nearby_auto').addEventListener('change', handleNearbyAutoChange);
         document.getElementById('nearby_period').addEventListener('change', handleNearbyPeriodChange);
         document.getElementById('nearby_refresh').addEventListener('click', () => refreshNearby(true));
-        document.getElementById('nearby_prev').addEventListener('click', () => changeNearbyPage(-1));
-        document.getElementById('nearby_next').addEventListener('click', () => changeNearbyPage(1));
 
         document.getElementById('reticulum_auto').addEventListener('change', handleReticulumAutoChange);
         document.getElementById('reticulum_period').addEventListener('change', handleReticulumPeriodChange);
         document.getElementById('reticulum_refresh').addEventListener('click', () => refreshReticulum(true));
-        document.getElementById('reticulum_prev').addEventListener('click', () => changeReticulumPage(-1));
-        document.getElementById('reticulum_next').addEventListener('click', () => changeReticulumPage(1));
 
         document.getElementById('fw_file').addEventListener('change', updateFwDisabled);
         document.getElementById('fw_flash').addEventListener('click', fwFlash);
@@ -271,6 +298,22 @@
         const netFields = document.getElementById('net_fields');
         netFields.querySelectorAll('input').forEach(el => {
             el.disabled = dhcp;
+        });
+    }
+
+    function updateSlipDisabled() {
+        const enabled = document.getElementById('slip_enable').checked;
+        const slipFields = document.getElementById('slip_fields');
+        slipFields.querySelectorAll('input').forEach(el => {
+            el.disabled = !enabled;
+        });
+    }
+
+    function updateLogDisabled() {
+        const enabled = document.getElementById('log_udp_enable').checked;
+        const logFields = document.getElementById('log_udp_fields');
+        logFields.querySelectorAll('input').forEach(el => {
+            el.disabled = !enabled;
         });
     }
 
@@ -453,10 +496,6 @@
     function updateNearbyUi() {
         const autoEl = document.getElementById('nearby_auto');
         const periodEl = document.getElementById('nearby_period');
-        const prevEl = document.getElementById('nearby_prev');
-        const nextEl = document.getElementById('nearby_next');
-        const pageInfoEl = document.getElementById('nearby_page_info');
-        const totalPages = Math.max(1, Math.ceil((nearbyState.total || 0) / NEARBY_PAGE_SIZE));
 
         if (autoEl) {
             autoEl.checked = nearbyState.auto;
@@ -465,18 +504,6 @@
         if (periodEl) {
             periodEl.value = String(Math.max(1, Math.round(nearbyState.periodMs / 1000)));
             periodEl.disabled = !nearbyState.auto;
-        }
-
-        if (prevEl) {
-            prevEl.disabled = nearbyState.loading || nearbyState.page <= 0;
-        }
-
-        if (nextEl) {
-            nextEl.disabled = nearbyState.loading || nearbyState.page >= (totalPages - 1);
-        }
-
-        if (pageInfoEl) {
-            pageInfoEl.textContent = 'Page ' + (totalPages === 0 ? 0 : nearbyState.page + 1) + ' / ' + totalPages;
         }
     }
 
@@ -504,16 +531,6 @@
         scheduleNearbyRefresh();
     }
 
-    function changeNearbyPage(delta) {
-        const totalPages = Math.max(1, Math.ceil((nearbyState.total || 0) / NEARBY_PAGE_SIZE));
-        const nextPage = Math.min(Math.max(nearbyState.page + delta, 0), totalPages - 1);
-        if (nextPage === nearbyState.page) {
-            return;
-        }
-        nearbyState.page = nextPage;
-        updateNearbyUi();
-        refreshNearby(true);
-    }
 
     function normalizeNearbyMcs(value) {
         if (value === undefined || value === null || value === '') {
@@ -684,29 +701,18 @@
         updateNearbyUi();
 
         try {
-            for (let attempt = 0; attempt < 2; attempt++) {
-                const url = '/api/get_nearby_modems?p=' + nearbyState.page + '&n=' + NEARBY_PAGE_SIZE;
-                const res = await fetch(url, { cache: 'no-store' });
-                if (!res.ok) {
-                    return;
-                }
-
-                const data = await res.json();
-                const total = Number(data?.c ?? data?.count ?? data?.total ?? 0);
-                const totalPages = Math.max(1, Math.ceil(total / NEARBY_PAGE_SIZE));
-
-                if (nearbyState.page >= totalPages) {
-                    nearbyState.page = totalPages - 1;
-                    nearbyState.total = total;
-                    continue;
-                }
-
-                nearbyState.total = total;
-                setText('nearby_self_mac', formatMac(data?.m ?? data?.mac ?? data?.self_mac ?? document.getElementById('stat_mac')?.textContent));
-                setText('nearby_count', total);
-                renderNearbyRows(Array.isArray(data?.d) ? data.d : (Array.isArray(data?.devices) ? data.devices : []));
+            const res = await fetch('/api/get_nearby_modems', { cache: 'no-store' });
+            if (!res.ok) {
                 return;
             }
+
+            const data = await res.json();
+            const rows = Array.isArray(data?.d) ? data.d : (Array.isArray(data?.devices) ? data.devices : []);
+            const total = Number(data?.c ?? data?.count ?? data?.total ?? rows.length ?? 0);
+
+            setText('nearby_self_mac', formatMac(data?.m ?? data?.mac ?? data?.self_mac ?? document.getElementById('stat_mac')?.textContent));
+            setText('nearby_count', total);
+            renderNearbyRows(rows);
         } catch (err) {
             // ignore nearby fetch errors
         } finally {
@@ -736,10 +742,6 @@
     function updateReticulumUi() {
         const autoEl = document.getElementById('reticulum_auto');
         const periodEl = document.getElementById('reticulum_period');
-        const prevEl = document.getElementById('reticulum_prev');
-        const nextEl = document.getElementById('reticulum_next');
-        const pageInfoEl = document.getElementById('reticulum_page_info');
-        const totalPages = Math.max(1, Math.ceil((reticulumState.total || 0) / RETICULUM_PAGE_SIZE));
 
         if (autoEl) {
             autoEl.checked = reticulumState.auto;
@@ -748,18 +750,6 @@
         if (periodEl) {
             periodEl.value = String(Math.max(1, Math.round(reticulumState.periodMs / 1000)));
             periodEl.disabled = !reticulumState.auto;
-        }
-
-        if (prevEl) {
-            prevEl.disabled = reticulumState.loading || reticulumState.page <= 0;
-        }
-
-        if (nextEl) {
-            nextEl.disabled = reticulumState.loading || reticulumState.page >= (totalPages - 1);
-        }
-
-        if (pageInfoEl) {
-            pageInfoEl.textContent = 'Page ' + (totalPages === 0 ? 0 : reticulumState.page + 1) + ' / ' + totalPages;
         }
     }
 
@@ -787,16 +777,6 @@
         scheduleReticulumRefresh();
     }
 
-    function changeReticulumPage(delta) {
-        const totalPages = Math.max(1, Math.ceil((reticulumState.total || 0) / RETICULUM_PAGE_SIZE));
-        const nextPage = Math.min(Math.max(reticulumState.page + delta, 0), totalPages - 1);
-        if (nextPage === reticulumState.page) {
-            return;
-        }
-        reticulumState.page = nextPage;
-        updateReticulumUi();
-        refreshReticulum(true);
-    }
 
     function formatDurationCompact(seconds) {
         const total = Number(seconds);
@@ -961,28 +941,17 @@
         updateReticulumUi();
 
         try {
-            for (let attempt = 0; attempt < 2; attempt++) {
-                const url = '/api/get_reticulum_links?p=' + reticulumState.page + '&n=' + RETICULUM_PAGE_SIZE;
-                const res = await fetch(url, { cache: 'no-store' });
-                if (!res.ok) {
-                    return;
-                }
-
-                const data = await res.json();
-                const total = Number(data?.c ?? data?.count ?? data?.total ?? 0);
-                const totalPages = Math.max(1, Math.ceil(total / RETICULUM_PAGE_SIZE));
-
-                if (reticulumState.page >= totalPages) {
-                    reticulumState.page = totalPages - 1;
-                    reticulumState.total = total;
-                    continue;
-                }
-
-                reticulumState.total = total;
-                setText('reticulum_count', total);
-                renderReticulumRows(Array.isArray(data?.d) ? data.d : (Array.isArray(data?.links) ? data.links : []));
+            const res = await fetch('/api/get_reticulum_links', { cache: 'no-store' });
+            if (!res.ok) {
                 return;
             }
+
+            const data = await res.json();
+            const rows = Array.isArray(data?.d) ? data.d : (Array.isArray(data?.links) ? data.links : []);
+            const total = Number(data?.c ?? data?.count ?? data?.total ?? rows.length ?? 0);
+
+            setText('reticulum_count', total);
+            renderReticulumRows(rows);
         } catch (err) {
             // ignore reticulum fetch errors
         } finally {
@@ -1015,7 +984,6 @@
         setInput('halow_central_freq', halow.central_freq);
         setSelect('halow_mcs_index', halow.mcs_index);
         setSelect('halow_bandwidth', halow.bandwidth);
-        setCheckbox('halow_super_power', halow.super_power);
         updateBandwidthDisabled();
 
         const lbt = pick(state?.lbt, state?.api_lbt_cfg, state?.lbt_cfg);
@@ -1029,6 +997,19 @@
         setInput('net_gw_address', net.gw_address);
         setInput('net_netmask', net.netmask);
         updateNetDisabled();
+
+        const slip = pick(state?.slip, state?.api_slip_cfg, state?.slip_cfg);
+        setCheckbox('slip_enable', slip.enable);
+        setInput('slip_baud', slip.baud);
+        setInput('slip_ip_address', slip.ip_address ?? slip.ip);
+        setInput('slip_gw_address', slip.gw_address ?? slip.gw);
+        updateSlipDisabled();
+
+        const logCfg = pick(state?.log, state?.logs, state?.api_log_cfg, state?.log_cfg, state?.api_logs_cfg, state?.logs_cfg);
+        setCheckbox('log_udp_enable', logCfg.udp_enable ?? logCfg.enable);
+        setInput('log_udp_host', logCfg.host ?? logCfg.ip_address);
+        setInput('log_udp_port', logCfg.port);
+        updateLogDisabled();
 
         const tcp = pick(state?.tcp, state?.api_tcp_server_cfg, state?.tcp_server_cfg);
         setCheckbox('tcp_enable', tcp.enable);
@@ -1114,6 +1095,26 @@
             await postJson('/api/net_cfg', payload);
         } catch (err) {
             console.error('saveNet error', err);
+        }
+        loadAll();
+    }
+
+    async function saveSlip() {
+        const payload = readSlipForm();
+        try {
+            await postJson('/api/slip_cfg', payload);
+        } catch (err) {
+            console.error('saveSlip error', err);
+        }
+        loadAll();
+    }
+
+    async function saveLog() {
+        const payload = readLogForm();
+        try {
+            await postJson('/api/log_cfg', payload);
+        } catch (err) {
+            console.error('saveLog error', err);
         }
         loadAll();
     }

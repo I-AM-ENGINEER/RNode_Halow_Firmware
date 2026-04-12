@@ -77,13 +77,15 @@
 #define MQTT_RETRY_MS                           (500)
 
 // SLIP static ip only
-#define SLIP_CONFIG_UART_DEVICE                 (uart1)
-#define SLIP_CONFIG_RX_BUF_SIZE                 (2048)
-#define SLIP_CONFIG_IP_ADDR_DEF                 PP_HTONL(LWIP_MAKEU32(192,168,7,2))
-#define SLIP_CONFIG_IP_MASK_DEF                 PP_HTONL(LWIP_MAKEU32(255,255,255,255))
-#define SLIP_CONFIG_IP_GW_DEF                   PP_HTONL(LWIP_MAKEU32(192,168,7,1))
 #define SLIP_RX_FROM_ISR                        (0)
 #define SLIP_USE_RX_THREAD                      (0)
+#define UART_SLIP_DEVICE                        (uart1)
+#define UART_SLIP_RB_SIZE                       (2048)
+#define UART_SLIP_CONFIG_ENABLE_DEF             (true)
+#define UART_SLIP_CONFIG_BAUD_DEF               (2000000)
+#define UART_SLIP_CONFIG_IP_ADDR_DEF            PP_HTONL(LWIP_MAKEU32(192,168,7,2))
+#define UART_SLIP_CONFIG_IP_MASK_DEF            PP_HTONL(LWIP_MAKEU32(255,255,255,255))
+#define UART_SLIP_CONFIG_IP_GW_DEF              PP_HTONL(LWIP_MAKEU32(192,168,7,1))
 
 #define NET_IP_CONFIG_MODE_DEF                  (NET_IP_MODE_DHCP)
 #define NET_IP_CONFIG_IP_DEF                    PP_HTONL(LWIP_MAKEU32(192, 168, 42, 42))
@@ -135,13 +137,13 @@
 #define HALOW_LBT_LISTEN_TASK_PRIO              (OS_TASK_PRIORITY_IDLE)
 #define HALOW_LBT_LISTEN_TASK_STACK             (2*1024)
 
-#define TELEMETRY_WORK_PRIO                     (OS_TASK_PRIORITY_BELOW_NORMAL)
-
 #define TCPIP_THREAD_PRIO                       (OS_TASK_PRIORITY_ABOVE_NORMAL + 5)
 #define TCPIP_THREAD_STACKSIZE                  (2*1024)
 
 #define UART_SLIP_TASK_PRIO                     (OS_TASK_PRIORITY_ABOVE_NORMAL + 4)
 #define UART_SLIP_TASK_STACK                    (2*1024)
+
+#define TELEMETRY_WORK_PRIO                     (OS_TASK_PRIORITY_BELOW_NORMAL)
 
 #define LOG_LEVEL_CONFIGDB                      (LOG_DEBUG)
 #define LOG_LEVEL_LITTLEFS                      (LOG_TRACE)
@@ -150,13 +152,14 @@
 #define LOG_LEVEL_CONFIG_API_DISPATCH           (LOG_TRACE)
 #define LOG_LEVEL_CONFIG_API_OTA                (LOG_TRACE)
 #define LOG_LEVEL_CONFIG_PAGE                   (LOG_TRACE)
-#define LOG_LEVEL_TFTP_SERVER                   (LOG_TRACE)
+#define LOG_LEVEL_TFTP_SERVER                   (LOG_NONE)
 #define LOG_LEVEL_STATISTICS                    (LOG_TRACE)
 #define LOG_LEVEL_TCP_SERVER                    (LOG_TRACE)
 #define LOG_LEVEL_TELEMETRY                     (LOG_TRACE)
 #define LOG_LEVEL_RNS_STREAM_PARSER             (LOG_TRACE)
 #define LOG_LEVEL_FAL_PORT                      (LOG_INFO)
 #define LOG_LEVEL_RNS_LINK_PARSER               (LOG_TRACE)
+#define LOG_LEVEL_UART_SLIP                     (LOG_TRACE)
 
 #define RNS_STREAM_PARSER_LOG_LEVEL LOG_LEVEL_RNS_STREAM_PARSER
 #define RNS_LINK_PARSER_LOG_LEVEL LOG_LEVEL_RNS_LINK_PARSER

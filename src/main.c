@@ -253,7 +253,7 @@ __init static void sys_network_init(void) {
 
     tcpip_init(NULL, NULL);
     sock_monitor_init();
-    uart_slip_init();
+    uart_slip_early_init();
     net_log_init_early();
 
     uint8_t mac[6];
@@ -442,6 +442,7 @@ __init int main(void) {
         return 0;
     }
     configdb_init();
+    uart_slip_init();
     net_log_init();
     littlefs_init();
     boot_counter_update();

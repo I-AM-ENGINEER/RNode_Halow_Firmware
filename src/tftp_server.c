@@ -36,7 +36,7 @@ static void *tftp_lfs_open( const char *fname, const char *mode, u8_t write ){
 
     memset(&g_tftp_file, 0, sizeof(g_tftp_file));
 
-    log_debug("open %s '%s'", write ? "WRQ" : "RRQ", fname);
+    log_debug("open %s '%s' mode='%s'", write ? "WRQ" : "RRQ", fname, mode ? mode : "");
 
     flags = write
           ? (LFS_O_WRONLY | LFS_O_CREAT | LFS_O_TRUNC)
@@ -116,7 +116,14 @@ static const struct tftp_context g_tftp_ctx = {
 };
 
 int32_t tftp_server_init( void ){
-    tftp_init(&g_tftp_ctx);
+    err_t err;
+
+    err = tftp_init(&g_tftp_ctx);
+    if( err != ERR_OK ){
+        log_error("tftp init fail err=%d", (int)err);
+        return -1;
+    }
+
     log_info("tftp init ok");
     return 0;
 }

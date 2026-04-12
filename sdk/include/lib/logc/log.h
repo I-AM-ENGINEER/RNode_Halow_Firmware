@@ -14,14 +14,13 @@ typedef void (*log_LockFn)( bool lock, void *udata );
 #define LOG_WARN  3
 #define LOG_ERROR 4
 #define LOG_FATAL 5
+#define LOG_NONE 100
 
 #define LOG_USE_COLOR
 
 #ifndef LOG_BUF_SIZE
 #define LOG_BUF_SIZE 256
 #endif
-
-#define LOG_NONE 100
 
 #ifndef LOG_ENABLE_LEVEL
 #define LOG_ENABLE_LEVEL LOG_NONE

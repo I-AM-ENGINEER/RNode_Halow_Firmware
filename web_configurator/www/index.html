@@ -58,8 +58,9 @@
                 <h3>RF Settings</h3>
                 <label>
                     <span>TX power (dBm)</span>
-                    <input type="number" id="halow_power_dbm" min="1" max="20">
+                    <input type="number" id="halow_power_dbm" min="1" max="25">
                 </label>
+                <p class="note">Valid values: 1-25 dBm.</p>
                 <label>
                     <span>Central frequency (MHz)</span>
                     <input type="number" id="halow_central_freq" min="750" max="950" step="0.1">
@@ -86,10 +87,6 @@
                         <option value="4 MHz">4&nbsp;MHz</option>
                         <option value="8 MHz">8&nbsp;MHz</option>
                     </select>
-                </label>
-                <label class="toggle-label">
-                    <span>TX super power</span>
-                    <input type="checkbox" id="halow_super_power">
                 </label>
                 <div class="panel-actions">
                     <button type="button" id="save_halow" disabled>Save</button>
@@ -210,6 +207,52 @@
                 </fieldset>
                 <div class="panel-actions">
                     <button type="button" id="save_net" disabled>Save</button>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>SLIP Settings</h3>
+                <label class="toggle-label">
+                    <span>Enable SLIP</span>
+                    <input type="checkbox" id="slip_enable">
+                </label>
+                <fieldset id="slip_fields">
+                    <label>
+                        <span>Baud rate</span>
+                        <input type="number" id="slip_baud" min="1" step="1">
+                    </label>
+                    <label>
+                        <span>Static IP address</span>
+                        <input type="text" id="slip_ip_address" spellcheck="false">
+                    </label>
+                    <label>
+                        <span>Gateway address</span>
+                        <input type="text" id="slip_gw_address" spellcheck="false">
+                    </label>
+                </fieldset>
+                <div class="panel-actions">
+                    <button type="button" id="save_slip" disabled>Save</button>
+                </div>
+            </div>
+
+            <div class="panel">
+                <h3>UDP Log Settings</h3>
+                <label class="toggle-label">
+                    <span>Enable UDP logs</span>
+                    <input type="checkbox" id="log_udp_enable">
+                </label>
+                <fieldset id="log_udp_fields">
+                    <label>
+                        <span>Destination IP address</span>
+                        <input type="text" id="log_udp_host" spellcheck="false">
+                    </label>
+                    <label>
+                        <span>Destination port</span>
+                        <input type="number" id="log_udp_port" min="1" max="65535" step="1">
+                    </label>
+                </fieldset>
+                <div class="panel-actions">
+                    <button type="button" id="save_log" disabled>Save</button>
                 </div>
             </div>
 
@@ -374,12 +417,6 @@
                         </tbody>
                     </table>
                 </div>
-
-                <div class="panel-actions panel-actions-wrap nearby-paging">
-                    <button type="button" id="nearby_prev" class="secondary">Prev</button>
-                    <span id="nearby_page_info">Page 1 / 1</span>
-                    <button type="button" id="nearby_next" class="secondary">Next</button>
-                </div>
             </div>
         </section>
 
@@ -431,12 +468,6 @@
                             <tr><td colspan="13">--</td></tr>
                         </tbody>
                     </table>
-                </div>
-
-                <div class="panel-actions panel-actions-wrap nearby-paging">
-                    <button type="button" id="reticulum_prev" class="secondary">Prev</button>
-                    <span id="reticulum_page_info">Page 1 / 1</span>
-                    <button type="button" id="reticulum_next" class="secondary">Next</button>
                 </div>
             </div>
         </section>

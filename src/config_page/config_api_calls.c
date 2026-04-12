@@ -27,6 +27,8 @@
 #include "ota.h"
 #include "nearby_detect.h"
 #include "lib/logc/log.h"
+#include "uart_slip.h"
+#include "net_log.h"
 
 /* -------------------------------------------------------------------------- */
 /* Change version                                                             */
@@ -167,6 +169,8 @@ int32_t web_api_ok_get( const cJSON *in, cJSON *out ){
 
 int32_t web_api_halow_cfg_get( const cJSON *in, cJSON *out ){
     halow_config_t cfg;
+    char bndw[16];
+    char mcs[8];
 
     (void)in;
 
@@ -176,24 +180,21 @@ int32_t web_api_halow_cfg_get( const cJSON *in, cJSON *out ){
 
     halow_config_load(&cfg);
 
-    char bndw[16];
     (void)snprintf(bndw, sizeof(bndw), "%d MHz", (int)cfg.bandwidth);
-    (void)cJSON_AddStringToObject(out, "bandwidth",    bndw);
+    (void)cJSON_AddStringToObject(out, "bandwidth", bndw);
     (void)cJSON_AddNumberToObject(out, "central_freq", ((double)cfg.central_freq) / 10.0);
-    (void)cJSON_AddBoolToObject(out,   "super_power",  (cfg.rf_super_power != 0) ? 1 : 0);
-    (void)cJSON_AddNumberToObject(out, "power_dbm",    (double)cfg.rf_power);
-    char mcs[8];
+    (void)cJSON_AddNumberToObject(out, "power_dbm", (double)cfg.rf_power);
     (void)snprintf(mcs, sizeof(mcs), "MCS%d", (int)cfg.mcs);
     (void)cJSON_AddStringToObject(out, "mcs_index", mcs);
 
     return WEB_API_RC_OK;
 }
 
-int32_t web_api_halow_cfg_post( const cJSON *in, cJSON *out ){
+int32_t web_api_halow_cfg_post(const cJSON *in, cJSON *out) {
     halow_config_t cfg;
-    bool b;
     int i;
     double d;
+    const cJSON *j;
 
     if (in == NULL || !cJSON_IsObject(in) || out == NULL) {
         log_warn("halow_cfg_post bad json");
@@ -202,36 +203,48 @@ int32_t web_api_halow_cfg_post( const cJSON *in, cJSON *out ){
 
     halow_config_load(&cfg);
 
-    const cJSON *j;
-
     j = cJSON_GetObjectItemCaseSensitive(in, "bandwidth");
     if (j != NULL && cJSON_IsString(j) && j->valuestring != NULL) {
-        const char *s = j->valuestring;          /* "4 MHz" */
-        int bw = atoi(s);                        /* 4 */
+        const char *s_bw = j->valuestring;
+        int bw = atoi(s_bw);
 
         if (bw > 0 && bw < 64) {
             cfg.bandwidth = (int8_t)bw;
         }
 
-        log_debug("halow_cfg bandwidth json='%s' -> %d", s, bw);
+        log_debug("halow_cfg bandwidth json='%s' -> %d", s_bw, bw);
     }
-    
+
     j = cJSON_GetObjectItemCaseSensitive(in, "mcs_index");
     if (j != NULL && cJSON_IsString(j) && j->valuestring != NULL) {
-        const char *s = j->valuestring;
-        if (s[0] == 'M' && s[1] == 'C' && s[2] == 'S') {
-            cfg.mcs = (int8_t)atoi(&s[3]);
+        const char *s_mcs = j->valuestring;
+
+        if (s_mcs[0] == 'M' && s_mcs[1] == 'C' && s_mcs[2] == 'S') {
+            cfg.mcs = (int8_t)atoi(&s_mcs[3]);
         }
     }
 
-    if (json_get_bool(in, "super_power", &b)) {
-        cfg.rf_super_power = b ? 1 : 0;
+    if (cJSON_GetObjectItemCaseSensitive(in, "super_power") != NULL) {
+        log_debug("halow_cfg_post ignore legacy super_power");
     }
 
     if (json_get_int(in, "power_dbm", &i)) {
-        if (i > -128 && i < 128) {
+        if (i < 1 || i > 25) {
+            log_warn("halow_cfg_post bad power_dbm=%d", i);
+            return api_err(out, WEB_API_RC_BAD_REQUEST,
+                           "power_dbm must be in range 1..25 dBm");
+        }
+
+        if (i > 20) {
+            cfg.rf_super_power = 1;
+            cfg.rf_power = (int8_t)(i - 5);
+        } else {
+            cfg.rf_super_power = 0;
             cfg.rf_power = (int8_t)i;
         }
+
+        log_debug("halow_cfg power_dbm=%d -> rf_power=%d, super_power=%d",
+                  i, cfg.rf_power, cfg.rf_super_power);
     }
 
     if (json_get_double(in, "central_freq", &d)) {
@@ -247,6 +260,178 @@ int32_t web_api_halow_cfg_post( const cJSON *in, cJSON *out ){
     web_api_notify_change();
 
     return web_api_halow_cfg_get(NULL, out);
+}
+
+/* -------------------------------------------------------------------------- */
+/* /api/slip_cfg                                                              */
+/* -------------------------------------------------------------------------- */
+
+int32_t web_api_slip_cfg_get( const cJSON *in, cJSON *out ){
+    uart_slip_config_t cfg;
+    char ip[16];
+    char mask[16];
+    char gw[16];
+
+    (void)in;
+
+    if( out == NULL ){
+        return WEB_API_RC_BAD_REQUEST;
+    }
+
+    uart_slip_config_load(&cfg);
+
+    ip4addr_ntoa_r(&cfg.ip,   ip,   sizeof(ip));
+    ip4addr_ntoa_r(&cfg.mask, mask, sizeof(mask));
+    ip4addr_ntoa_r(&cfg.gw,   gw,   sizeof(gw));
+
+    (void)cJSON_AddBoolToObject(out, "enable", cfg.enabled ? 1 : 0);
+    (void)cJSON_AddNumberToObject(out, "baud", (double)cfg.baud);
+    (void)cJSON_AddStringToObject(out, "ip", ip);
+    (void)cJSON_AddStringToObject(out, "mask", mask);
+    (void)cJSON_AddStringToObject(out, "gw", gw);
+
+    return WEB_API_RC_OK;
+}
+
+int32_t web_api_slip_cfg_post(const cJSON *in, cJSON *out) {
+    uart_slip_config_t cfg;
+    bool b;
+    int v;
+    const cJSON *j;
+
+    if (in == NULL || !cJSON_IsObject(in) || out == NULL) {
+        log_warn("uart_slip_cfg_post bad json");
+        return api_err(out, WEB_API_RC_BAD_REQUEST, "bad json");
+    }
+
+    uart_slip_config_load(&cfg);
+
+    if (json_get_bool(in, "enable", &b)) {
+        cfg.enabled = b ? true : false;
+    }
+
+    if (json_get_int(in, "baud", &v)) {
+        if (v < 1) {
+            log_warn("uart_slip_cfg_post bad baud=%d", v);
+            return api_err(out, WEB_API_RC_BAD_REQUEST, "bad baud");
+        }
+        cfg.baud = (uint32_t)v;
+    }
+
+    j = cJSON_GetObjectItemCaseSensitive(in, "ip");
+    if (j != NULL) {
+        if (!cJSON_IsString(j) || j->valuestring == NULL ||
+            !ip4addr_aton(j->valuestring, &cfg.ip)) {
+            log_warn("uart_slip_cfg_post bad ip");
+            return api_err(out, WEB_API_RC_BAD_REQUEST, "bad ip");
+        }
+    }
+
+    j = cJSON_GetObjectItemCaseSensitive(in, "mask");
+    if (j != NULL) {
+        if (!cJSON_IsString(j) || j->valuestring == NULL ||
+            !ip4addr_aton(j->valuestring, &cfg.mask)) {
+            log_warn("uart_slip_cfg_post bad mask");
+            return api_err(out, WEB_API_RC_BAD_REQUEST, "bad mask");
+        }
+    }
+
+    j = cJSON_GetObjectItemCaseSensitive(in, "gw");
+    if (j != NULL) {
+        if (!cJSON_IsString(j) || j->valuestring == NULL ||
+            !ip4addr_aton(j->valuestring, &cfg.gw)) {
+            log_warn("uart_slip_cfg_post bad gw");
+            return api_err(out, WEB_API_RC_BAD_REQUEST, "bad gw");
+        }
+    }
+
+    uart_slip_config_save(&cfg);
+    uart_slip_config_apply(&cfg);
+
+    log_debug("uart_slip cfg updated enable=%d baud=%lu",
+              cfg.enabled ? 1 : 0,
+              (unsigned long)cfg.baud);
+
+    web_api_notify_change();
+    return web_api_slip_cfg_get(NULL, out);
+}
+
+/* -------------------------------------------------------------------------- */
+/* /api/log_cfg                                                               */
+/* -------------------------------------------------------------------------- */
+
+int32_t web_api_log_cfg_get(const cJSON *in, cJSON *out) {
+    char host[16];
+    net_log_config_t cfg;
+
+    (void)in;
+
+    if (out == NULL) {
+        return WEB_API_RC_BAD_REQUEST;
+    }
+
+    net_log_config_load(&cfg);
+
+    ip4addr_ntoa_r(&cfg.ip, host, sizeof(host));
+
+    (void)cJSON_AddBoolToObject(out, "udp_enable", cfg.enable ? 1 : 0);
+    (void)cJSON_AddBoolToObject(out, "enable", cfg.enable ? 1 : 0);
+    (void)cJSON_AddStringToObject(out, "host", host);
+    (void)cJSON_AddStringToObject(out, "ip_address", host);
+    (void)cJSON_AddNumberToObject(out, "port", (double)cfg.port);
+
+    return WEB_API_RC_OK;
+}
+
+int32_t web_api_log_cfg_post(const cJSON *in, cJSON *out) {
+    net_log_config_t cfg;
+    bool b;
+    int v;
+    const cJSON *j;
+
+    if (in == NULL || !cJSON_IsObject(in) || out == NULL) {
+        log_warn("log_cfg_post bad json");
+        return api_err(out, WEB_API_RC_BAD_REQUEST, "bad json");
+    }
+
+    net_log_config_load(&cfg);
+
+    if (json_get_bool(in, "udp_enable", &b)) {
+        cfg.enable = b ? true : false;
+    } else if (json_get_bool(in, "enable", &b)) {
+        cfg.enable = b ? true : false;
+    }
+
+    j = cJSON_GetObjectItemCaseSensitive(in, "host");
+    if (j == NULL) {
+        j = cJSON_GetObjectItemCaseSensitive(in, "ip_address");
+    }
+
+    if (j != NULL) {
+        if (!cJSON_IsString(j) || j->valuestring == NULL ||
+            !ip4addr_aton(j->valuestring, &cfg.ip)) {
+            log_warn("log_cfg_post bad host/ip_address");
+            return api_err(out, WEB_API_RC_BAD_REQUEST, "bad host");
+        }
+    }
+
+    if (json_get_int(in, "port", &v)) {
+        if (v < 1 || v > 65535) {
+            log_warn("log_cfg_post bad port=%d", v);
+            return api_err(out, WEB_API_RC_BAD_REQUEST, "bad port");
+        }
+        cfg.port = (uint16_t)v;
+    }
+
+    net_log_config_save(&cfg);
+    net_log_config_apply(&cfg);
+
+    log_debug("log_cfg updated enable=%d port=%u",
+              cfg.enable ? 1 : 0,
+              (unsigned)cfg.port);
+
+    web_api_notify_change();
+    return web_api_log_cfg_get(NULL, out);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -781,6 +966,8 @@ int32_t web_api_all_get( const cJSON *in, cJSON *out ){
     cJSON *tcp   = NULL;
     cJSON *lbt   = NULL;
     cJSON *ota   = NULL;
+    cJSON *slip  = NULL;
+    cJSON *log   = NULL;
 
     cJSON *stat  = NULL;
     cJSON *dev   = NULL;
@@ -802,13 +989,15 @@ int32_t web_api_all_get( const cJSON *in, cJSON *out ){
     tcp   = cJSON_CreateObject();
     lbt   = cJSON_CreateObject();
     ota   = cJSON_CreateObject();
+    slip  = cJSON_CreateObject();
+    log   = cJSON_CreateObject();
 
     stat  = cJSON_CreateObject();
     dev   = cJSON_CreateObject();
     radio = cJSON_CreateObject();
     telemetry = cJSON_CreateObject();
 
-    if (!halow || !net || !tcp || !lbt || !ota || !telemetry || !stat || !dev || !radio) {
+    if (!halow || !net || !tcp || !lbt || !ota || !slip || !log || !telemetry || !stat || !dev || !radio) {
         rc = WEB_API_RC_INTERNAL;
         goto fail;
     }
@@ -828,6 +1017,12 @@ int32_t web_api_all_get( const cJSON *in, cJSON *out ){
     rc = web_api_online_ota_get(NULL, ota);
     if (rc != WEB_API_RC_OK) goto fail;
 
+    rc = web_api_slip_cfg_get(NULL, slip);
+    if (rc != WEB_API_RC_OK) goto fail;
+
+    rc = web_api_log_cfg_get(NULL, log);
+    if (rc != WEB_API_RC_OK) goto fail;
+
     rc = web_api_dev_stat_get(NULL, dev);
     if (rc != WEB_API_RC_OK) goto fail;
 
@@ -845,6 +1040,8 @@ int32_t web_api_all_get( const cJSON *in, cJSON *out ){
     cJSON_AddItemToObject(out, "tcp",   tcp);     tcp   = NULL;
     cJSON_AddItemToObject(out, "lbt",   lbt);     lbt   = NULL;
     cJSON_AddItemToObject(out, "ota",   ota);     ota   = NULL;
+    cJSON_AddItemToObject(out, "slip",  slip);    slip  = NULL;
+    cJSON_AddItemToObject(out, "log",   log);     log   = NULL;
     cJSON_AddItemToObject(out, "telemetry", telemetry); telemetry = NULL;
 
     cJSON_AddItemToObject(out, "stat",  stat);    stat  = NULL;
@@ -857,6 +1054,8 @@ fail:
     cJSON_Delete(tcp);
     cJSON_Delete(lbt);
     cJSON_Delete(ota);
+    cJSON_Delete(slip);
+    cJSON_Delete(log);
 
     cJSON_Delete(stat);
     cJSON_Delete(dev);

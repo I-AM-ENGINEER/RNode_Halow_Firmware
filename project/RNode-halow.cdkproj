@@ -2491,31 +2491,6 @@ Board: txw4002a
       <File Name="../src/ports/littlefs_port.c">
         <FileOption/>
       </File>
-      <File Name="../src/ports/lwip_slip.c">
-        <FileOption>
-          <BuildConfig Name="BuildSet">
-            <Compiler>
-              <Define>__NO_BOARD_INIT TXW4002ACK803 SKBPOOL_ENABLE MPOOL_ALLOC CONFIG_UMAC4</Define>
-              <Undefine/>
-              <Optim>Optimize fast (-Ofast)</Optim>
-              <DebugLevel>Default (-g)</DebugLevel>
-              <IncludePath>$(ProjectPath);$(ProjectPath)/../csky/configs;$(ProjectPath)/../csky/csi_core/include;$(ProjectPath)/../csky/csi_driver/include;$(ProjectPath)/../csky/csi_kernel/include;$(ProjectPath)/../csky/csi_kernel/rhino/arch/include;$(ProjectPath)/../csky/csi_kernel/rhino/common;$(ProjectPath)/../csky/csi_kernel/rhino/core/include;$(ProjectPath)/../csky/csi_kernel/rhino/driver;$(ProjectPath)/../csky/csi_kernel/rhino/pwrmgmt;$(ProjectPath)/../csky/libs/include;$(ProjectPath)/../inc;$(ProjectPath)/../sdk/chip/txw4002ack803;$(ProjectPath)/../sdk/driver/emac;$(ProjectPath)/../sdk/include;$(ProjectPath)/../sdk/include/chip;$(ProjectPath)/../sdk/include/chip/txw4002ack803;$(ProjectPath)/../sdk/include/lib/crypto;$(ProjectPath)/../sdk/include/lib/net/lwip;$(ProjectPath)/../sdk/include/lib/net/lwip/include;$(ProjectPath)/../sdk/lib/crypto/mbedtls/include/mbedtls;$(ProjectPath)/../sdk/lib/crypto/mbedtls/include/psa;$(ProjectPath)/../sdk/lib/crypto/mbedtls/library;$(ProjectPath)/../sdk/lib/crypto/openssl/crypto;$(ProjectPath)/../sdk/lib/crypto/openssl/crypto/aes;$(ProjectPath)/../sdk/lib/crypto/openssl/crypto/asn1;$(ProjectPath)/../sdk/lib/crypto/openssl/crypto/bn;$(ProjectPath)/../sdk/lib/crypto/openssl/crypto/buffer;$(ProjectPath)/../sdk/lib/crypto/openssl/crypto/ec;$(ProjectPath)/../sdk/lib/crypto/openssl/crypto/engine;$(ProjectPath)/../sdk/lib/crypto/openssl/crypto/err;$(ProjectPath)/../sdk/lib/crypto/openssl/crypto/evp;$(ProjectPath)/../sdk/lib/crypto/openssl/crypto/hmac;$(ProjectPath)/../sdk/lib/crypto/openssl/crypto/lhash;$(ProjectPath)/../sdk/lib/crypto/openssl/crypto/md5;$(ProjectPath)/../sdk/lib/crypto/openssl/crypto/modes;$(ProjectPath)/../sdk/lib/crypto/openssl/crypto/objects;$(ProjectPath)/../sdk/lib/crypto/openssl/crypto/rand;$(ProjectPath)/../sdk/lib/crypto/openssl/crypto/rc4;$(ProjectPath)/../sdk/lib/crypto/openssl/crypto/rsa;$(ProjectPath)/../sdk/lib/crypto/openssl/crypto/sha;$(ProjectPath)/../sdk/lib/crypto/openssl/crypto/stack;$(ProjectPath)/../sdk/lib/crypto/openssl/include;$(ProjectPath)/../sdk/lib/crypto/openssl/include/openssl;$(ProjectPath)/../sdk/lib/lmac/mars;$(ProjectPath)/../sdk/lib/net/ethphy;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/altcp_tls;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/http;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/http/makefsdata;$(ProjectPath)/../sdk/lib/net/lwip/src/apps/snmp;$(ProjectPath)/../sdk/lib/umac/umac4/;$(ProjectPath)/../sdk/lib/umac/umac4/include;$(ProjectPath)/../sdk/lib/umac/umac4/lib;$(ProjectPath)/../sdk/lib/umac/umac4/wnb/include;$(ProjectPath)/../sdk/lib/umac/umac4/wpa;$(ProjectPath)/../sdk/lib/umac/umac4/wpa_auth;$(ProjectPath)/../src</IncludePath>
-              <OtherFlags>-ffunction-sections -fdata-sections -Wno-comment -Wno-unused-function -Wno-unused-but-set-variable</OtherFlags>
-              <Verbose>no</Verbose>
-              <Ansi>no</Ansi>
-              <Syntax>no</Syntax>
-              <Pedantic>no</Pedantic>
-              <PedanticErr>no</PedanticErr>
-              <InhibitWarn>no</InhibitWarn>
-              <AllWarn>yes</AllWarn>
-              <WarnErr>no</WarnErr>
-              <OneElfS>no</OneElfS>
-              <OneElfSPerData>no</OneElfSPerData>
-              <Fstrict>no</Fstrict>
-            </Compiler>
-          </BuildConfig>
-        </FileOption>
-      </File>
     </VirtualDirectory>
     <File Name="../src/indication.c">
       <FileOption/>
@@ -2541,6 +2516,9 @@ Board: txw4002a
       <FileOption/>
     </File>
     <File Name="../src/net_log.c">
+      <FileOption/>
+    </File>
+    <File Name="../src/uart_slip.c">
       <FileOption/>
     </File>
   </VirtualDirectory>
