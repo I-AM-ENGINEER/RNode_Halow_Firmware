@@ -225,11 +225,11 @@ __init void device_init(void) {
     spi_nor_attach(&flash0, HG_FLASH0_DEVID);
     hg_crc_attach(HG_CRC_DEVID, &crc32_module);
 
-#if GMAC_ENABLE
+//#if GMAC_ENABLE
     hg_gmac_attach(HG_GMAC_DEVID, &gmac);
     eth_mdio_bus_attach(HG_ETH_MDIOBUS0_DEVID, &mdio_bus0);
     eth_phy_attach(HG_ETHPHY0_DEVID, &ethernet_phy0);
-#endif
+//#endif
 
     hgspi_dw_attach(HG_SPI1_DEVID, &spi1);
 
@@ -238,6 +238,7 @@ __init void device_init(void) {
     uart_open((struct uart_device *)&uart0, 115200);
     console_handle = &uart0;
 #else
+    // UART only usable for SLIP
     uart_open((struct uart_device *)&uart1, 2000000);
     console_handle = &uart1;
 #endif

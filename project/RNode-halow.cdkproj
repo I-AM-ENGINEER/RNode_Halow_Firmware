@@ -2511,6 +2511,9 @@ Board: txw4002a
       <File Name="../src/rns/stream_parser.c">
         <FileOption/>
       </File>
+      <File Name="../src/rns/link_utils.c">
+        <FileOption/>
+      </File>
     </VirtualDirectory>
     <File Name="../src/nearby_detect.c">
       <FileOption/>
@@ -2519,6 +2522,9 @@ Board: txw4002a
       <FileOption/>
     </File>
     <File Name="../src/uart_slip.c">
+      <FileOption/>
+    </File>
+    <File Name="../src/halow_pkg_handler.c">
       <FileOption/>
     </File>
   </VirtualDirectory>

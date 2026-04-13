@@ -5,6 +5,8 @@
 #include <stdbool.h>
 #include "lwip/ip4_addr.h"
 
+extern const uint8_t mac_broadcast[6];
+
 void utils_ip_mask_to_cidr( char *dst, size_t dst_sz, const ip4_addr_t *ip, const ip4_addr_t *mask );
 bool utils_cidr_to_mask( const char *s, ip4_addr_t *mask );
 bool utils_cidr_to_ip( const char *s, ip4_addr_t *ip );

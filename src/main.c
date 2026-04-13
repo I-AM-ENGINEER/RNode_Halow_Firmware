@@ -50,11 +50,11 @@
 #include "lib/common/dsleepdata.h"
 #endif
 #include "rns/stream_parser.h"
-#include "rns/link_parser.h"
-#include "rns/link_db.h"
 #include "nearby_detect.h"
 #include "uart_slip.h"
 #include "net_log.h"
+#include "halow_pkg_handler.h"
+#include "lib/net/ethphy/eth_phy.h"
 
 static struct os_work blink_wk;
 static struct os_work stats_wk;
@@ -68,135 +68,51 @@ extern struct hguart uart1;
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef struct {
-    bool none           :1;
-    bool resource       :1;
-    bool resource_adv   :1;
-    bool resource_req   :1;
-    bool resource_hmu   :1;
-    bool resource_prf   :1;
-    bool resource_icl   :1;
-    bool resource_rcl   :1;
-    bool cache_request  :1;
-    bool request        :1;
-    bool response       :1;
-    bool path_response  :1;
-    bool command        :1;
-    bool command_status :1;
-    bool channel        :1;
-    bool keepalive      :1;
-    bool linkidentify   :1;
-    bool linkclose      :1;
-    bool linkproof      :1;
-    bool lrrtt          :1;
-    bool lrproof        :1;
-    bool unknown        :1;
-} halow_ack_link_context_t;
-
-typedef struct {
-    halow_ack_link_context_t contexts_en;
-    uint8_t batch_size;
-    uint8_t retries_count;
-} halow_ack_config_t;
-
-static inline bool rns_link_ack_cfg_should_ack( const halow_ack_link_context_t *cfg, rns_context_t context ){
-    if( cfg == NULL ){
-        return false;
-    }
-
-    switch( context ){
-        case RNS_CONTEXT_NONE:           return cfg->none;
-        case RNS_CONTEXT_RESOURCE:       return cfg->resource;
-        case RNS_CONTEXT_RESOURCE_ADV:   return cfg->resource_adv;
-        case RNS_CONTEXT_RESOURCE_REQ:   return cfg->resource_req;
-        case RNS_CONTEXT_RESOURCE_HMU:   return cfg->resource_hmu;
-        case RNS_CONTEXT_RESOURCE_PRF:   return cfg->resource_prf;
-        case RNS_CONTEXT_RESOURCE_ICL:   return cfg->resource_icl;
-        case RNS_CONTEXT_RESOURCE_RCL:   return cfg->resource_rcl;
-        case RNS_CONTEXT_CACHE_REQUEST:  return cfg->cache_request;
-        case RNS_CONTEXT_REQUEST:        return cfg->request;
-        case RNS_CONTEXT_RESPONSE:       return cfg->response;
-        case RNS_CONTEXT_PATH_RESPONSE:  return cfg->path_response;
-        case RNS_CONTEXT_COMMAND:        return cfg->command;
-        case RNS_CONTEXT_COMMAND_STATUS: return cfg->command_status;
-        case RNS_CONTEXT_CHANNEL:        return cfg->channel;
-        case RNS_CONTEXT_KEEPALIVE:      return cfg->keepalive;
-        case RNS_CONTEXT_LINKIDENTIFY:   return cfg->linkidentify;
-        case RNS_CONTEXT_LINKCLOSE:      return cfg->linkclose;
-        case RNS_CONTEXT_LINKPROOF:      return cfg->linkproof;
-        case RNS_CONTEXT_LRRTT:          return cfg->lrrtt;
-        case RNS_CONTEXT_LRPROOF:        return cfg->lrproof;
-        default:                         return false;
-    }
-}
-
-typedef struct __attribute__((packed)) {
-    union {
-        struct __attribute__((packed)) {
-            uint8_t data      : 1;
-            uint8_t ack_only  : 1;
-            uint8_t retry     : 1;
-            uint8_t need_ack  : 1;
-            uint8_t _reserved : 2;
-            uint8_t version   : 2;
-        };
-        uint8_t flags;
-    };
-
-    uint8_t seq;
-    uint8_t ack;
-    uint8_t ack_bits;
-} halow_hdr_t;
-
-struct link_user_ctx {
-    const rns_link_db_link_t* link;
-    uint8_t remote_mac[6];
-};
-
 // TCP -> RF
-static void rns_tcp_rx_handler( const uint8_t *payload, uint16_t payload_len ){
+static void rns_tcp_rx_handler( uint8_t *data, uint16_t len ){
     rns_link_packet_info_t link_packet_info;
     int32_t res;
 
-    log_trace("rns package received len=%d", payload_len);
-    statistics_radio_register_tx_package(payload_len);
+    log_trace("rns package received len=%d", len);
+    statistics_radio_register_tx_package(len);
+    halow_pkg_handler_tcp_to_rf(data, len);
 
-    res = rns_link_parser_parse(payload, payload_len, &link_packet_info);
-    if(res != 0){
-        log_warn("parse package link info error=%d", res);
-    }
+    // res = rns_link_parser_parse(data, len, &link_packet_info);
+    // if(res != 0){
+    //     log_warn("parse package link info error=%d", res);
+    // }
 
-    if(link_packet_info.valid){
-        rns_link_db_link_t* link = NULL;
-        res = rns_link_db_package_register(&link_packet_info, RNS_PACKET_DIRECTION_TX);
-        if(res != 0){
-            log_warn("cant register link package res=%d", res);
-        }
+    // if(link_packet_info.valid){
+    //     rns_link_db_link_t* link = NULL;
+    //     res = rns_link_db_package_register(&link_packet_info, RNS_PACKET_DIRECTION_TX);
+    //     if(res != 0){
+    //         log_warn("cant register link package res=%d", res);
+    //     }
 
-        link = rns_link_db_link_get(link_packet_info.link_id);
-        if(link == NULL){
-            log_warn("cant get link res=%d", res);
-        }
+    //     link = rns_link_db_link_get(link_packet_info.link_id);
+    //     if(link == NULL){
+    //         log_warn("cant get link res=%d", res);
+    //     }
 
-        struct link_user_ctx *link_user = (struct link_user_ctx*)rns_link_db_link_user_get(link);
-        if(link_user == NULL){
-            link_user = calloc(0, sizeof(struct link_user_ctx));
-            rns_link_db_link_user_set(link, (void*)link_user);
-        }
-    }
+    //     struct link_user_ctx *link_user = (struct link_user_ctx*)rns_link_db_link_user_get(link);
+    //     if(link_user == NULL){
+    //         link_user = calloc(0, sizeof(struct link_user_ctx));
+    //         rns_link_db_link_user_set(link, (void*)link_user);
+    //     }
+    // }
 
-    uint8_t dst_mac[6];
-    memset(dst_mac, 0xFF, sizeof(dst_mac)); // broadcast
-    res = halow_tx(payload, payload_len, dst_mac);
-    if(res != 0){
-        log_warn("halow tx err=%d", res);
-    }
+    // uint8_t dst_mac[6];
+    // memset(dst_mac, 0xFF, sizeof(dst_mac)); // broadcast
+    // res = halow_tx(data, len, dst_mac);
+    // if(res != 0){
+    //     log_warn("halow tx err=%d", res);
+    // }
 }
 
 // RF -> TCP
 static void halow_rx_handler(struct hgic_rx_info *info,
                              struct ieee80211_hdr *hdr,
-                             const uint8 *data,
+                             uint8 *data,
                              int32 len) {
     (void)info;
 
@@ -228,12 +144,22 @@ static void halow_rx_handler(struct hgic_rx_info *info,
     nearby_modem_package_register(&modem_pkg_info);
     indication_led_rx();
     statistics_radio_register_rx_package(len);
-    int32_t res = tcp_server_send(data, len);
-    if(res != 0){
-        log_info("rf->tcp send error: %d\n", res);
+
+    uint8_t my_mac[6];
+    get_mac(my_mac);
+    if ((memcmp(hdr->addr2, mac_broadcast, 6) != 0) &&
+        (memcmp(hdr->addr2, my_mac, 6) != 0)) {
+        log_trace("RX not my mac, drop");
+        return;
     }
+    halow_pkg_handler_rf_to_tcp(data, (uint16_t)len);
+    // int32_t res = tcp_server_send(data, len);
+    // if(res != 0){
+    //     log_info("rf->tcp send error: %d\n", res);
+    // }
 }
 
+// TCP -> rns stream decoder
 int32_t tcp_to_halow_send(const uint8_t* data, uint32_t len){
     if(data == NULL){
         return -100;
@@ -244,6 +170,21 @@ int32_t tcp_to_halow_send(const uint8_t* data, uint32_t len){
 
     rns_stream_decoder_process(&tcp_rns_decoder, data, (uint16_t)len, NULL);
     return 0;
+}
+
+extern struct ethernet_phy_device ethernet_phy0;
+
+static bool eth_phy_present( void ){
+    if( ethernet_phy0.phy_id == 0 ||
+        ethernet_phy0.phy_id == 0xFFFFFFFFU ){
+        return false;
+    }
+
+    if( genphy_update_link(&ethernet_phy0) != 0 ){
+        return false;
+    }
+
+    return true;
 }
 
 __init static void sys_network_init(void) {
@@ -259,21 +200,29 @@ __init static void sys_network_init(void) {
     uint8_t mac[6];
     get_mac(mac);
     ndev = (struct netdev *)dev_get(HG_GMAC_DEVID);
-    if (ndev) {
-		netdev_set_macaddr(ndev, mac);
-        lwip_netif_add(ndev, "e0", NULL, NULL, NULL);
-        lwip_netif_set_default(ndev);
-        
-        nif = netif_find("e0");
-        if (nif) {
-            snprintf(hostname,sizeof(hostname),"RNode-Halow-%02X%02X%02X",nif->hwaddr[3],nif->hwaddr[4],nif->hwaddr[5]);
-            nif->hostname = hostname;
-        }
-
-        log_info("add e0 interface\r\n");
-    }else{
+    if( ndev == NULL ) {
         log_error("Ethernet GMAC not found");
+        return;
     }
+/*
+    if( !eth_phy_present() ) {
+        log_warn("Ethernet PHY not detected, skip e0");
+        return;
+    }
+    */
+    log_info("Ethernet mac set\r\n");
+    netdev_set_macaddr(ndev, mac);
+    lwip_netif_add(ndev, "e0", NULL, NULL, NULL);
+    lwip_netif_set_default(ndev);
+    
+    nif = netif_find("e0");
+    if (nif) {
+        log_info("Hostname set\r\n");
+        snprintf(hostname,sizeof(hostname),"RNode-Halow-%02X%02X%02X",nif->hwaddr[3],nif->hwaddr[4],nif->hwaddr[5]);
+        nif->hostname = hostname;
+    }
+
+    log_info("add e0 interface\r\n");
 }
 
 sysevt_hdl_res sys_event_hdl(uint32 event_id, uint32 data, uint32 priv) {
@@ -388,7 +337,7 @@ static void uart_slip_debug_send_now( void ){
         return;
     }
 
-    memcpy(p->payload, buf, (size_t)len);
+    memcpy(p->data, buf, (size_t)len);
     udp_sendto(slip_dbg_pcb, p, &slip_dbg_dst, 5000);
     pbuf_free(p);
 }
@@ -446,6 +395,7 @@ __init int main(void) {
     net_log_init();
     littlefs_init();
     boot_counter_update();
+    halow_pkg_handler_init();
     skbpool_init(SKB_POOL_ADDR, (uint32)SKB_POOL_SIZE, 90, 0);
     halow_init(WIFI_RX_BUFF_ADDR, WIFI_RX_BUFF_SIZE, TDMA_BUFF_ADDR, TDMA_BUFF_SIZE);
     halow_lbt_init();

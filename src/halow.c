@@ -116,7 +116,7 @@ static int32_t halow_lmac_rx(struct lmac_ops *ops,
         return -1;
     }
 
-    const uint8_t *payload = data + sizeof(*hdr);
+    uint8_t *payload = data + sizeof(*hdr);
     int32_t payload_len    = len - (int32_t)sizeof(*hdr);
 
     if (payload_len <= 0 || !g_rx_cb) {
@@ -373,7 +373,7 @@ void halow_get_tx_vacanted_bytes(uint32_t bytes){
     }
 }
 
-int32_t halow_tx(const uint8_t *data, uint32_t len, uint8_t destination_mac[6]) {
+int32_t halow_tx(const uint8_t *data, uint32_t len, const uint8_t destination_mac[6]) {
     if(g_ops == NULL){
         return -1;
     }

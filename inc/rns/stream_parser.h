@@ -4,7 +4,7 @@
 #include "rns/defines.h"
 #include <stdint.h>
 
-typedef void (*rns_stream_frame_cb_t)( const uint8_t *payload, uint16_t payload_len, void *user );
+typedef void (*rns_stream_frame_cb_t)( uint8_t *payload, uint16_t payload_len, void *user );
 
 typedef enum {
     RNS_STREAM_STATE_WAIT_FRAME_START = 0,

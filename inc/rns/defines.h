@@ -67,7 +67,9 @@ typedef enum {
     RNS_RET_INVALID_HASH_BODY,
     RNS_RET_NO_LINK_ID,
     RNS_RET_NO_SLOT,
-    RNS_RET_NO_MEMORY
+    RNS_RET_NO_MEMORY,
+    RNS_RET_INVALID_PACKET_TYPE,
+    RNS_RET_NOT_MODIFIED
 } rns_ret_t;
 
 typedef enum {

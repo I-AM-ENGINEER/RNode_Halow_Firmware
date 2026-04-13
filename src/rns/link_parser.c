@@ -7,7 +7,7 @@
 #define RNS_HEADER_TYPE1_SIZE  (2U + RNS_TRUNCATED_HASH_LEN + 1U)
 #define RNS_HEADER_TYPE2_SIZE  (2U + RNS_TRUNCATED_HASH_LEN + RNS_TRUNCATED_HASH_LEN + 1U)
 
-static int rns_link_parser_calc_link_id(
+static int32_t rns_link_parser_calc_link_id(
     const uint8_t *packet,
     size_t packet_len,
     uint8_t out_link_id[RNS_LINK_ID_LEN]
@@ -68,7 +68,7 @@ static int rns_link_parser_calc_link_id(
     return RNS_RET_OK;
 }
 
-int rns_link_parser_parse( const uint8_t *packet, size_t packet_len, rns_link_packet_info_t *out ){
+int32_t rns_link_parser_parse( const uint8_t *packet, size_t packet_len, rns_link_packet_info_t *out ){
     uint8_t flags;
     rns_header_type_t header_type;
     size_t payload_offset;

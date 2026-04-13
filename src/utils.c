@@ -8,6 +8,8 @@
 #include <string.h>
 #include <stdlib.h>
 
+const uint8_t mac_broadcast[6] = {0xFF};
+
 static uint32_t utils_mask_to_prefix( const ip4_addr_t *mask ){
     uint32_t m = lwip_ntohl(ip4_addr_get_u32(mask));
     uint32_t p = 0;

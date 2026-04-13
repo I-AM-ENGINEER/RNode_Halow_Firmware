@@ -52,6 +52,8 @@ void trap_c(uint32_t *regs)
     trap_err("epsr: %08x\r\n", regs[17]);
     trap_err("epc : %08x\r\n", regs[18]);
     csi_kernel_task_dump(g_active_task[0], (void *)regs[14]);
-    mcu_reset();
+    while (1){}
+    
+    //mcu_reset();
 }
 
