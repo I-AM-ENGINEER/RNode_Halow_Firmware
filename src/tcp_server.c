@@ -16,7 +16,8 @@
 
 #include <string.h>
 
-#define TCP_SERVER_RF_TO_TCP_BUFF_COUNT     8
+#define TCP_SERVER_RF_TO_TCP_BUFF_COUNT             (8)
+#define TCP_SERVER_SEND_STALL_LIMIT_MS              (10000)
 
 #ifndef TCP_SERVER_CONFIG_PREFIX
 #define TCP_SERVER_CONFIG_PREFIX                    CONFIGDB_ADD_MODULE("tcps")
@@ -226,7 +227,7 @@ static void tcp_client_loop( struct netconn *client ){
                 }
 
                 if( err == ERR_WOULDBLOCK ){
-                    if( ++wb_cnt > 1000 ){
+                    if( ++wb_cnt > TCP_SERVER_SEND_STALL_LIMIT_MS ){
                         log_warn("send stuck -> close");
                         break;
                     }
