@@ -119,20 +119,7 @@ static void halow_rx_handler(struct hgic_rx_info *info,
     if (data == NULL || len <= 0) {
         return;
     }
-
-    //hexdump
-    // os_printf("rf->tcp hexdump (%u bytes):\n", (unsigned int)len);
-    // for(uint32_t i = 0; i < len; i++){
-    //     hgprintf("%02X ", data[i]);
-    //     if((i + 1) % 16 == 0){
-    //         hgprintf("\n");
-    //     }
-    // }
-    // if(len % 16 != 0){
-    //     os_printf("\n");
-    // }
     
-    //log_trace("rf->tcp: MAC: %02X:%02X:%02X:%02X:%02X:%02X signal=%d len=%db" , hdr->addr2[0], hdr->addr2[1], hdr->addr2[2], hdr->addr2[3], hdr->addr2[4], hdr->addr2[5], info->signal, len);
     nearby_modem_package_info_t modem_pkg_info = {
         .len = len,
         .mcs = info->mcs,
@@ -147,16 +134,12 @@ static void halow_rx_handler(struct hgic_rx_info *info,
 
     uint8_t my_mac[6];
     get_mac(my_mac);
-    if ((memcmp(hdr->addr2, mac_broadcast, 6) != 0) &&
-        (memcmp(hdr->addr2, my_mac, 6) != 0)) {
+    if ((memcmp(hdr->addr3, mac_broadcast, 6) != 0) &&
+        (memcmp(hdr->addr3, my_mac, 6) != 0)) {
         log_trace("RX not my mac, drop");
         return;
     }
     halow_pkg_handler_rf_to_tcp(data, (uint16_t)len);
-    // int32_t res = tcp_server_send(data, len);
-    // if(res != 0){
-    //     log_info("rf->tcp send error: %d\n", res);
-    // }
 }
 
 // TCP -> rns stream decoder
