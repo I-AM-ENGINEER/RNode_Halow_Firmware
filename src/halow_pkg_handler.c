@@ -100,24 +100,35 @@ struct link_user_ctx {
 void halow_pkg_handler_rf_to_tcp( uint8_t* pkg, uint16_t len ){
     int32_t res;
     rns_link_packet_info_t packet_info;
-    
+    uint8_t *allocated_rx = NULL;
+    uint32_t allocated_len = 0u;
+
     res = rns_link_parser_parse(pkg, len, &packet_info);
-    if(res != RNS_RET_OK){
-        log_warn("rx rns package parse error=%d", res);
+    if( res != RNS_RET_OK ){
+        log_warn("rx rns package parse error=%d len=%u", (int)res, (unsigned int)len);
         return;
     }
 
-    uint8_t* allocated_rx;
-    uint32_t allocated_len;
-    
     res = rns_stream_encode_alloc(pkg, len, &allocated_rx, &allocated_len);
-    
-    if((allocated_rx == NULL) || (allocated_rx != 0)){
-        log_warn("rx rns tcp encoding fail");
+    if( res != 0 || allocated_rx == NULL || allocated_len == 0u ){
+        log_warn(
+            "rx rns tcp encoding fail res=%d in_len=%u out=%p out_len=%u",
+            (int)res,
+            (unsigned int)len,
+            allocated_rx,
+            (unsigned int)allocated_len
+        );
         return;
     }
 
-    tcp_server_send(pkg, len);
+    log_trace(
+        "rf->tcp encoded in_len=%u out_len=%u",
+        (unsigned int)len,
+        (unsigned int)allocated_len,
+        allocated_rx
+    );
+
+    tcp_server_send(allocated_rx, allocated_len);
     free(allocated_rx);
 }
 

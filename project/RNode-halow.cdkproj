@@ -2754,7 +2754,7 @@ Board: txw4002a
     </BuildConfig>
   </BuildConfigs>
   <DebugSessions>
-    <watchExpressions>psalive:1;sdata:1;__sleep_data_start:1;__sleep_data_stop:1;g_rx_cb:1;g_ops:1;ah_lmac_tx:1;g_ops:1;ah_lmac:1</watchExpressions>
+    <watchExpressions>psalive:1;sdata:1;__sleep_data_start:1;__sleep_data_stop:1;g_rx_cb:1;g_ops:1;ah_lmac_tx:1;g_ops:1;ah_lmac:1;netif:1</watchExpressions>
     <memoryExpressions>0x50000000;0x2009e49c;;</memoryExpressions>
     <statistics>;;MHZ;;MHZ;;up</statistics>
     <peripheralTabs>
