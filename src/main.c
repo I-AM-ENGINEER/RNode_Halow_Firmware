@@ -70,43 +70,9 @@ extern struct hguart uart1;
 
 // TCP -> RF
 static void rns_tcp_rx_handler( uint8_t *data, uint16_t len ){
-    rns_link_packet_info_t link_packet_info;
-    int32_t res;
-
     log_trace("rns package received len=%d", len);
     statistics_radio_register_tx_package(len);
     halow_pkg_handler_tcp_to_rf(data, len);
-
-    // res = rns_link_parser_parse(data, len, &link_packet_info);
-    // if(res != 0){
-    //     log_warn("parse package link info error=%d", res);
-    // }
-
-    // if(link_packet_info.valid){
-    //     rns_link_db_link_t* link = NULL;
-    //     res = rns_link_db_package_register(&link_packet_info, RNS_PACKET_DIRECTION_TX);
-    //     if(res != 0){
-    //         log_warn("cant register link package res=%d", res);
-    //     }
-
-    //     link = rns_link_db_link_get(link_packet_info.link_id);
-    //     if(link == NULL){
-    //         log_warn("cant get link res=%d", res);
-    //     }
-
-    //     struct link_user_ctx *link_user = (struct link_user_ctx*)rns_link_db_link_user_get(link);
-    //     if(link_user == NULL){
-    //         link_user = calloc(0, sizeof(struct link_user_ctx));
-    //         rns_link_db_link_user_set(link, (void*)link_user);
-    //     }
-    // }
-
-    // uint8_t dst_mac[6];
-    // memset(dst_mac, 0xFF, sizeof(dst_mac)); // broadcast
-    // res = halow_tx(data, len, dst_mac);
-    // if(res != 0){
-    //     log_warn("halow tx err=%d", res);
-    // }
 }
 
 // RF -> TCP
@@ -187,11 +153,6 @@ __init static void sys_network_init(void) {
     struct netdev *ndev;
     struct netif  *nif;
     static char hostname[sizeof("RNode-Halow-XXXXXX")];
-
-//    tcpip_init(NULL, NULL);
-//    sock_monitor_init();
-//    uart_slip_early_init();
-//    net_log_init_early();
 
     static uint8_t mac[6];
     get_mac(mac);
@@ -312,67 +273,11 @@ bool boot_recovery_check( void ){
     return false;
 }
 
-/*
-static struct netif slip_netif;
-static struct udp_pcb *slip_dbg_pcb = NULL;
-static ip_addr_t slip_dbg_dst;
-static uint32_t slip_dbg_cnt = 0;
-
-static void uart_slip_debug_send_now( void ){
-    struct pbuf *p;
-    char buf[64];
-    int len;
-
-    len = snprintf(buf, sizeof(buf), "slip dbg %lu", (unsigned long)slip_dbg_cnt++);
-    if (len <= 0) {
-        return;
-    }
-
-    p = pbuf_alloc(PBUF_TRANSPORT, (u16_t)len, PBUF_RAM);
-    if (p == NULL) {
-        log_error("slip dbg: pbuf_alloc failed");
-        return;
-    }
-
-    memcpy(p->data, buf, (size_t)len);
-    udp_sendto(slip_dbg_pcb, p, &slip_dbg_dst, 5000);
-    pbuf_free(p);
-}
-
-static void uart_slip_debug_send_cb( void *arg ){
-    (void)arg;
-    uart_slip_debug_send_now();
-}
-
-void uart_slip_init( void ){
-    ip4_addr_t ipaddr, netmask, gw;
-
-    IP4_ADDR(&ipaddr,  192,168,7,2);
-    IP4_ADDR(&netmask, 255,255,255,255);
-    IP4_ADDR(&gw,      192,168,7,1);
-
-#if NO_SYS
-    netif_add(&slip_netif, &ipaddr, &netmask, &gw, NULL, slipif_init, ip_input);
-#else
-    netif_add(&slip_netif, &ipaddr, &netmask, &gw, NULL, slipif_init, tcpip_input);
-#endif
-
-    netif_set_up(&slip_netif);
-    netif_set_link_up(&slip_netif);
-    slip_dbg_pcb = udp_new();
-    IP4_ADDR(ip_2_ip4(&slip_dbg_dst), 192, 168, 7, 1);
-}
-*/
-
-//const char test_str[] = "1234567890\r\n"; 
-
 static int32 sys_blink_work(struct os_work *work) {
     static bool active = 0;
     active = !active;
-    //nearby_modem_print_table();
     indication_led_main_set(active);
-    //os_run_work_delay(work, active ? 20 : 4980);
-    os_run_work_delay(work, 1000);
+    os_run_work_delay(work, active ? 20 : 4980);
     return 0;
 }
 
