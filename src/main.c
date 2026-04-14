@@ -172,19 +172,32 @@ int32_t tcp_to_halow_send(const uint8_t* data, uint32_t len){
     return 0;
 }
 
+#include "lib/net/ethphy/eth_mdio_bus.h"
+#include "lib/net/ethphy/eth_phy.h"
+
 extern struct ethernet_phy_device ethernet_phy0;
+extern struct ethernet_mdio_bus mdio_bus0;
 
 static bool eth_phy_present( void ){
-    if( ethernet_phy0.phy_id == 0 ||
-        ethernet_phy0.phy_id == 0xFFFFFFFFU ){
+    struct netdev *ndev;
+
+    ndev = (struct netdev *)dev_get(HG_GMAC_DEVID);
+    if( ndev == NULL ){
         return false;
     }
 
-    if( genphy_update_link(&ethernet_phy0) != 0 ){
+    if( pin_func(HG_GMAC_DEVID, 1) != RET_OK ){
         return false;
     }
 
-    return true;
+    if( eth_mdio_bus_open(&mdio_bus0, ndev) != RET_OK ){
+        return false;
+    }
+
+    ethernet_phy0.ndev = ndev;
+    ethernet_phy0.bus  = &mdio_bus0;
+
+    return eth_get_phy_device(&ethernet_phy0) ? true : false;
 }
 
 __init static void sys_network_init(void) {
@@ -192,37 +205,38 @@ __init static void sys_network_init(void) {
     struct netif  *nif;
     static char hostname[sizeof("RNode-Halow-XXXXXX")];
 
-    tcpip_init(NULL, NULL);
-    sock_monitor_init();
-    uart_slip_early_init();
-    net_log_init_early();
+//    tcpip_init(NULL, NULL);
+//    sock_monitor_init();
+//    uart_slip_early_init();
+//    net_log_init_early();
 
-    uint8_t mac[6];
+    static uint8_t mac[6];
     get_mac(mac);
     ndev = (struct netdev *)dev_get(HG_GMAC_DEVID);
     if( ndev == NULL ) {
         log_error("Ethernet GMAC not found");
         return;
     }
-/*
+
     if( !eth_phy_present() ) {
         log_warn("Ethernet PHY not detected, skip e0");
         return;
     }
-    */
-    log_info("Ethernet mac set\r\n");
+    
+    log_info("Ethernet mac set");
     netdev_set_macaddr(ndev, mac);
     lwip_netif_add(ndev, "e0", NULL, NULL, NULL);
+    log_info("netif added");
     lwip_netif_set_default(ndev);
     
     nif = netif_find("e0");
     if (nif) {
-        log_info("Hostname set\r\n");
+        log_info("Hostname set");
         snprintf(hostname,sizeof(hostname),"RNode-Halow-%02X%02X%02X",nif->hwaddr[3],nif->hwaddr[4],nif->hwaddr[5]);
         nif->hostname = hostname;
     }
 
-    log_info("add e0 interface\r\n");
+    log_info("add e0 interface");
 }
 
 sysevt_hdl_res sys_event_hdl(uint32 event_id, uint32 data, uint32 priv) {
@@ -386,21 +400,30 @@ __init int main(void) {
     sys_event_take(0xffffffff, sys_event_hdl, 0);
     indication_init();
     fal_init();
-    sys_network_init();
+	
+	tcpip_init(NULL, NULL);
+    sock_monitor_init();
+    uart_slip_early_init();
+    net_log_init_early();
+	
     if(boot_recovery_check()){
+		sys_network_init();
         return 0;
     }
     configdb_init();
-    uart_slip_init();
-    net_log_init();
-    littlefs_init();
     boot_counter_update();
+    littlefs_init();
     halow_pkg_handler_init();
     skbpool_init(SKB_POOL_ADDR, (uint32)SKB_POOL_SIZE, 90, 0);
     halow_init(WIFI_RX_BUFF_ADDR, WIFI_RX_BUFF_SIZE, TDMA_BUFF_ADDR, TDMA_BUFF_SIZE);
+	
+    sys_network_init();
+    uart_slip_init();
+    net_log_init();
+    net_ip_init();
+	//return 0;
     halow_lbt_init();
     halow_set_rx_cb(halow_rx_handler);
-    net_ip_init();
     config_page_init(); 
     tftp_server_init();
     statistics_init();

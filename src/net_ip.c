@@ -93,24 +93,24 @@ static void net_ip_apply_cb( void *arg ){
     net_ip_config_t *cfg = (net_ip_config_t *)arg;
 
     if( cfg == NULL ){
-        log_warn("apply cb: cfg null");
+//        log_warn("apply cb: cfg null");
         return;
     }
 
     if( g_nif == NULL ){
-        log_warn("apply cb: netif null");
+//        log_warn("apply cb: netif null");
         os_free(cfg);
         return;
     }
 
-    log_debug("apply cb: mode=%d", cfg->mode);
+//    log_debug("apply cb: mode=%d", cfg->mode);
 
     dhcp_stop(g_nif);
 
     if( cfg->mode == NET_IP_MODE_DHCP ){
         err_t err = dhcp_start(g_nif);
         if( err != ERR_OK ){
-            log_error("dhcp_start failed err=%d", (int)err);
+//            log_error("dhcp_start failed err=%d", (int)err);
         }
     } else {
         netif_set_addr(g_nif, &cfg->ip, &cfg->mask, &cfg->gw);
