@@ -16,7 +16,7 @@
 
 #include <string.h>
 
-#define TCP_SERVER_RF_TO_TCP_BUFF_COUNT             (8)
+#define TCP_SERVER_RF_TO_TCP_BUFF_COUNT             (32)
 #define TCP_SERVER_SEND_STALL_LIMIT_MS              (10000)
 
 #ifndef TCP_SERVER_CONFIG_PREFIX
@@ -191,6 +191,23 @@ bool tcp_server_get_client_info( ip4_addr_t *addr, uint16_t *port ){
     return ok;
 }
 
+static void tcp_server_tx_queue_clear( void ){
+    struct rb_tx_package pkg;
+
+    os_mutex_lock(&g_tx_rb_mutex, OS_MUTEX_WAIT_FOREVER);
+
+    while( lwrb_read(&g_tx_rb, &pkg, sizeof(pkg)) == sizeof(pkg) ){
+        if( pkg.data != NULL ){
+            os_free(pkg.data);
+        }
+    }
+
+    lwrb_reset(&g_tx_rb);
+    os_mutex_unlock(&g_tx_rb_mutex);
+
+    log_debug("tx queue cleared");
+}
+
 static void tcp_client_loop( struct netconn *client ){
     err_t err;
     struct netbuf *nb = NULL;
@@ -344,6 +361,8 @@ static void tcp_server_task( void *arg ){
                  ip4addr_ntoa(&client_ip),
                  (unsigned)client->pcb.tcp->remote_port,
                  client);
+                 
+        tcp_server_tx_queue_clear();
 
         os_mutex_lock(&g_clinet_mutex, OS_MUTEX_WAIT_FOREVER);
         netconn_set_sendtimeout(client, 1000);
@@ -361,9 +380,11 @@ static void tcp_server_task( void *arg ){
         log_info("closing client nc=%p", client);
         os_mutex_lock(&g_clinet_mutex, OS_MUTEX_WAIT_FOREVER);
         g_client_nc = NULL;
+        os_mutex_unlock(&g_clinet_mutex);
+        tcp_server_tx_queue_clear();
+        
         netconn_close(client);
         netconn_delete(client);
-        os_mutex_unlock(&g_clinet_mutex);
     }
 }
 
