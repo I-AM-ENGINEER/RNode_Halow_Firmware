@@ -171,6 +171,7 @@ int32_t web_api_halow_cfg_get( const cJSON *in, cJSON *out ){
     halow_config_t cfg;
     char bndw[16];
     char mcs[8];
+    int power_dbm;
 
     (void)in;
 
@@ -183,7 +184,13 @@ int32_t web_api_halow_cfg_get( const cJSON *in, cJSON *out ){
     (void)snprintf(bndw, sizeof(bndw), "%d MHz", (int)cfg.bandwidth);
     (void)cJSON_AddStringToObject(out, "bandwidth", bndw);
     (void)cJSON_AddNumberToObject(out, "central_freq", ((double)cfg.central_freq) / 10.0);
-    (void)cJSON_AddNumberToObject(out, "power_dbm", (double)cfg.rf_power);
+
+    power_dbm = (int)cfg.rf_power;
+    if (cfg.rf_super_power) {
+        power_dbm += 5;
+    }
+    (void)cJSON_AddNumberToObject(out, "power_dbm", (double)power_dbm);
+
     (void)snprintf(mcs, sizeof(mcs), "MCS%d", (int)cfg.mcs);
     (void)cJSON_AddStringToObject(out, "mcs_index", mcs);
 
