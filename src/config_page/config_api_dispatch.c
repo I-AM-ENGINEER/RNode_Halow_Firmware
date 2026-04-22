@@ -88,13 +88,16 @@ static const web_api_route_t s_api_routes[] = {
     { "telemetry_cfg",      web_api_telemetry_cfg_get,      web_api_telemetry_cfg_post  },
     { "telemetry_send",     NULL,                           web_api_telemetry_send_post },
 
-    { "ota_begin",  NULL,                   web_api_ota_begin_post },
-    { "ota_chunk",  NULL,                   web_api_ota_chunk_post },
-    { "ota_end",    NULL,                   web_api_ota_end_post },
-    { "ota_write",  NULL,                   web_api_ota_write_post },
-    { "reboot",     NULL,                   web_api_reboot_post },
-    { "reset_stat", NULL,                   web_api_radio_stat_post },
-    { "default_rst",NULL,                   web_api_default_reset },
+    { "ota_wipe_lfs",       NULL,                           web_api_ota_wipe_lfs_post   },
+    { "ota_file_begin",     NULL,                           web_api_ota_file_begin_post },
+    { "ota_file_end",       NULL,                           web_api_ota_file_end_post   },
+    { "ota_file_chunk",     NULL,                           web_api_ota_file_chunk_post },
+    { "ota_fw_begin",       NULL,                           web_api_ota_fw_begin_post   },
+    { "ota_fw_end",         NULL,                           web_api_ota_fw_end_post     },
+    { "ota_fw_chunk",       NULL,                           web_api_ota_fw_chunk_post   },
+    { "reboot",             NULL,                           web_api_reboot_post         },
+    { "reset_stat",         NULL,                           web_api_radio_stat_post     },
+    { "default_rst",        NULL,                           web_api_default_reset       },
 };
 
 static const web_api_route_t *api_find_route( const char *endpoint ){

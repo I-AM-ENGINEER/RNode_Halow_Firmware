@@ -221,6 +221,24 @@ fieldset h4 {
     text-decoration: underline;
 }
 
+.warning-panel {
+    background: #fef3c7;
+    border: 1px solid #fbbf24;
+    border-radius: 4px;
+}
+
+.warning-title {
+    margin: 0 0 0.5rem;
+    font-size: 1rem;
+    color: #92400e;
+}
+
+.warning-text {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #b45309;
+}
+
 .status-message {
     min-height: 1.2rem;
     margin-top: 0.4rem;

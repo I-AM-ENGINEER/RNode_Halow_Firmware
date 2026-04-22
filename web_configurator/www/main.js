@@ -271,8 +271,8 @@
         document.getElementById('reticulum_period').addEventListener('change', handleReticulumPeriodChange);
         document.getElementById('reticulum_refresh').addEventListener('click', () => refreshReticulum(true));
 
-        document.getElementById('fw_file').addEventListener('change', updateFwDisabled);
-        document.getElementById('fw_flash').addEventListener('click', fwFlash);
+        document.getElementById('webota_file').addEventListener('change', updateWebOtaDisabled);
+        document.getElementById('webota_flash').addEventListener('click', fwWebOtaFlash);
         document.getElementById('fw_reboot').addEventListener('click', rebootDevice);
         document.getElementById('fw_factory_reset').addEventListener('click', factoryResetDevice);
 
@@ -1360,9 +1360,9 @@
         setStatus(id, '', false);
     }
 
-    function updateFwDisabled() {
-        const f = document.getElementById('fw_file').files;
-        document.getElementById('fw_flash').disabled = !(f && f.length === 1);
+    function updateWebOtaDisabled() {
+        const f = document.getElementById('webota_file').files;
+        document.getElementById('webota_flash').disabled = !(f && f.length === 1);
     }
 
     function bytesToB64(u8) {
@@ -1491,15 +1491,62 @@
         }
     }
 
-    async function fwFlash() {
-        const fileEl = document.getElementById('fw_file');
-        const btn = document.getElementById('fw_flash');
-        const consoleEl = document.getElementById('fw_console');
+    function tarParse(u8) {
+        const files = [];
+        const BLOCK = 512;
+        let pos = 0;
 
-        const file = (fileEl.files && fileEl.files.length === 1) ? fileEl.files[0] : null;
-        if (!file) { return; }
+        function readStr(start, len) {
+            let end = start;
+            while (end < start + len && u8[end] !== 0) { end++; }
+            return new TextDecoder().decode(u8.subarray(start, end));
+        }
 
-        if (!confirm('Upload OTA file to device and flash it?')) { return; }
+        function readOct(start, len) {
+            return parseInt(readStr(start, len).trim() || '0', 8);
+        }
+
+        function isZeroBlock(off) {
+            for (let i = 0; i < BLOCK; i++) {
+                if (u8[off + i] !== 0) { return false; }
+            }
+            return true;
+        }
+
+        while (pos + BLOCK <= u8.length) {
+            if (isZeroBlock(pos)) { break; }
+
+            const name = readStr(pos, 100);
+            const typeflag = String.fromCharCode(u8[pos + 156]);
+            const size = readOct(pos + 124, 12);
+
+            pos += BLOCK;
+
+            if (typeflag === '5' || size === 0) {
+                pos += Math.ceil(size / BLOCK) * BLOCK;
+                continue;
+            }
+
+            if (typeflag === '0' || typeflag === '\0') {
+                const data = u8.slice(pos, pos + size);
+                files.push({ name: name.replace(/^\./, ''), data });
+            }
+
+            pos += Math.ceil(size / BLOCK) * BLOCK;
+        }
+
+        return files;
+    }
+
+    async function fwWebOtaFlash() {
+        const fileEl = document.getElementById('webota_file');
+        const btn = document.getElementById('webota_flash');
+        const consoleEl = document.getElementById('webota_console');
+
+        const tarFile = (fileEl.files && fileEl.files.length === 1) ? fileEl.files[0] : null;
+        if (!tarFile) { return; }
+
+        if (!confirm('Unpack ' + tarFile.name + ' and flash?')) { return; }
 
         function log(msg) {
             const line = document.createElement('div');
@@ -1508,10 +1555,13 @@
             consoleEl.scrollTop = consoleEl.scrollHeight;
             return line;
         }
-
         function stage(msg) { log('[*] ' + msg); }
         function ok(msg) { log('[OK] ' + msg); }
         function err(msg) { log('[ERR] ' + msg); }
+
+        const chunkSize = 512;
+        const tries = 6;
+        const baseDelayMs = 80;
 
         function mkPost(url, obj) {
             return fetchJsonRetry(url, {
@@ -1523,62 +1573,133 @@
 
         btn.disabled = true;
         consoleEl.innerHTML = '';
-        clearStatus('fw_action_status');
-
-        const chunkSize = 512;
-        const tries = 6;
-        const baseDelayMs = 80;
+        clearStatus('webota_status');
 
         try {
-            stage('Reading file: ' + file.name);
-            const fileBuf = await file.arrayBuffer();
-            const fileU8 = new Uint8Array(fileBuf);
-            ok('File loaded (' + fileU8.length + ' bytes)');
+            stage('Reading TAR...');
+            const tarBuf = await tarFile.arrayBuffer();
+            const tarU8 = new Uint8Array(tarBuf);
 
-            stage('Calculating CRC32...');
-            const fileCrc32 = (crc32_update(0 >>> 0, fileU8) >>> 0);
-            ok('CRC32 = 0x' + fileCrc32.toString(16));
+            const allEntries = tarParse(tarU8);
+            const fwEntry = allEntries.find(e => e.name === 'fw.bin' || e.name === '/fw.bin');
+            const fileEntries = allEntries.filter(e => e.name !== 'fw.bin' && e.name !== '/fw.bin');
 
-            stage('Starting OTA session...');
-            await mkPost('/api/ota_begin', {
-                size: fileU8.length,
-                crc32: fileCrc32
-            });
-            ok('ota_begin accepted');
+            if (!fwEntry && fileEntries.length === 0) {
+                throw new Error('No files in archive');
+            }
+            ok('Found ' + allEntries.length + ' file(s)');
 
-            stage('Uploading firmware...');
-            const progressLine = log('    0%');
+            if (fileEntries.length > 0) {
+                stage('Wiping filesystem...');
+                await mkPost('/api/ota_wipe_lfs', {});
+                ok('Filesystem cleared');
 
-            let offset = 0;
-            while (offset < fileU8.length) {
-                const nextOffset = Math.min(offset + chunkSize, fileU8.length);
-                const chunkBin = fileU8.subarray(offset, nextOffset);
-                const chunkB64 = bytesToB64(chunkBin);
+                for (let i = 0; i < fileEntries.length; i++) {
+                    const entry = fileEntries[i];
+                    const targetPath = '/www/' + entry.name.replace(/^www\//, '');
+                    const fileU8 = entry.data;
 
-                await mkPost('/api/ota_chunk', {
-                    off: offset,
-                    b64: chunkB64
-                });
+                    stage('[' + (i + 1) + '/' + fileEntries.length + '] ' + targetPath + ' (' + fileU8.length + 'B)');
 
-                offset = nextOffset;
-                const percent = Math.floor((offset * 100) / fileU8.length);
-                progressLine.textContent = '    ' + percent + '%';
+                    const fileCrc32 = (crc32_update(0 >>> 0, fileU8) >>> 0);
+
+                    await mkPost('/api/ota_file_begin', {
+                        path: targetPath,
+                        size: fileU8.length,
+                        crc32: fileCrc32
+                    });
+
+                    const progressLine = log('    CRC32=0x' + fileCrc32.toString(16));
+                    let offset = 0;
+                    while (offset < fileU8.length) {
+                        const nextOffset = Math.min(offset + chunkSize, fileU8.length);
+                        const chunkBin = fileU8.subarray(offset, nextOffset);
+                        const chunkB64 = bytesToB64(chunkBin);
+                        await mkPost('/api/ota_file_chunk', { b64: chunkB64 });
+                        offset = nextOffset;
+                        const percent = Math.floor((offset * 100) / fileU8.length);
+                        progressLine.textContent = '    ' + percent + '% (' + offset + '/' + fileU8.length + 'B)';
+                    }
+
+                    await mkPost('/api/ota_file_end', {});
+                    ok('Verified');
+                }
             }
 
-            progressLine.textContent = '[OK] Upload complete';
+            if (fwEntry) {
+                const fileU8 = fwEntry.data;
+                const fileCrc32 = (crc32_update(0 >>> 0, fileU8) >>> 0);
+                ok('Firmware: ' + fileU8.length + ' bytes, CRC32=0x' + fileCrc32.toString(16));
 
-            stage('Verifying file on device...');
-            await mkPost('/api/ota_end', { crc32: fileCrc32 });
-            ok('Device CRC verification OK');
+                stage('Starting firmware flash...');
+                await mkPost('/api/ota_fw_begin', {
+                    size: fileU8.length,
+                    crc32: fileCrc32
+                });
+                ok('Ready');
 
-            stage('Writing firmware to flash...');
-            await mkPost('/api/ota_write', {});
-            ok('Flash write + verify OK');
+                stage('Uploading firmware...');
+                const progressLine = log('    0%');
 
-            stage('OTA finished. Device may reboot.');
+                let offset = 0;
+                while (offset < fileU8.length) {
+                    const nextOffset = Math.min(offset + chunkSize, fileU8.length);
+                    const chunkBin = fileU8.subarray(offset, nextOffset);
+                    const chunkB64 = bytesToB64(chunkBin);
+                    await mkPost('/api/ota_fw_chunk', { off: offset, b64: chunkB64 });
+                    offset = nextOffset;
+                    const percent = Math.floor((offset * 100) / fileU8.length);
+                    progressLine.textContent = '    ' + percent + '% (' + offset + '/' + fileU8.length + 'B)';
+                }
+
+                progressLine.textContent = '[OK] Upload complete';
+
+                stage('Verifying firmware...');
+                await mkPost('/api/ota_fw_end', {});
+                ok('Verified');
+
+                stage('Rebooting...');
+                fetch('/api/reboot', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                }).catch(() => {});
+                ok('Rebooting...');
+
+                stage('Waiting for device...');
+                let newVersion = null;
+                for (let poll = 0; poll < 120; poll++) {
+                    await sleepMs(1000);
+                    try {
+                        const res = await fetch('/api/get_stat', { cache: 'no-store' });
+                        if (res.ok) {
+                            const data = await res.json();
+                            const device = data.device || data.api_dev_stat;
+                            if (device && device.ver) {
+                                newVersion = device.ver;
+                                break;
+                            }
+                        }
+                    } catch (_) { }
+                }
+
+                if (newVersion) {
+                    ok('Device ready. New firmware version: ' + newVersion);
+                } else {
+                    ok('Device ready');
+                }
+
+                setStatus('webota_status', 'OTA complete. Please reload page.', false);
+                return;
+            }
+
+            setStatus('webota_status', 'Update complete. Please reload page.', false);
+            stage('Done.');
         } catch (e) {
-            err(e && e.message ? e.message : 'unknown error');
+            err(e && e.message ? e.message : 'error');
+            setStatus('webota_status', 'Web update failed', true);
             btn.disabled = false;
         }
     }
+
 })();

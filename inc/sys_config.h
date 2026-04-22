@@ -2,7 +2,7 @@
 #define __SYS_CONFIG_H__
 
 #define PROJECT_TYPE           PRO_TYPE_WNB
-#define FW_VERSION              "2.0.0b"
+#define FW_VERSION              "2.0.1b"
 #define FW_FULL_VERSION         FW_VERSION " (" __DATE__ " " __TIME__ ")"
 
 #define IP_SOF_BROADCAST       1
@@ -147,6 +147,8 @@
 
 #define LOG_LEVEL_CONFIGDB                      (LOG_DEBUG)
 #define LOG_LEVEL_LITTLEFS                      (LOG_TRACE)
+#define LOG_LEVEL_OTA_LFS                       (LOG_TRACE)
+#define LOG_LEVEL_OTA                           (LOG_TRACE)
 #define LOG_LEVEL_NET_IP                        (LOG_TRACE)
 #define LOG_LEVEL_CONFIG_API_CALLS              (LOG_TRACE)
 #define LOG_LEVEL_CONFIG_API_DISPATCH           (LOG_TRACE)

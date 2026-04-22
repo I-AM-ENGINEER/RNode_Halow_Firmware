@@ -5,5 +5,6 @@
 #include <stdio.h>
 
 int32_t littlefs_init(void);
+int32_t littlefs_reformat(void);
 
 #endif // __LITTLEFS_PORT_H__

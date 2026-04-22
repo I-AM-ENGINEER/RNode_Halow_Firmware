@@ -17,19 +17,6 @@
 
 #define OTA_TMP_BIN_MAX    2048
 
-static uint32_t crc32_update_u8( uint32_t crc, const uint8_t *p, uint32_t n ){
-    uint32_t c = crc ^ 0xFFFFFFFFu;
-
-    while (n--) {
-        c ^= (uint32_t)(*p++);
-        for (uint32_t k = 0; k < 8; k++) {
-            c = (c & 1u) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
-        }
-    }
-
-    return c ^ 0xFFFFFFFFu;
-}
-
 static int8_t b64_inv( char c ){
     if (c >= 'A' && c <= 'Z') { return (int8_t)(c - 'A'); }
     if (c >= 'a' && c <= 'z') { return (int8_t)(c - 'a' + 26); }
@@ -78,7 +65,126 @@ static int32_t b64_decode( const char *in, uint8_t *out, uint32_t out_max, uint3
     return 0;
 }
 
-int32_t web_api_ota_begin_post( const cJSON *in, cJSON *out ){
+int32_t web_api_ota_wipe_lfs_post( const cJSON *in, cJSON *out ){
+    (void)in;
+    (void)out;
+
+    log_debug("wota_wipe: clearing /www");
+    
+    if (ota_format_littefs() != 0) {
+        log_error("wota_wipe failed");
+        return -1;
+    }
+
+    log_debug("wota_wipe: OK");
+    return 0;
+}
+
+int32_t web_api_ota_file_begin_post( const cJSON *in, cJSON *out ){
+    const cJSON *j_path;
+    const cJSON *j_size;
+    const cJSON *j_crc;
+    const char  *path;
+    uint32_t     size;
+    uint32_t     crc;
+
+    (void)out;
+
+    if (in == NULL) {
+        log_warn("wota_file_begin: in null");
+        return -1;
+    }
+
+    j_path = cJSON_GetObjectItemCaseSensitive((cJSON *)in, "path");
+    j_size = cJSON_GetObjectItemCaseSensitive((cJSON *)in, "size");
+    j_crc  = cJSON_GetObjectItemCaseSensitive((cJSON *)in, "crc32");
+    
+    if (!cJSON_IsString(j_path) || !cJSON_IsNumber(j_size) || !cJSON_IsNumber(j_crc)) {
+        log_warn("wota_file_begin: bad json");
+        return -1;
+    }
+
+    path = j_path->valuestring;
+    size = (uint32_t)j_size->valuedouble;
+    crc  = (uint32_t)j_crc->valuedouble;
+
+    log_debug("wota_file_begin path=%s size=%lu crc=0x%08lx",
+              path, (unsigned long)size, (unsigned long)crc);
+
+    if (ota_lfs_file_begin(path, size, crc) != 0) {
+        log_error("wota_file_begin failed path=%s", path);
+        return -1;
+    }
+    return 0;
+}
+
+int32_t web_api_ota_file_chunk_post( const cJSON *in, cJSON *out ){
+    const cJSON *j_b64;
+    const char  *b64;
+    uint8_t     *tmp;
+    uint32_t     n;
+    size_t       b64_len;
+    size_t       tmp_cap;
+
+    (void)out;
+
+    if (in == NULL) {
+        log_warn("wota_file_chunk: in null");
+        return -1;
+    }
+
+    j_b64 = cJSON_GetObjectItemCaseSensitive((cJSON *)in, "b64");
+    if (!cJSON_IsString(j_b64)) {
+        log_warn("wota_file_chunk: bad json");
+        return -2;
+    }
+
+    b64     = j_b64->valuestring;
+    b64_len = strlen(b64);
+    tmp_cap = (b64_len / 4u) * 3u + 3u;
+
+    if (tmp_cap == 0u || tmp_cap > (size_t)OTA_TMP_BIN_MAX) {
+        log_warn("wota_file_chunk: bad tmp_cap=%lu", (unsigned long)tmp_cap);
+        return -3;
+    }
+
+    tmp = (uint8_t *)os_malloc((uint32_t)tmp_cap);
+    if (tmp == NULL) {
+        log_error("wota_file_chunk: oom cap=%lu", (unsigned long)tmp_cap);
+        return -4;
+    }
+
+    if (b64_decode(b64, tmp, (uint32_t)tmp_cap, &n) != 0) {
+        log_warn("wota_file_chunk: b64 decode failed");
+        os_free(tmp);
+        return -5;
+    }
+
+    if (ota_wota_file_write(tmp, n) != 0) {
+        log_error("wota_file_chunk: write failed len=%lu", (unsigned long)n);
+        os_free(tmp);
+        return -6;
+    }
+
+    log_trace("wota_file_chunk len=%lu", (unsigned long)n);
+    os_free(tmp);
+    return 0;
+}
+
+int32_t web_api_ota_file_end_post( const cJSON *in, cJSON *out ){
+    (void)in;
+    (void)out;
+
+    if (ota_wota_file_end() != 0) {
+        log_error("wota_file_end: failed");
+        return -1;
+    }
+
+    log_debug("wota_file_end: OK");
+    return 0;
+}
+
+int32_t web_api_ota_fw_begin_post( const cJSON *in, cJSON *out ){
     const cJSON *j_size;
     const cJSON *j_crc;
     uint32_t size;
@@ -87,39 +193,35 @@ int32_t web_api_ota_begin_post( const cJSON *in, cJSON *out ){
     (void)out;
 
     if (in == NULL) {
-        log_warn("ota_begin: in null");
+        log_warn("ota_fw_begin: in null");
         return -1;
     }
 
     j_size = cJSON_GetObjectItemCaseSensitive((cJSON *)in, "size");
     j_crc  = cJSON_GetObjectItemCaseSensitive((cJSON *)in, "crc32");
     if (!cJSON_IsNumber(j_size) || !cJSON_IsNumber(j_crc)) {
-        log_warn("ota_begin: bad json");
+        log_warn("ota_fw_begin: bad json");
         return -1;
     }
 
     size = (uint32_t)j_size->valuedouble;
     crc  = (uint32_t)j_crc->valuedouble;
 
-    log_debug("ota_begin size=%lu crc=0x%08lx",
-              (unsigned long)size,
-              (unsigned long)crc);
+    log_debug("ota_fw_begin size=%lu crc=0x%08lx",
+              (unsigned long)size, (unsigned long)crc);
 
-    if (ota_lfs_begin(size, crc) != 0) {
-        log_error("ota_begin failed size=%lu crc=0x%08lx",
-                  (unsigned long)size,
-                  (unsigned long)crc);
+    if (ota_fw_begin(size, crc) != 0) {
+        log_error("ota_fw_begin failed");
         return -1;
     }
     return 0;
 }
 
-int32_t web_api_ota_chunk_post( const cJSON *in, cJSON *out ){
+int32_t web_api_ota_fw_chunk_post( const cJSON *in, cJSON *out ){
     const cJSON *j_off;
     const cJSON *j_b64;
     uint32_t off;
     const char *b64;
-
     uint8_t *tmp;
     uint32_t n;
     size_t b64_len;
@@ -128,14 +230,14 @@ int32_t web_api_ota_chunk_post( const cJSON *in, cJSON *out ){
     (void)out;
 
     if (in == NULL) {
-        log_warn("ota_chunk: in null");
+        log_warn("ota_fw_chunk: in null");
         return -1;
     }
 
     j_off = cJSON_GetObjectItemCaseSensitive((cJSON *)in, "off");
     j_b64 = cJSON_GetObjectItemCaseSensitive((cJSON *)in, "b64");
     if (!cJSON_IsNumber(j_off) || !cJSON_IsString(j_b64)) {
-        log_warn("ota_chunk: bad json");
+        log_warn("ota_fw_chunk: bad json");
         return -2;
     }
 
@@ -145,65 +247,46 @@ int32_t web_api_ota_chunk_post( const cJSON *in, cJSON *out ){
     b64_len = strlen(b64);
     tmp_cap = (b64_len / 4u) * 3u + 3u;
     if (tmp_cap == 0u || tmp_cap > (size_t)OTA_TMP_BIN_MAX) {
-        log_warn("ota_chunk: bad tmp_cap=%lu off=%lu",
-                 (unsigned long)tmp_cap,
-                 (unsigned long)off);
+        log_warn("ota_fw_chunk: bad tmp_cap=%lu off=%lu",
+                 (unsigned long)tmp_cap, (unsigned long)off);
         return -3;
     }
 
     tmp = (uint8_t *)os_malloc((uint32_t)tmp_cap);
     if (tmp == NULL) {
-        log_error("ota_chunk: oom cap=%lu off=%lu",
-                  (unsigned long)tmp_cap,
-                  (unsigned long)off);
+        log_error("ota_fw_chunk: oom cap=%lu", (unsigned long)tmp_cap);
         return -4;
     }
 
     if (b64_decode(b64, tmp, (uint32_t)tmp_cap, &n) != 0) {
-        log_warn("ota_chunk: b64 decode failed off=%lu", (unsigned long)off);
+        log_warn("ota_fw_chunk: b64 fail off=%lu", (unsigned long)off);
         os_free(tmp);
         return -5;
     }
 
-    if (ota_lfs_write(off, tmp, n) != 0) {
-        log_error("ota_chunk: write failed off=%lu len=%lu",
-                  (unsigned long)off,
-                  (unsigned long)n);
+    if (ota_fw_write_chunk(off, tmp, (uint16_t)n) != 0) {
+        log_error("ota_fw_chunk: write fail off=%lu len=%lu",
+                  (unsigned long)off, (unsigned long)n);
         os_free(tmp);
         return -6;
     }
 
-    log_trace("ota_chunk off=%lu len=%lu",
-              (unsigned long)off,
-              (unsigned long)n);
-
+    log_trace("ota_fw_chunk off=%lu len=%lu", (unsigned long)off, (unsigned long)n);
     os_free(tmp);
     return 0;
 }
 
-int32_t web_api_ota_end_post( const cJSON *in, cJSON *out ){
+int32_t web_api_ota_fw_end_post( const cJSON *in, cJSON *out ){
     (void)in;
     (void)out;
 
-    if (ota_lfs_end() != 0) {
-        log_error("ota_end failed");
+    log_debug("ota_fw_end start");
+
+    if (ota_fw_end() != 0) {
+        log_error("ota_fw_end: crc mismatch or error");
         return -1;
     }
 
-    log_debug("ota_end ok");
-    return 0;
-}
-
-int32_t web_api_ota_write_post( const cJSON *in, cJSON *out ){
-    (void)in;
-    (void)out;
-
-    log_debug("ota_write start");
-
-    if( ota_lfs_upgrade_from_tar() != 0 ){
-        log_error("ota_write failed");
-        return -1;
-    }
-
+    log_info("ota_fw_end: firmware validated OK");
     return 0;
 }
