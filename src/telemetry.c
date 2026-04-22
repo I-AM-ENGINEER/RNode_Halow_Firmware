@@ -7,6 +7,8 @@
 #include "lwip/dns.h"
 #include "lwip/ip_addr.h"
 #include "lwip/sys.h"
+#include "lwip/tcpip.h"
+#include "lwip/priv/tcpip_priv.h"
 
 #include "configdb.h"
 #include "halow.h"
@@ -37,10 +39,18 @@ static struct os_work telemetry_work;
 
 static struct {
     sys_sem_t sem;
+    sys_sem_t dispatch_sem;
     ip_addr_t ip;
     volatile bool done;
     volatile err_t err;
     volatile mqtt_connection_status_t st;
+    /* args for tcpip-thread dispatch */
+    mqtt_client_t *client;
+    u16_t port;
+    const struct mqtt_connect_client_info_t *ci;
+    const char *topic;
+    const char *payload;
+    u16_t payload_len;
 } g_telemetry_ctx;
 
 static void telemetry_config_log_trace( const char *tag, const telemetry_config_t *cfg ){
@@ -298,11 +308,11 @@ static void telemetry_dns_cb ( const char *name, const ip_addr_t *ipaddr, void *
     (void)arg;
 
     if (ipaddr != NULL) {
-        log_debug("dns cb: name=%s resolved", (name != NULL) ? name : "(null)");
+        //log_debug("dns cb: name=%s resolved", (name != NULL) ? name : "(null)");
         ip_addr_copy(g_telemetry_ctx.ip, *ipaddr);
         g_telemetry_ctx.err = ERR_OK;
     } else {
-        log_warn("dns cb: name=%s resolve failed", (name != NULL) ? name : "(null)");
+        //log_warn("dns cb: name=%s resolve failed", (name != NULL) ? name : "(null)");
         g_telemetry_ctx.err = ERR_VAL;
     }
 
@@ -314,7 +324,7 @@ static void telemetry_conn_cb ( mqtt_client_t *client, void *arg, mqtt_connectio
     (void)client;
     (void)arg;
 
-    log_debug("mqtt conn cb: status=%d", (int)status);
+    //log_debug("mqtt conn cb: status=%d", (int)status);
 
     g_telemetry_ctx.st = status;
     g_telemetry_ctx.done = true;
@@ -324,11 +334,44 @@ static void telemetry_conn_cb ( mqtt_client_t *client, void *arg, mqtt_connectio
 static void telemetry_pub_cb ( void *arg, err_t err ){
     (void)arg;
 
-    log_debug("mqtt pub cb: err=%d", (int)err);
+    //log_debug("mqtt pub cb: err=%d", (int)err);
 
     g_telemetry_ctx.err = err;
     g_telemetry_ctx.done = true;
     sys_sem_signal(&g_telemetry_ctx.sem);
+}
+
+static void tcpip_mqtt_connect_cb( void *arg ){
+    (void)arg;
+    g_telemetry_ctx.err = mqtt_client_connect(
+        g_telemetry_ctx.client,
+        &g_telemetry_ctx.ip,
+        g_telemetry_ctx.port,
+        telemetry_conn_cb,
+        NULL,
+        g_telemetry_ctx.ci);
+    sys_sem_signal(&g_telemetry_ctx.dispatch_sem);
+}
+
+static void tcpip_mqtt_publish_cb( void *arg ){
+    (void)arg;
+    g_telemetry_ctx.err = mqtt_publish(
+        g_telemetry_ctx.client,
+        g_telemetry_ctx.topic,
+        g_telemetry_ctx.payload,
+        g_telemetry_ctx.payload_len,
+        1, 0,
+        telemetry_pub_cb,
+        NULL);
+    sys_sem_signal(&g_telemetry_ctx.dispatch_sem);
+}
+
+static void tcpip_mqtt_cleanup_cb( void *arg ){
+    (void)arg;
+    mqtt_disconnect(g_telemetry_ctx.client);
+    mqtt_client_free(g_telemetry_ctx.client);
+    g_telemetry_ctx.client = NULL;
+    sys_sem_signal(&g_telemetry_ctx.dispatch_sem);
 }
 
 static bool telemetry_wait( uint32_t timeout_ms ){
@@ -343,7 +386,6 @@ static bool telemetry_wait( uint32_t timeout_ms ){
             log_warn("wait timeout: dt=%lu ms", (unsigned long)dt);
             return false;
         }
-
         sys_arch_sem_wait(&g_telemetry_ctx.sem, timeout_ms - dt);
     }
 
@@ -409,6 +451,14 @@ void telemetry_send ( void ){
         return;
     }
 
+    if (sys_sem_new(&g_telemetry_ctx.dispatch_sem, 0) != ERR_OK) {
+        log_error("dispatch sem create failed");
+        sys_sem_free(&g_telemetry_ctx.sem);
+        cJSON_free(json);
+        cJSON_Delete(j);
+        return;
+    }
+
     for (i = 0; i < MQTT_RETRIES; i++) {
         memset(&ci, 0, sizeof(ci));
 
@@ -465,14 +515,13 @@ void telemetry_send ( void ){
                   ci.client_user != NULL ? ci.client_user : "(null)");
 
         g_telemetry_ctx.done = false;
-        err = mqtt_client_connect(client,
-                                  &ip,
-                                  cfg.port ? cfg.port : MQTT_PORT,
-                                  telemetry_conn_cb,
-                                  NULL,
-                                  &ci);
-        if (err != ERR_OK) {
-            log_warn("mqtt_client_connect failed: err=%d", (int)err);
+        g_telemetry_ctx.client = client;
+        ip_addr_copy(g_telemetry_ctx.ip, ip);
+        g_telemetry_ctx.port = cfg.port ? cfg.port : MQTT_PORT;
+        g_telemetry_ctx.ci = &ci;
+        tcpip_send_msg_wait_sem(tcpip_mqtt_connect_cb, NULL, &g_telemetry_ctx.dispatch_sem);
+        if (g_telemetry_ctx.err != ERR_OK) {
+            log_warn("mqtt_client_connect failed: err=%d", (int)g_telemetry_ctx.err);
             goto fail;
         }
 
@@ -489,16 +538,12 @@ void telemetry_send ( void ){
         log_debug("mqtt connected");
 
         g_telemetry_ctx.done = false;
-        err = mqtt_publish(client,
-                           cfg.topic,
-                           json,
-                           (u16_t)strlen(json),
-                           1,
-                           0,
-                           telemetry_pub_cb,
-                           NULL);
-        if (err != ERR_OK) {
-            log_warn("mqtt_publish failed immediately: err=%d", (int)err);
+        g_telemetry_ctx.topic = cfg.topic;
+        g_telemetry_ctx.payload = json;
+        g_telemetry_ctx.payload_len = (u16_t)strlen(json);
+        tcpip_send_msg_wait_sem(tcpip_mqtt_publish_cb, NULL, &g_telemetry_ctx.dispatch_sem);
+        if (g_telemetry_ctx.err != ERR_OK) {
+            log_warn("mqtt_publish failed immediately: err=%d", (int)g_telemetry_ctx.err);
             goto fail;
         }
 
@@ -516,8 +561,10 @@ void telemetry_send ( void ){
 
         log_info("mqtt publish success");
 
-        mqtt_disconnect(client);
-        mqtt_client_free(client);
+        tcpip_send_msg_wait_sem(tcpip_mqtt_cleanup_cb, NULL, &g_telemetry_ctx.dispatch_sem);
+        client = NULL;
+
+        sys_sem_free(&g_telemetry_ctx.dispatch_sem);
         sys_sem_free(&g_telemetry_ctx.sem);
         cJSON_free(json);
         cJSON_Delete(j);
@@ -529,8 +576,8 @@ fail:
         log_warn("attempt %d failed", i + 1);
 
         if (client != NULL) {
-            mqtt_disconnect(client);
-            mqtt_client_free(client);
+            g_telemetry_ctx.client = client;
+            tcpip_send_msg_wait_sem(tcpip_mqtt_cleanup_cb, NULL, &g_telemetry_ctx.dispatch_sem);
             client = NULL;
         }
 
@@ -541,6 +588,7 @@ fail:
 
     log_error("send failed after all retries");
 
+    sys_sem_free(&g_telemetry_ctx.dispatch_sem);
     sys_sem_free(&g_telemetry_ctx.sem);
     cJSON_free(json);
     cJSON_Delete(j);
@@ -570,13 +618,13 @@ void telemetry_init( void ){
 
     log_debug("init begin");
 
-    OS_WORK_INIT(&telemetry_work, telemetry_work_handler, TELEMETRY_WORK_PRIO);
-
     telemetry_config_set_default(&cfg);
     telemetry_config_load(&cfg);
     telemetry_config_save(&cfg);
 
     telemetry_config_log_debug("INIT", &cfg);
+
+    OS_WORK_INIT(&telemetry_work, telemetry_work_handler, TELEMETRY_WORK_PRIO);
 
     if (cfg.enabled) {
         log_debug("init schedule first send after 5 s");
