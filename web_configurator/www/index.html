@@ -479,6 +479,12 @@
                 <p class="warning-text">Do not reload or close this page, or power off the device during OTA update. Interrupting the process may damage the device.</p>
             </div>
 
+
+            <div class="panel warning-panel">
+                <h4 class="warning-title">⚠ Warning</h4>
+                <p class="warning-text">Do not reload or close this page, or power off the device during OTA update. Interrupting the process may damage the device.</p>
+            </div>
+
             <div class="panel">
                 <h3>Firmware Update</h3>
 
@@ -517,20 +523,26 @@
                 <label>
                     <span>Update archive</span>
                     <input id="webota_file" type="file" accept=".tar,application/x-tar">
+                    <span>Update archive</span>
+                    <input id="webota_file" type="file" accept=".tar,application/x-tar">
                 </label>
 
                 <label>
                     <span>Console</span>
                 </label>
                 <div id="webota_console" class="fw-console"></div>
+                <div id="webota_console" class="fw-console"></div>
 
                 <div class="panel-actions panel-actions-wrap">
+                    <button type="button" id="webota_flash" disabled>Flash OTA Update</button>
                     <button type="button" id="webota_flash" disabled>Flash OTA Update</button>
                     <button type="button" id="fw_reboot" class="secondary">Reboot device</button>
                     <button type="button" id="fw_factory_reset" class="danger">Factory reset</button>
                 </div>
                 <div id="webota_status" class="status-message" aria-live="polite"></div>
+                <div id="webota_status" class="status-message" aria-live="polite"></div>
             </div>
+
 
         </section>
     </main>
