@@ -473,32 +473,65 @@
         </section>
 
         <section id="firmware" class="tab-content">
+
+            <div class="panel warning-panel">
+                <h4 class="warning-title">⚠ Warning</h4>
+                <p class="warning-text">Do not reload or close this page, or power off the device during OTA update. Interrupting the process may damage the device.</p>
+            </div>
+
             <div class="panel">
-                <h3>Firmware Update (DO NOT WORK FOR NOW)</h3>
+                <h3>Firmware Update</h3>
 
                 <label>
                     <span>Current firmware version</span>
                     <span id="fw_current">--</span>
                 </label>
 
+                <label class="toggle-label">
+                    <span>Include beta versions</span>
+                    <input type="checkbox" id="fw_beta_toggle">
+                </label>
+
+                <div class="panel-actions panel-actions-wrap">
+                    <button type="button" id="fw_check_updates" class="secondary">Check for updates</button>
+                </div>
+
+                <div id="fw_updates_container" style="display: none;">
+                    <label>
+                        <span>Available versions</span>
+                        <select id="fw_version_select">
+                            <option value="">Loading...</option>
+                        </select>
+                    </label>
+                    <p class="field-hint" id="fw_version_info">--</p>
+                    <div class="panel-actions panel-actions-wrap">
+                        <button type="button" id="fw_download_flash" disabled>Download & Flash</button>
+                    </div>
+                    <div id="fw_download_status" class="status-message" aria-live="polite"></div>
+                </div>
+
+                <hr style="margin: 1rem 0; border: none; border-top: 1px solid #ddd;">
+
+                <h3>Manual OTA Update</h3>
+
                 <label>
-                    <span>Firmware file</span>
-                    <input id="fw_file" type="file" accept=".bin,.img,.fw,.uf2,application/octet-stream">
+                    <span>Update archive</span>
+                    <input id="webota_file" type="file" accept=".tar,application/x-tar">
                 </label>
 
                 <label>
                     <span>Console</span>
                 </label>
-
-                <div id="fw_console" class="fw-console"></div>
+                <div id="webota_console" class="fw-console"></div>
 
                 <div class="panel-actions panel-actions-wrap">
-                    <button type="button" id="fw_flash" disabled>Flash</button>
+                    <button type="button" id="webota_flash" disabled>Flash OTA Update</button>
                     <button type="button" id="fw_reboot" class="secondary">Reboot device</button>
                     <button type="button" id="fw_factory_reset" class="danger">Factory reset</button>
                 </div>
-                <div id="fw_action_status" class="status-message" aria-live="polite"></div>
+                <div id="webota_status" class="status-message" aria-live="polite"></div>
             </div>
+
         </section>
     </main>
 

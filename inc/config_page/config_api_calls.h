@@ -39,10 +39,13 @@ int32_t web_api_nearby_modems_get( const cJSON *in, cJSON *out );
 int32_t web_api_reticulum_links_get( const cJSON *in, cJSON *out );
 
 int32_t web_api_stat_reset( const cJSON *in, cJSON *out );
-int32_t web_api_ota_begin_post( const cJSON *in, cJSON *out );
-int32_t web_api_ota_chunk_post( const cJSON *in, cJSON *out );
-int32_t web_api_ota_end_post( const cJSON *in, cJSON *out );
-int32_t web_api_ota_write_post( const cJSON *in, cJSON *out );
+int32_t web_api_ota_wipe_lfs_post( const cJSON *in, cJSON *out );
+int32_t web_api_ota_file_begin_post( const cJSON *in, cJSON *out );
+int32_t web_api_ota_file_chunk_post( const cJSON *in, cJSON *out );
+int32_t web_api_ota_file_end_post( const cJSON *in, cJSON *out );
+int32_t web_api_ota_fw_begin_post( const cJSON *in, cJSON *out );
+int32_t web_api_ota_fw_chunk_post( const cJSON *in, cJSON *out );
+int32_t web_api_ota_fw_end_post( const cJSON *in, cJSON *out );
 int32_t web_api_reboot_post( const cJSON *in, cJSON *out );
 int32_t web_api_default_reset( const cJSON *in, cJSON *out );
 

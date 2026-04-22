@@ -5,15 +5,17 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-#define OTA_TAR_FILE_PATH                   "/ota.tar"
-#define OTA_FIWMWARE_FILE_PATH              "/fw.bin"
-
-uint32_t ota_lfs_begin( uint32_t total_size, uint32_t expect_crc32 );
-uint32_t ota_lfs_write( uint32_t off, const void *data, uint32_t len );
-uint32_t ota_lfs_end( void );
-int32_t ota_lfs_upgrade_from_tar( void );
-
 int32_t ota_reset_to_default(void);
-int32_t ota_write_firmware_from_file( void );
+
+/* Web OTA: write individual files directly to LittleFS */
+int32_t ota_format_littefs( void );
+int32_t ota_lfs_file_begin( const char *path, uint32_t total_size, uint32_t expect_crc32 );
+int32_t ota_wota_file_write( const void *data, uint32_t len );
+int32_t ota_wota_file_end( void );
+
+/* Firmware OTA: direct flash write */
+int32_t ota_fw_begin( uint32_t total_size, uint32_t expect_crc32 );
+int32_t ota_fw_write_chunk( uint32_t off, const uint8_t *data, uint16_t len );
+int32_t ota_fw_end( void );
 
 #endif // __OTA_H__

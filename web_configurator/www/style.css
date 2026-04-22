@@ -221,6 +221,24 @@ fieldset h4 {
     text-decoration: underline;
 }
 
+.warning-panel {
+    background: #fef3c7;
+    border: 1px solid #fbbf24;
+    border-radius: 4px;
+}
+
+.warning-title {
+    margin: 0 0 0.5rem;
+    font-size: 1rem;
+    color: #92400e;
+}
+
+.warning-text {
+    margin: 0;
+    font-size: 0.9rem;
+    color: #b45309;
+}
+
 .status-message {
     min-height: 1.2rem;
     margin-top: 0.4rem;
@@ -456,6 +474,22 @@ label textarea {
 label input[type="checkbox"] {
     width: auto;
     max-width: none;
+}
+
+hr {
+    border: none;
+    border-top: 1px solid #ddd;
+    margin: 1rem 0;
+}
+
+#fw_updates_container {
+    margin-top: 0.5rem;
+}
+
+#fw_version_info {
+    font-size: 0.85rem;
+    color: #666;
+    margin: 0.5rem 0;
 }
 
 @media (max-width: 720px) {

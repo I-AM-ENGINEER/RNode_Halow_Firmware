@@ -1,5 +1,8 @@
 // TODO
 // Checksum cheking
+#include "sys_config.h"
+//#define LOG_LOCAL_LEVEL     LOG_LEVEL_OTA
+#include "lib/logc/log.h"
 
 #include "ota.h"
 #include <stdint.h>
@@ -19,26 +22,32 @@
 #include "lib/ota/fw.h"
 #include "lib/fal/fal.h"
 #include "lib/littlefs/lfs.h"
+#include "littelfs_port.h"
 #include "basic_include.h"
-#include "sys_config.h"
 #include "device.h"
 #include "utils.h"
 
-extern lfs_t g_lfs;
-
-//#define OTA_DEBUG
-
-#ifdef OTA_DEBUG
-#define ota_dbg(fmt, ...) os_printf("[OTA] " fmt "\r\n", ##__VA_ARGS__)
-#else
-#define ota_dbg(fmt, ...) do { } while (0)
-#endif
+typedef struct {
+    bool     active;
+    uint32_t total;
+    uint32_t expect_crc32;
+} ota_fw_ctx_t;
 
 static const struct fal_partition *g_ota_part;
 static bool g_ota_erased;
 static uint32_t g_ota_total;
+static ota_fw_ctx_t s_fw_ota;
 
-static int ota_format_littefs( void );
+static uint32_t crc32_fw( uint32_t crc, const uint8_t *p, uint32_t n ){
+    uint32_t c = crc ^ 0xFFFFFFFFu;
+    while (n--) {
+        c ^= (uint32_t)(*p++);
+        for (uint32_t k = 0; k < 8u; k++) {
+            c = (c & 1u) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+        }
+    }
+    return c ^ 0xFFFFFFFFu;
+}
 
 static const struct fal_partition *ota_fal_part_get( void ){
     if (g_ota_part != NULL) {
@@ -130,26 +139,98 @@ int32_t _libota_write_fw_ah( uint32_t tot_len, uint32_t off, const uint8_t *data
     return 0;
 }
 
+int32_t ota_fw_begin( uint32_t total_size, uint32_t expect_crc32 ){
+    const struct fal_partition *p;
+
+    if (total_size == 0) { return -1; }
+
+    p = ota_fal_part_get();
+    if (p == NULL) { return -2; }
+
+    if (total_size > (uint32_t)p->len) { return -3; }
+
+    g_ota_erased = false;
+    g_ota_total  = 0;
+
+    s_fw_ota.active       = true;
+    s_fw_ota.total        = total_size;
+    s_fw_ota.expect_crc32 = expect_crc32;
+
+    return 0;
+}
+
+int32_t ota_fw_write_chunk( uint32_t off, const uint8_t *data, uint16_t len ){
+    if (!s_fw_ota.active) { 
+        return -1;
+    }
+    if (data == NULL || len == 0) { 
+        return -2;
+    }
+
+    return _libota_write_fw_ah(s_fw_ota.total, off, data, len);
+}
+
+int32_t ota_fw_end( void ){
+    const struct fal_partition *p;
+    static uint8_t buf[1024];
+    uint32_t left;
+    uint32_t offset;
+    uint32_t crc;
+
+    if (!s_fw_ota.active) { 
+        return -1;
+    }
+
+    s_fw_ota.active = false;
+
+    p = ota_fal_part_get();
+    if (p == NULL) { 
+        return -2;
+    }
+
+    left   = s_fw_ota.total;
+    offset = 0;
+    crc    = 0;
+
+    while (left) {
+        uint32_t n = (left > (uint32_t)sizeof(buf)) ? (uint32_t)sizeof(buf) : left;
+
+        if (fal_partition_read(p, offset, buf, n) < 0) {
+            return -3;
+        }
+
+        crc     = crc32_fw(crc, buf, n);
+        offset += n;
+        left   -= n;
+    }
+
+    if (crc != s_fw_ota.expect_crc32) {
+        return -4;
+    }
+
+    return 0;
+}
+
 extern int32_t __real_lwip_netif_hook_inputdata(struct netif* nif, uint8_t* data, uint32_t len);
 
 static int ota_cmd_firmware_data(struct netif* nif, uint8_t* data, uint32_t len){
     if (nif == NULL) {
-        ota_dbg("FW_DATA: nif NULL");
+        log_warn("FW_DATA: nif NULL");
         return -1;
     }
     if (data == NULL) {
-        ota_dbg("FW_DATA: data NULL");
+        log_warn("FW_DATA: data NULL");
         return -1;
     }
     if (len < sizeof(struct eth_ota_fw_data)) {
-        ota_dbg("FW_DATA: short len=%lu", (unsigned long)len);
+        log_warn("FW_DATA: short len=%lu", (unsigned long)len);
         return -1;
     }
 
     struct eth_ota_fw_data *fw = (struct eth_ota_fw_data *)data;
 
     if (fw->hdr.proto != __be16(ETH_P_OTA)) {
-        ota_dbg("FW_DATA: bad proto");
+        log_warn("FW_DATA: bad proto");
         return -1;
     }
 
@@ -157,32 +238,32 @@ static int ota_cmd_firmware_data(struct netif* nif, uint8_t* data, uint32_t len)
     uint32 fw_off   = __be32(fw->off);
     uint32 fw_total = __be32(fw->tot_len);
 
-    ota_dbg("FW_DATA: off=%lu len=%u total=%lu",
+    log_trace("FW_DATA: off=%lu len=%u total=%lu",
             (unsigned long)fw_off, (unsigned int)fw_len, (unsigned long)fw_total);
 
     if (fw_len == 0 || fw_len > 1400) {
-        ota_dbg("FW_DATA: bad fw_len=%u", (unsigned int)fw_len);
+        log_trace("FW_DATA: bad fw_len=%u", (unsigned int)fw_len);
         return -1;
     }
 
     uint32 need = (uint32)sizeof(struct eth_ota_fw_data) + (uint32)fw_len;
     if (len < need) {
-        ota_dbg("FW_DATA: truncated need=%lu got=%lu",
+        log_trace("FW_DATA: truncated need=%lu got=%lu",
                 (unsigned long)need, (unsigned long)len);
         return -1;
     }
     if (fw_off > fw_total) {
-        ota_dbg("FW_DATA: off>total");
+        log_trace("FW_DATA: off>total");
         return -1;
     }
     if ((fw_off + fw_len) > fw_total) {
-        ota_dbg("FW_DATA: off+len>total");
+        log_trace("FW_DATA: off+len>total");
         return -1;
     }
 
     int32 r = 0;
     r = _libota_write_fw_ah(fw_total, fw_off, fw->data, fw_len);
-    ota_dbg("FW_DATA: write ret=%ld", (long)r);
+    log_trace("FW_DATA: write ret=%ld", (long)r);
     hgprintf("libota_write_fw_ah ret=%ld\r\n", (long)r);
     if (r != 0) {
         return -1;
@@ -207,7 +288,7 @@ static int ota_cmd_firmware_data(struct netif* nif, uint8_t* data, uint32_t len)
 
     struct pbuf *p = pbuf_alloc(PBUF_RAW, frame_len, PBUF_RAM);
     if (!p) {
-        ota_dbg("FW_DATA: pbuf_alloc failed");
+        log_warn("FW_DATA: pbuf_alloc failed");
         return -1;
     }
 
@@ -217,12 +298,12 @@ static int ota_cmd_firmware_data(struct netif* nif, uint8_t* data, uint32_t len)
     if (nif->linkoutput) {
         e = nif->linkoutput(nif, p);
     } else {
-        ota_dbg("FW_DATA: linkoutput NULL");
+        log_warn("FW_DATA: linkoutput NULL");
     }
 
     pbuf_free(p);
 
-    ota_dbg("FW_DATA: send=%d", (int)e);
+    log_trace("FW_DATA: send=%d", (int)e);
 
     return (e == ERR_OK) ? 0 : -1;
 }
@@ -230,15 +311,15 @@ static int ota_cmd_firmware_data(struct netif* nif, uint8_t* data, uint32_t len)
 
 static int ota_cmd_scan(struct netif* nif, uint8_t* data, uint32_t len){
     if(nif == NULL) {
-        ota_dbg("SCAN: nif NULL");
+        log_warn("SCAN: nif NULL");
         return -1;
     }
     if(data == NULL){
-        ota_dbg("SCAN: data NULL");
+        log_warn("SCAN: data NULL");
         return -1;
     }
     if(len < sizeof(struct eth_ota_hdr)){
-        ota_dbg("SCAN: short len=%lu", (unsigned long)len);
+        log_warn("SCAN: short len=%lu", (unsigned long)len);
         return -1;
     }
 
@@ -259,7 +340,7 @@ static int ota_cmd_scan(struct netif* nif, uint8_t* data, uint32_t len){
 
     struct pbuf *p = pbuf_alloc(PBUF_RAW, frame_len, PBUF_RAM);
     if (!p) {
-        ota_dbg("SCAN: pbuf_alloc failed");
+        log_warn("SCAN: pbuf_alloc failed");
         return -1;
     }
 
@@ -271,12 +352,12 @@ static int ota_cmd_scan(struct netif* nif, uint8_t* data, uint32_t len){
     if (nif->linkoutput) {
         e = nif->linkoutput(nif, p);
     } else {
-        ota_dbg("SCAN: linkoutput NULL");
+        log_warn("SCAN: linkoutput NULL");
     }
 
     pbuf_free(p);
 
-    ota_dbg("SCAN: send=%d", (int)e);
+    log_trace("SCAN: send=%d", (int)e);
 
     return (e == ERR_OK) ? 0 : -1;
 }
@@ -288,15 +369,15 @@ static int ota_cmd_reboot(struct netif* nif, uint8_t* data, uint32_t len){
 
 static int ota_cmd_get_ip( struct netif *nif, uint8_t *data, uint32_t len ){
     if (nif == NULL) {
-        ota_dbg("GET_IP: nif NULL");
+        log_warn("GET_IP: nif NULL");
         return -1;
     }
     if (data == NULL) {
-        ota_dbg("GET_IP: data NULL");
+        log_warn("GET_IP: data NULL");
         return -1;
     }
     if (len < sizeof(struct eth_ota_hdr)) {
-        ota_dbg("GET_IP: short len=%lu", (unsigned long)len);
+        log_warn("GET_IP: short len=%lu", (unsigned long)len);
         return -1;
     }
 
@@ -326,7 +407,7 @@ static int ota_cmd_get_ip( struct netif *nif, uint8_t *data, uint32_t len ){
 
     struct pbuf *p = pbuf_alloc(PBUF_RAW, (uint16_t)sizeof(resp), PBUF_RAM);
     if (!p) {
-        ota_dbg("GET_IP: pbuf_alloc failed");
+        log_warn("GET_IP: pbuf_alloc failed");
         return -1;
     }
 
@@ -336,12 +417,12 @@ static int ota_cmd_get_ip( struct netif *nif, uint8_t *data, uint32_t len ){
     if (nif->linkoutput) {
         e = nif->linkoutput(nif, p);
     } else {
-        ota_dbg("GET_IP: linkoutput NULL");
+        log_warn("GET_IP: linkoutput NULL");
     }
 
     pbuf_free(p);
 
-    ota_dbg("GET_IP: send=%d ip=%08lx gw=%08lx mask=%08lx",
+    log_trace("GET_IP: send=%d ip=%08lx gw=%08lx mask=%08lx",
             (int)e,
             (unsigned long)__be32(ip),
             (unsigned long)__be32(gw),
@@ -358,15 +439,15 @@ static int ota_cmd_format_littlefs( struct netif *nif, uint8_t *data, uint32_t l
     err_t e = ERR_IF;
 
     if (nif == NULL) {
-        ota_dbg("FORMAT_LFS: nif NULL");
+        log_warn("FORMAT_LFS: nif NULL");
         return -1;
     }
     if (data == NULL) {
-        ota_dbg("FORMAT_LFS: data NULL");
+        log_warn("FORMAT_LFS: data NULL");
         return -1;
     }
     if (len < sizeof(struct eth_ota_hdr)) {
-        ota_dbg("FORMAT_LFS: short len=%lu", (unsigned long)len);
+        log_warn("FORMAT_LFS: short len=%lu", (unsigned long)len);
         return -1;
     }
 
@@ -383,7 +464,7 @@ static int ota_cmd_format_littlefs( struct netif *nif, uint8_t *data, uint32_t l
 
     p = pbuf_alloc(PBUF_RAW, (uint16_t)sizeof(resp), PBUF_RAM);
     if (p == NULL) {
-        ota_dbg("FORMAT_LFS: pbuf_alloc failed");
+        log_warn("FORMAT_LFS: pbuf_alloc failed");
         return -1;
     }
 
@@ -392,12 +473,12 @@ static int ota_cmd_format_littlefs( struct netif *nif, uint8_t *data, uint32_t l
     if (nif->linkoutput) {
         e = nif->linkoutput(nif, p);
     } else {
-        ota_dbg("FORMAT_LFS: linkoutput NULL");
+        log_warn("FORMAT_LFS: linkoutput NULL");
     }
 
     pbuf_free(p);
 
-    ota_dbg("FORMAT_LFS: format_rc=%d send=%d", rc, (int)e);
+    log_trace("FORMAT_LFS: format_rc=%d send=%d", rc, (int)e);
 
     if (rc != 0) {
         return -1;
@@ -415,15 +496,15 @@ int ota_process_package(struct netif* nif, uint8_t* data, uint32_t len){
         return -1;
     }
 
-    ota_dbg("PROCESS: stype=%u len=%lu", (unsigned int)hdr->stype, (unsigned long)len);
+    log_trace("PROCESS: stype=%u len=%lu", (unsigned int)hdr->stype, (unsigned long)len);
 
     switch (hdr->stype){
-        case ETH_P_OTA_SCAN:                ota_dbg("PROCESS: SCAN");       ota_cmd_scan(nif, data, len);           break;
-        case ETH_P_OTA_FW_DATA:             ota_dbg("PROCESS: FW_DATA");    ota_cmd_firmware_data(nif, data, len);  break;
-        case ETH_P_OTA_REBOOT:              ota_dbg("PROCESS: REBOOT");     ota_cmd_reboot(nif, data, len);         break;
-        case ETH_P_OTA_FW_CUSTOM_GET_IP:    ota_dbg("PROCESS: GET_IP");     ota_cmd_get_ip(nif, data, len);         break;
-        case ETH_P_OTA_FW_FORMAT_LITTLEFS:  ota_dbg("PROCESS: FORMAT_LFS"); ota_cmd_format_littlefs(nif, data, len);break;
-        default:                            ota_dbg("PROCESS: unknown");                                            break;
+        case ETH_P_OTA_SCAN:                log_trace("PROCESS: SCAN");       ota_cmd_scan(nif, data, len);           break;
+        case ETH_P_OTA_FW_DATA:             log_trace("PROCESS: FW_DATA");    ota_cmd_firmware_data(nif, data, len);  break;
+        case ETH_P_OTA_REBOOT:              log_trace("PROCESS: REBOOT");     ota_cmd_reboot(nif, data, len);         break;
+        case ETH_P_OTA_FW_CUSTOM_GET_IP:    log_trace("PROCESS: GET_IP");     ota_cmd_get_ip(nif, data, len);         break;
+        case ETH_P_OTA_FW_FORMAT_LITTLEFS:  log_trace("PROCESS: FORMAT_LFS"); ota_cmd_format_littlefs(nif, data, len);break;
+        default:                            log_trace("PROCESS: unknown");                                            break;
     }
     return -1;
 }
@@ -450,16 +531,6 @@ int ota_reset_to_default( void ){
     return 0;
 }
 
-static int ota_format_littefs( void ){
-    const struct fal_partition *p;
-    lfs_unmount(&g_lfs);
-    p = fal_partition_find(FAL_PART_NAME_LITTLEFS);
-    if (p == NULL) {
-        return -1;
-    }
-
-    if (fal_partition_erase(p, 0, p->len) < 0) {
-        return -2;
-    }
-    return 0;
+int32_t ota_format_littefs( void ){
+    return littlefs_reformat();
 }

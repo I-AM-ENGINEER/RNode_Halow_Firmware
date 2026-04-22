@@ -30,10 +30,20 @@ def _minify_css(css: str) -> str:
 
 def _minify_js(js: str) -> str:
     # VERY lightweight minifier: strips /* */ and //... (not perfect for all edge cases)
+    # Note: This is imperfect and doesn't handle all regex/string edge cases,
+    # but works for typical frontend code.
+
+    # Remove /* */ block comments (but not */ inside strings/regexes)
     js = re.sub(r"/\*.*?\*/", "", js, flags=re.S)
-    js = re.sub(r"(^|[^\:])//.*?$", r"\1", js, flags=re.M)   # keep http://
+
+    # Remove // line comments, but be careful not to remove // inside regex literals
+    # Match // that are preceded by whitespace or operators (not inside regex/URL context)
+    # This is a heuristic: // preceded by ; = , ( [ { or at line start is likely a comment
+    js = re.sub(r"(;|=|,|\(|\[|\{|^)\s*//.*?$", r"\1", js, flags=re.M)
+
     js = re.sub(r"\s+", " ", js)
-    js = re.sub(r"\s*([{}();,:=<>+\-*/%&|!?])\s*", r"\1", js)
+    # Remove spaces around operators, but NOT around / to preserve regex literals
+    js = re.sub(r"\s*([{}();,:=<>+\-*%&|!?])\s*", r"\1", js)
     return js.strip()
 
 

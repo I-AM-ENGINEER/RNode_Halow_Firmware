@@ -245,3 +245,29 @@ int32_t littlefs_init( void ){
     log_info("littlefs mounted");
     return 0;
 }
+
+int32_t littlefs_reformat( void ){
+    int err;
+
+    if( g_part == NULL ){
+        log_error("reformat: partition not set");
+        return -1;
+    }
+
+    lfs_unmount(&g_lfs);
+
+    err = lfs_format(&g_lfs, &g_lfs_cfg);
+    if( err != 0 ){
+        log_error("reformat: format failed err=%d", err);
+        return -2;
+    }
+
+    err = lfs_mount(&g_lfs, &g_lfs_cfg);
+    if( err != 0 ){
+        log_error("reformat: mount failed err=%d", err);
+        return -3;
+    }
+
+    log_info("reformat: done, littlefs remounted");
+    return 0;
+}
