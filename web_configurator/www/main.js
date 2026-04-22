@@ -51,6 +51,7 @@
         setupTabs();
         setupHandlers();
         setupDirtyTracking();
+        fwUpdateState.betaEnabled = document.getElementById('fw_beta_toggle').checked;
         loadAll();
         updateNearbyUi();
         updateReticulumUi();
@@ -285,7 +286,7 @@
         document.getElementById('fw_beta_toggle').addEventListener('change', handleFwBetaToggle);
         document.getElementById('fw_check_updates').addEventListener('click', checkFwUpdates);
         document.getElementById('fw_version_select').addEventListener('change', handleFwVersionSelect);
-        document.getElementById('fw_download_flash').addEventListener('click', fwDownloadAndFlash);
+        document.getElementById('fw_download_only').addEventListener('click', fwDownloadOnly);
 
         initFwConsole();
     }
@@ -1455,12 +1456,12 @@
 
     function handleFwBetaToggle() {
         fwUpdateState.betaEnabled = document.getElementById('fw_beta_toggle').checked;
+        updateFwVersionList();
     }
 
     async function checkFwUpdates() {
         const btn = document.getElementById('fw_check_updates');
         const container = document.getElementById('fw_updates_container');
-        const select = document.getElementById('fw_version_select');
 
         btn.disabled = true;
         container.style.display = 'none';
@@ -1475,33 +1476,14 @@
                 return;
             }
 
-            const releases = await res.json();
-            fwUpdateState.releases = releases.filter(r => {
-                if (fwUpdateState.betaEnabled) return true;
-                return !r.prerelease;
-            });
-
-            select.innerHTML = '';
+            fwUpdateState.releases = await res.json();
 
             if (fwUpdateState.releases.length === 0) {
-                const opt = document.createElement('option');
-                opt.textContent = 'No versions available';
-                opt.value = '';
-                select.appendChild(opt);
                 setStatus('fw_download_status', 'No releases found', true);
                 return;
             }
 
-            fwUpdateState.releases.forEach(release => {
-                const opt = document.createElement('option');
-                const label = release.prerelease ? `${release.tag_name} (beta)` : release.tag_name;
-                opt.textContent = label;
-                opt.value = release.id;
-                select.appendChild(opt);
-            });
-
-            select.value = fwUpdateState.releases[0].id;
-            handleFwVersionSelect();
+            updateFwVersionList();
             container.style.display = 'block';
             clearStatus('fw_download_status');
         } catch (err) {
@@ -1512,218 +1494,79 @@
         }
     }
 
+    function updateFwVersionList() {
+        const select = document.getElementById('fw_version_select');
+        select.innerHTML = '';
+
+        const visibleReleases = fwUpdateState.releases.filter(r => {
+            if (fwUpdateState.betaEnabled) return true;
+            return !r.prerelease;
+        });
+
+        if (visibleReleases.length === 0) {
+            const opt = document.createElement('option');
+            opt.textContent = 'No versions available';
+            opt.value = '';
+            select.appendChild(opt);
+            return;
+        }
+
+        visibleReleases.forEach(release => {
+            const opt = document.createElement('option');
+            const label = release.prerelease ? `${release.tag_name} (beta)` : release.tag_name;
+            opt.textContent = label;
+            opt.value = release.id;
+            select.appendChild(opt);
+        });
+
+        select.value = visibleReleases[0].id;
+        handleFwVersionSelect();
+    }
+
     function handleFwVersionSelect() {
         const select = document.getElementById('fw_version_select');
         const infoEl = document.getElementById('fw_version_info');
-        const flashBtn = document.getElementById('fw_download_flash');
+        const downloadBtn = document.getElementById('fw_download_only');
 
         const releaseId = select.value;
         const release = fwUpdateState.releases.find(r => r.id == releaseId);
 
         if (!release) {
             infoEl.textContent = '--';
-            flashBtn.disabled = true;
+            downloadBtn.disabled = true;
             return;
         }
 
         const tarAsset = release.assets.find(a => a.name.endsWith('.tar'));
         if (!tarAsset) {
             infoEl.textContent = 'No .tar file found in this release';
-            flashBtn.disabled = true;
+            downloadBtn.disabled = true;
             return;
         }
 
         fwUpdateState.selectedVersion = {
             name: release.tag_name,
-            downloadUrl: tarAsset.browser_download_url,
-            size: tarAsset.size
+            downloadUrl: tarAsset.browser_download_url
         };
 
-        const sizeMb = (tarAsset.size / (1024 * 1024)).toFixed(1);
-        infoEl.textContent = `${sizeMb} MB • Released ${new Date(release.published_at).toLocaleDateString()}`;
-        flashBtn.disabled = false;
+        const dateStr = new Date(release.published_at).toLocaleDateString('ru-RU');
+        infoEl.textContent = `Released ${dateStr}`;
+        downloadBtn.disabled = false;
     }
 
-    async function fwDownloadAndFlash() {
+    function fwDownloadOnly() {
         if (!fwUpdateState.selectedVersion) {
-            setStatus('fw_download_status', 'No version selected', true);
             return;
         }
 
-        const btn = document.getElementById('fw_download_flash');
-        const consoleEl = document.getElementById('webota_console');
-
-        function log(msg) {
-            const line = document.createElement('div');
-            line.textContent = msg;
-            consoleEl.appendChild(line);
-            consoleEl.scrollTop = consoleEl.scrollHeight;
-            return line;
-        }
-        function stage(msg) { log('[*] ' + msg); }
-        function ok(msg) { log('[OK] ' + msg); }
-        function err(msg) { log('[ERR] ' + msg); }
-
-        const select = document.getElementById('fw_version_select');
-        const versionLabel = select.options[select.selectedIndex].text;
-        if (!confirm('Download ' + versionLabel + ' and flash?')) { return; }
-
-        btn.disabled = true;
-        fwUpdateState.downloading = true;
-        consoleEl.innerHTML = '';
-        clearStatus('fw_download_status');
-
-        try {
-            stage('Downloading firmware...');
-
-            const res = await fetch(fwUpdateState.selectedVersion.downloadUrl, {
-                cache: 'no-store'
-            });
-
-            if (!res.ok) {
-                throw new Error('HTTP ' + res.status);
-            }
-
-            const arrayBuf = await res.arrayBuffer();
-            const tarU8 = new Uint8Array(arrayBuf);
-            ok('Downloaded ' + tarU8.length + ' bytes');
-
-            const chunkSize = 512;
-            const tries = 6;
-            const baseDelayMs = 80;
-
-            function mkPost(url, obj) {
-                return fetchJsonRetry(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(obj)
-                }, tries, baseDelayMs);
-            }
-
-            stage('Parsing TAR...');
-            const allEntries = tarParse(tarU8);
-            const fwEntry = allEntries.find(e => e.name === 'fw.bin' || e.name === '/fw.bin');
-            const fileEntries = allEntries.filter(e => e.name !== 'fw.bin' && e.name !== '/fw.bin');
-
-            if (!fwEntry && fileEntries.length === 0) {
-                throw new Error('No files in archive');
-            }
-            ok('Found ' + allEntries.length + ' file(s)');
-
-            if (fileEntries.length > 0) {
-                stage('Wiping filesystem...');
-                await mkPost('/api/ota_wipe_lfs', {});
-                ok('Filesystem cleared');
-
-                for (let i = 0; i < fileEntries.length; i++) {
-                    const entry = fileEntries[i];
-                    const targetPath = '/www/' + entry.name.replace(/^www\//, '');
-                    const fileU8 = entry.data;
-
-                    stage('[' + (i + 1) + '/' + fileEntries.length + '] ' + targetPath + ' (' + fileU8.length + 'B)');
-
-                    const fileCrc32 = (crc32_update(0 >>> 0, fileU8) >>> 0);
-
-                    await mkPost('/api/ota_file_begin', {
-                        path: targetPath,
-                        size: fileU8.length,
-                        crc32: fileCrc32
-                    });
-
-                    const progressLine = log('    CRC32=0x' + fileCrc32.toString(16));
-                    let offset = 0;
-                    while (offset < fileU8.length) {
-                        const nextOffset = Math.min(offset + chunkSize, fileU8.length);
-                        const chunkBin = fileU8.subarray(offset, nextOffset);
-                        const chunkB64 = bytesToB64(chunkBin);
-                        await mkPost('/api/ota_file_chunk', { b64: chunkB64 });
-                        offset = nextOffset;
-                        const percent = Math.floor((offset * 100) / fileU8.length);
-                        progressLine.textContent = '    ' + percent + '% (' + offset + '/' + fileU8.length + 'B)';
-                    }
-
-                    await mkPost('/api/ota_file_end', {});
-                    ok('Verified');
-                }
-            }
-
-            if (fwEntry) {
-                const fileU8 = fwEntry.data;
-                const fileCrc32 = (crc32_update(0 >>> 0, fileU8) >>> 0);
-                ok('Firmware: ' + fileU8.length + ' bytes, CRC32=0x' + fileCrc32.toString(16));
-
-                stage('Starting firmware flash...');
-                await mkPost('/api/ota_fw_begin', {
-                    size: fileU8.length,
-                    crc32: fileCrc32
-                });
-                ok('Ready');
-
-                stage('Uploading firmware...');
-                const progressLine = log('    0%');
-
-                let offset = 0;
-                while (offset < fileU8.length) {
-                    const nextOffset = Math.min(offset + chunkSize, fileU8.length);
-                    const chunkBin = fileU8.subarray(offset, nextOffset);
-                    const chunkB64 = bytesToB64(chunkBin);
-                    await mkPost('/api/ota_fw_chunk', { off: offset, b64: chunkB64 });
-                    offset = nextOffset;
-                    const percent = Math.floor((offset * 100) / fileU8.length);
-                    progressLine.textContent = '    ' + percent + '% (' + offset + '/' + fileU8.length + 'B)';
-                }
-
-                progressLine.textContent = '[OK] Upload complete';
-
-                stage('Verifying firmware...');
-                await mkPost('/api/ota_fw_end', {});
-                ok('Verified');
-
-                stage('Rebooting...');
-                fetch('/api/reboot', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
-                }).catch(() => {});
-                ok('Rebooting...');
-
-                stage('Waiting for device...');
-                let newVersion = null;
-                for (let poll = 0; poll < 120; poll++) {
-                    await sleepMs(1000);
-                    try {
-                        const res = await fetch('/api/get_stat', { cache: 'no-store' });
-                        if (res.ok) {
-                            const data = await res.json();
-                            const device = data.device || data.api_dev_stat;
-                            if (device && device.ver) {
-                                newVersion = device.ver;
-                                break;
-                            }
-                        }
-                    } catch (_) { }
-                }
-
-                if (newVersion) {
-                    ok('Device ready. New firmware version: ' + newVersion);
-                } else {
-                    ok('Device ready');
-                }
-
-                setStatus('fw_download_status', 'OTA complete. Please reload page.', false);
-                return;
-            }
-
-            setStatus('fw_download_status', 'Update complete. Please reload page.', false);
-            stage('Done.');
-        } catch (e) {
-            err(e && e.message ? e.message : 'error');
-            setStatus('fw_download_status', 'Download and flash failed', true);
-            btn.disabled = false;
-        } finally {
-            fwUpdateState.downloading = false;
-        }
+        const a = document.createElement('a');
+        a.href = fwUpdateState.selectedVersion.downloadUrl;
+        a.download = fwUpdateState.selectedVersion.name + '.tar';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
     }
+
 
     async function rebootDevice() {
         clearStatus('fw_action_status');
