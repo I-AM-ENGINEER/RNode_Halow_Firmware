@@ -96,7 +96,7 @@
 #define NET_LOG_CONFIG_IP_DEF                   PP_HTONL(LWIP_MAKEU32(192,168,7,1))
 #define NET_LOG_CONFIG_PORT_DEF                 (5000)
 
-#define HALOW_CONFIG_CENTRAL_FREQ_DEF           (8665)
+#define HALOW_CONFIG_CENTRAL_FREQ_DEF           (8645)
 #define HALOW_CONFIG_POWER_DEF                  (14)
 #define HALOW_CONFIG_BANDWIDTH_DEF              (1)
 #define HALOW_CONFIG_MCS_DEF                    (0)
