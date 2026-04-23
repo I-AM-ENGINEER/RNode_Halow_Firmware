@@ -42,15 +42,28 @@ def main():
         subprocess.run(
             [
                 sys.executable,
-                str(script_dir / "pack_www.py"),  # если pack_www лежит рядом
+                str(script_dir / "pack_www.py"),
                 "--www", str(www_src),
-                "--out", str(out_index)
+                "--out", str(out_index),
+                "--gzip-only"
             ],
             check=True
         )
     except subprocess.CalledProcessError as e:
         print("pack_www failed")
         sys.exit(e.returncode)
+
+    # Keep as index.html.gz (gzip-compressed for browser decompression)
+    gz_file = firmware_www_dir / "index.html.gz"
+    if gz_file.exists():
+        print(f"Created: {gz_file}")
+
+    # Copy favicon.ico
+    favicon_src = www_src / "favicon.ico"
+    if favicon_src.exists():
+        favicon_dst = firmware_www_dir / "favicon.ico"
+        shutil.copyfile(favicon_src, favicon_dst)
+        print(f"Copied: {favicon_dst}")
 
     # 3) pack _filesystem into ota_firmware.tar
     tar_path = base_path / "ota_firmware.tar"

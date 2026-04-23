@@ -325,15 +325,24 @@ static void http_serve_file( struct netconn *nc, const char *uri ){
     }
 
     if (strcmp(uri, "/") == 0) {
-        snprintf(path, sizeof(path), "%s/index.html", WWW_DIR);
+        snprintf(path, sizeof(path), "%s/index.html.gz", WWW_DIR);
     } else {
         while (*uri == '/') { uri++; }
-        snprintf(path, sizeof(path), "%s/%s", WWW_DIR, uri);
+        snprintf(path, sizeof(path), "%s/%s.gz", WWW_DIR, uri);
     }
 
     httpd_debug("serve_file: open path='%s'", path);
 
     rc = lfs_file_open(&g_lfs, &f, path, LFS_O_RDONLY);
+    if (rc < 0) {
+        if (strcmp(uri, "/") == 0 || strcmp(uri, "index.html") == 0) {
+            snprintf(path, sizeof(path), "%s/index.html", WWW_DIR);
+        } else {
+            while (*uri == '/') { uri++; }
+            snprintf(path, sizeof(path), "%s/%s", WWW_DIR, uri);
+        }
+        rc = lfs_file_open(&g_lfs, &f, path, LFS_O_RDONLY);
+    }
     if (rc < 0) {
         httpd_debug("serve_file: open failed rc=%d", rc);
         http_send_text(nc, 404, "not found\n");
@@ -342,20 +351,36 @@ static void http_serve_file( struct netconn *nc, const char *uri ){
     opened = true;
 
     {
-        char *hdr = os_malloc(128);
-        err_t err; 
+        char *hdr = os_malloc(256);
+        err_t err;
+        const char *content_encoding = "";
+        const char *content_type_path = path;
+        char path_without_br[32];
+
         if (hdr == NULL) {
             httpd_error("serve_file: malloc failed");
             goto exit;
         }
 
-        snprintf(hdr, 128,
+        if (strstr(path, ".gz") != NULL) {
+            content_encoding = "Content-Encoding: gzip\r\n";
+            snprintf(path_without_br, sizeof(path_without_br), "%s", path);
+            char *gz_ext = strstr(path_without_br, ".gz");
+            if (gz_ext != NULL) {
+                *gz_ext = '\0';
+                content_type_path = path_without_br;
+            }
+        }
+
+        snprintf(hdr, 256,
                 "HTTP/1.1 200\r\n"
                 "Content-Type: %s\r\n"
+                "%s"
                 "Cache-Control: no-cache\r\n"
                 "Connection: close\r\n"
                 "\r\n",
-                http_content_type(path));
+                http_content_type(content_type_path),
+                content_encoding);
 
         httpd_trace("serve_file: send header type='%s'", http_content_type(path));
 

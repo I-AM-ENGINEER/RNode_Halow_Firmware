@@ -1,2 +1,4 @@
 scapy>=2.5.0
 tftpy
+minify-html
+brotli
