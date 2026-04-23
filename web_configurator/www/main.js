@@ -140,26 +140,47 @@
     function updateSaveButton(group) {
         let current = '';
         let btn = null;
+        let isValid = true;
 
-        if (group === 'halow') { current = jsonSnapshot(readHalowForm()); btn = document.getElementById('save_halow'); }
-        if (group === 'lbt') { current = jsonSnapshot(readLbtForm()); btn = document.getElementById('save_lbt'); }
-        if (group === 'net') { current = jsonSnapshot(readNetForm()); btn = document.getElementById('save_net'); }
-        if (group === 'slip') { current = jsonSnapshot(readSlipForm()); btn = document.getElementById('save_slip'); }
-        if (group === 'log') { current = jsonSnapshot(readLogForm()); btn = document.getElementById('save_log'); }
-        if (group === 'tcp') { current = jsonSnapshot(readTcpForm()); btn = document.getElementById('save_tcp'); }
+        if (group === 'halow') {
+            current = jsonSnapshot(readHalowForm());
+            btn = document.getElementById('save_halow');
+            isValid = isHalowFormValid();
+        }
+        if (group === 'lbt') {
+            current = jsonSnapshot(readLbtForm());
+            btn = document.getElementById('save_lbt');
+            isValid = isLbtFormValid();
+        }
+        if (group === 'net') {
+            current = jsonSnapshot(readNetForm());
+            btn = document.getElementById('save_net');
+            isValid = isNetFormValid();
+        }
+        if (group === 'slip') {
+            current = jsonSnapshot(readSlipForm());
+            btn = document.getElementById('save_slip');
+            isValid = isSlipFormValid();
+        }
+        if (group === 'log') {
+            current = jsonSnapshot(readLogForm());
+            btn = document.getElementById('save_log');
+            isValid = isLogFormValid();
+        }
+        if (group === 'tcp') {
+            current = jsonSnapshot(readTcpForm());
+            btn = document.getElementById('save_tcp');
+            isValid = isTcpFormValid();
+        }
         if (group === 'telemetry') {
             current = jsonSnapshot(readTelemetryForm());
             btn = document.getElementById('save_telemetry');
+            isValid = validateTelemetryForm({ silent: true });
         }
 
         if (!btn) { return; }
 
-        if (group === 'telemetry') {
-            btn.disabled = (current === baselines[group]) || !validateTelemetryForm({ silent: true });
-            return;
-        }
-
-        btn.disabled = (current === baselines[group]);
+        btn.disabled = (current === baselines[group]) || !isValid;
     }
 
     function snapshotGroup(group) {
@@ -236,23 +257,242 @@
         });
     }
 
+    function validateHalowFields() {
+        const powerField = document.getElementById('halow_power_dbm');
+        const freqField = document.getElementById('halow_central_freq');
+        const power = parseFloat(powerField.value);
+        const freq = parseFloat(freqField.value);
+
+        const powerInvalid = isNaN(power) || power < 1 || power > 25;
+        const freqInvalid = isNaN(freq) || freq < 750 || freq > 930;
+
+        powerField.classList.toggle('error', powerInvalid);
+        freqField.classList.toggle('error', freqInvalid);
+        updateSaveButton('halow');
+    }
+
+    function isHalowFormValid() {
+        const power = parseFloat(document.getElementById('halow_power_dbm').value);
+        const freq = parseFloat(document.getElementById('halow_central_freq').value);
+        return !(isNaN(power) || power < 1 || power > 25 || isNaN(freq) || freq < 750 || freq > 930);
+    }
+
+    function isLbtFormValid() {
+        const enabled = document.getElementById('lbt_uen').checked;
+        if (!enabled) return true;
+        const umax = parseInt(document.getElementById('lbt_umax').value, 10);
+        return !isNaN(umax) && umax >= 0 && umax <= 100;
+    }
+
+    function isValidIp(ip) {
+        const parts = ip.trim().split('.');
+        if (parts.length !== 4) return false;
+        return parts.every(part => {
+            const num = parseInt(part, 10);
+            return Number.isFinite(num) && num >= 0 && num <= 255 && part === String(num);
+        });
+    }
+
+    function isValidNetmask(mask) {
+        const parts = mask.trim().split('.');
+        if (parts.length !== 4) return false;
+        const nums = parts.map(p => {
+            const num = parseInt(p, 10);
+            return Number.isFinite(num) && num >= 0 && num <= 255 && p === String(num) ? num : -1;
+        });
+        if (nums.some(n => n === -1)) return false;
+
+        let combined = (nums[0] << 24) | (nums[1] << 16) | (nums[2] << 8) | nums[3];
+        combined = combined >>> 0;
+
+        let ones = 0;
+        let seenZero = false;
+        for (let i = 31; i >= 0; i--) {
+            const bit = (combined >>> i) & 1;
+            if (bit === 0) {
+                seenZero = true;
+            } else if (seenZero) {
+                return false;
+            }
+            if (bit === 1) ones++;
+        }
+        return ones > 0;
+    }
+
+    function validateNetFields() {
+        const dhcp = document.getElementById('net_dhcp').checked;
+        const ipField = document.getElementById('net_ip_address');
+        const gwField = document.getElementById('net_gw_address');
+        const nmField = document.getElementById('net_netmask');
+
+        if (dhcp) {
+            ipField.classList.remove('error');
+            gwField.classList.remove('error');
+            nmField.classList.remove('error');
+        } else {
+            const ip = ipField.value.trim();
+            const gw = gwField.value.trim();
+            const nm = nmField.value.trim();
+            ipField.classList.toggle('error', !isValidIp(ip));
+            gwField.classList.toggle('error', !isValidIp(gw));
+            nmField.classList.toggle('error', !isValidNetmask(nm));
+        }
+        updateSaveButton('net');
+    }
+
+    function isNetFormValid() {
+        const dhcp = document.getElementById('net_dhcp').checked;
+        if (dhcp) return true;
+        const ip = document.getElementById('net_ip_address').value.trim();
+        const gw = document.getElementById('net_gw_address').value.trim();
+        const nm = document.getElementById('net_netmask').value.trim();
+        return isValidIp(ip) && isValidIp(gw) && isValidNetmask(nm);
+    }
+
+    function validateSlipFields() {
+        const enabled = document.getElementById('slip_enable').checked;
+        const baudField = document.getElementById('slip_baud');
+        const ipField = document.getElementById('slip_ip_address');
+        const gwField = document.getElementById('slip_gw_address');
+
+        if (enabled) {
+            const baud = parseInt(baudField.value, 10);
+            const ip = ipField.value.trim();
+            const gw = gwField.value.trim();
+            baudField.classList.toggle('error', isNaN(baud) || baud < 1);
+            ipField.classList.toggle('error', !isValidIp(ip));
+            gwField.classList.toggle('error', !isValidIp(gw));
+        } else {
+            baudField.classList.remove('error');
+            ipField.classList.remove('error');
+            gwField.classList.remove('error');
+        }
+        updateSaveButton('slip');
+    }
+
+    function isSlipFormValid() {
+        const enabled = document.getElementById('slip_enable').checked;
+        if (!enabled) return true;
+        const baud = parseInt(document.getElementById('slip_baud').value, 10);
+        const ip = document.getElementById('slip_ip_address').value.trim();
+        const gw = document.getElementById('slip_gw_address').value.trim();
+        return !isNaN(baud) && baud >= 1 && isValidIp(ip) && isValidIp(gw);
+    }
+
+    function validateLogFields() {
+        const enabled = document.getElementById('log_udp_enable').checked;
+        const hostField = document.getElementById('log_udp_host');
+        const portField = document.getElementById('log_udp_port');
+
+        if (enabled) {
+            const host = hostField.value.trim();
+            const port = parseInt(portField.value, 10);
+            hostField.classList.toggle('error', !isValidIp(host));
+            portField.classList.toggle('error', isNaN(port) || port < 1 || port > 65535);
+        } else {
+            hostField.classList.remove('error');
+            portField.classList.remove('error');
+        }
+        updateSaveButton('log');
+    }
+
+    function isLogFormValid() {
+        const enabled = document.getElementById('log_udp_enable').checked;
+        if (!enabled) return true;
+        const host = document.getElementById('log_udp_host').value.trim();
+        const port = parseInt(document.getElementById('log_udp_port').value, 10);
+        return isValidIp(host) && !isNaN(port) && port >= 1 && port <= 65535;
+    }
+
+    function isValidCidr(cidr) {
+        const trimmed = cidr.trim();
+        if (!trimmed) return false;
+
+        const parts = trimmed.split('/');
+        if (parts.length !== 2) return false;
+
+        const ip = parts[0];
+        const prefix = parseInt(parts[1], 10);
+
+        if (!isValidIp(ip)) return false;
+        if (!Number.isFinite(prefix) || prefix < 0 || prefix > 32) return false;
+
+        return true;
+    }
+
+    function validateTcpFields() {
+        const enabled = document.getElementById('tcp_enable').checked;
+        const portField = document.getElementById('tcp_port');
+        const whitelistField = document.getElementById('tcp_whitelist');
+
+        if (enabled) {
+            const port = parseInt(portField.value, 10);
+            const whitelist = whitelistField.value.trim();
+            portField.classList.toggle('error', isNaN(port) || port < 1024 || port > 65535);
+
+            let whitelistValid = true;
+            if (whitelist) {
+                const entries = whitelist.split(/[,\s]+/).filter(s => s.trim());
+                whitelistValid = entries.length > 0 && entries.every(entry => isValidCidr(entry));
+            }
+            whitelistField.classList.toggle('error', !whitelistValid);
+        } else {
+            portField.classList.remove('error');
+            whitelistField.classList.remove('error');
+        }
+        updateSaveButton('tcp');
+    }
+
+    function isTcpFormValid() {
+        const enabled = document.getElementById('tcp_enable').checked;
+        if (!enabled) return true;
+        const port = parseInt(document.getElementById('tcp_port').value, 10);
+        const whitelist = document.getElementById('tcp_whitelist').value.trim();
+
+        if (isNaN(port) || port < 1024 || port > 65535) return false;
+
+        if (whitelist) {
+            const entries = whitelist.split(/[,\s]+/).filter(s => s.trim());
+            if (entries.length === 0) return false;
+            return entries.every(entry => isValidCidr(entry));
+        }
+        return true;
+    }
+
     function setupHandlers() {
+        const powerField = document.getElementById('halow_power_dbm');
+        const freqField = document.getElementById('halow_central_freq');
+
+        powerField.addEventListener('input', validateHalowFields);
+        freqField.addEventListener('input', validateHalowFields);
+
         document.getElementById('halow_mcs_index').addEventListener('change', updateBandwidthDisabled);
         document.getElementById('save_halow').addEventListener('click', saveHalow);
 
-        document.getElementById('lbt_uen').addEventListener('change', updateLbtUtilDisabled);
+        document.getElementById('lbt_uen').addEventListener('change', () => { updateLbtUtilDisabled(); updateSaveButton('lbt'); });
+        document.getElementById('lbt_umax').addEventListener('input', () => updateSaveButton('lbt'));
         document.getElementById('save_lbt').addEventListener('click', saveLbt);
 
-        document.getElementById('net_dhcp').addEventListener('change', updateNetDisabled);
+        document.getElementById('net_dhcp').addEventListener('change', () => { updateNetDisabled(); validateNetFields(); });
+        document.getElementById('net_ip_address').addEventListener('input', validateNetFields);
+        document.getElementById('net_gw_address').addEventListener('input', validateNetFields);
+        document.getElementById('net_netmask').addEventListener('input', validateNetFields);
         document.getElementById('save_net').addEventListener('click', saveNet);
 
-        document.getElementById('slip_enable').addEventListener('change', updateSlipDisabled);
+        document.getElementById('slip_enable').addEventListener('change', () => { updateSlipDisabled(); validateSlipFields(); });
+        document.getElementById('slip_baud').addEventListener('input', validateSlipFields);
+        document.getElementById('slip_ip_address').addEventListener('input', validateSlipFields);
+        document.getElementById('slip_gw_address').addEventListener('input', validateSlipFields);
         document.getElementById('save_slip').addEventListener('click', saveSlip);
 
-        document.getElementById('log_udp_enable').addEventListener('change', updateLogDisabled);
+        document.getElementById('log_udp_enable').addEventListener('change', () => { updateLogDisabled(); validateLogFields(); });
+        document.getElementById('log_udp_host').addEventListener('input', validateLogFields);
+        document.getElementById('log_udp_port').addEventListener('input', validateLogFields);
         document.getElementById('save_log').addEventListener('click', saveLog);
 
-        document.getElementById('tcp_enable').addEventListener('change', updateTcpDisabled);
+        document.getElementById('tcp_enable').addEventListener('change', () => { updateTcpDisabled(); validateTcpFields(); });
+        document.getElementById('tcp_port').addEventListener('input', validateTcpFields);
+        document.getElementById('tcp_whitelist').addEventListener('input', validateTcpFields);
         document.getElementById('save_tcp').addEventListener('click', saveTcp);
 
         document.getElementById('telemetry_en').addEventListener('change', updateTelemetryDisabled);
@@ -294,7 +534,12 @@
     function updateBandwidthDisabled() {
         const mcs = document.getElementById('halow_mcs_index').value;
         const bw = document.getElementById('halow_bandwidth');
-        bw.disabled = (mcs === 'MCS10');
+        if (mcs === 'MCS10') {
+            bw.value = '1 MHz';
+            bw.disabled = true;
+        } else {
+            bw.disabled = false;
+        }
     }
 
     function updateLbtUtilDisabled() {
@@ -1009,6 +1254,7 @@
         setInput('net_gw_address', net.gw_address);
         setInput('net_netmask', net.netmask);
         updateNetDisabled();
+        validateNetFields();
 
         const slip = pick(state?.slip, state?.api_slip_cfg, state?.slip_cfg);
         setCheckbox('slip_enable', slip.enable);
@@ -1016,12 +1262,14 @@
         setInput('slip_ip_address', slip.ip_address ?? slip.ip);
         setInput('slip_gw_address', slip.gw_address ?? slip.gw);
         updateSlipDisabled();
+        validateSlipFields();
 
         const logCfg = pick(state?.log, state?.logs, state?.api_log_cfg, state?.log_cfg, state?.api_logs_cfg, state?.logs_cfg);
         setCheckbox('log_udp_enable', logCfg.udp_enable ?? logCfg.enable);
         setInput('log_udp_host', logCfg.host ?? logCfg.ip_address);
         setInput('log_udp_port', logCfg.port);
         updateLogDisabled();
+        validateLogFields();
 
         const tcp = pick(state?.tcp, state?.api_tcp_server_cfg, state?.tcp_server_cfg);
         setCheckbox('tcp_enable', tcp.enable);
@@ -1029,6 +1277,7 @@
         setInput('tcp_whitelist', tcp.whitelist);
         setText('tcp_client', tcp.connected);
         updateTcpDisabled();
+        validateTcpFields();
 
         const telemetry = pick(state?.telemetry, state?.api_telemetry_cfg, state?.telemetry_cfg);
         setCheckbox('telemetry_en', telemetry.en);
@@ -1082,6 +1331,13 @@
     }
 
     async function saveHalow() {
+        const powerField = document.getElementById('halow_power_dbm');
+        const freqField = document.getElementById('halow_central_freq');
+
+        if (powerField.classList.contains('error') || freqField.classList.contains('error')) {
+            return;
+        }
+
         const payload = readHalowForm();
         try {
             await postJson('/api/halow_cfg', payload);

@@ -258,6 +258,11 @@ fieldset h4 {
     background: #fff1f2 !important;
 }
 
+input.error {
+    border-color: #dc2626 !important;
+    background: #fff1f2 !important;
+}
+
 .panel-actions button:disabled {
     background: #9ca3af;
     cursor: not-allowed;
