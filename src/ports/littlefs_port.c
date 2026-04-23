@@ -1,5 +1,5 @@
 #include "sys_config.h"
-#define LOG_LOCAL_LEVEL LOG_LEVEL_LITTLEFS
+//#define LOG_LOCAL_LEVEL LOG_LEVEL_LITTLEFS
 
 #include "basic_include.h"
 #include <stdint.h>
