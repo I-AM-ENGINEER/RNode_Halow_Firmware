@@ -72,6 +72,7 @@ targets:
       - csky/csi_driver
       - csky/csi_kernel/rhino/arch/include
       - csky/csi_kernel/rhino/core/include
+      - sdk/lib/lmac
       - sdk/lib/net/libcurl
       - src/atcmd.c
       - sdk/lib/usb_app
@@ -132,7 +133,7 @@ targets:
             output-debug-info: enable
           linker:
             $disableOutputTask: true
-            LD_FLAGS: -mcpu=ck803 -nostartfiles -Wl,--gc-sections -Wl,-zmax-page-size=1024 -Wl,-Map=project.map -Wl,--ckmap=txw4002a.map -Wl,--wrap=lwip_netif_hook_inputdata -Wl,--wrap=lmac_send_bss_announcement
+            LD_FLAGS: -mcpu=ck803 -nostartfiles -Wl,--gc-sections -Wl,-zmax-page-size=1024 -Wl,-Map=project.map -Wl,--ckmap=txw4002a.map -Wl,--wrap=lwip_netif_hook_inputdata -Wl,--wrap=lmac_send_bss_announcement -Wl,--wrap=ah_rfspi_write -Wl,--wrap=ah_rfspi_read
             LIB_FLAGS: -L libs -lcore -lnetutils -lcommon -losal -llmac -lm
             linker-type: gcc
             output-format: elf
@@ -141,7 +142,7 @@ targets:
     uploadConfigMap:
       Custom:
         bin: ""
-        commandLine: python ${workspaceFolder}/flasher/cklnk-flasher.py ${OutDir}/${ProjectName}.elf
+        commandLine: python ${workspaceFolder}/flasher/cklnk-flasher.py ${OutDir}/${ProjectName}.elf --reset
         eraseChipCommand: ""
       JLink:
         baseAddr: ""

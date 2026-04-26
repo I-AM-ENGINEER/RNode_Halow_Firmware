@@ -87,6 +87,7 @@ static struct os_semaphore g_tx_vacated_sem;
 
 extern void lmac_kick_tx_task( void );
 
+
 // Disable broadcast
 int32_t __wrap_lmac_send_bss_announcement(void){
     return 0;
@@ -257,12 +258,12 @@ void halow_config_apply(const halow_config_t *cfg){
 }
 
 static void halow_modem_set_default(void){
-    static uint8 g_mac[6] = {
-        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF
-    };
+    uint8_t g_mac[6];
+
+    get_mac(g_mac);
 
     /* ---- basic bring-up ---- */
-    g_ops->ioctl(g_ops, LMAC_IOCTL_SET_MAC_ADDR, (uint32)(uintptr_t)g_mac, 0);
+    lmac_set_mac_addr(g_ops, 0, g_mac);
 
     /* ---- RF / channel ---- */
     lmac_set_freq(g_ops, HALOW_CONFIG_CENTRAL_FREQ_DEF);
