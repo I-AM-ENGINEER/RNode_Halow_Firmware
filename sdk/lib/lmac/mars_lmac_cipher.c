@@ -9,8 +9,8 @@
 
 extern void hgprintf(const char *fmt, ...);
 
-/* ah_cipher @ 0x20054f54 — defined here (was in original mars_lmac_cipher.o) */
-void *ah_cipher;
+/* ah_cipher is defined here, as in the original object. */
+void *ah_cipher = 0;
 
 /* ---- IRQ handler ---------------------------------------------------- */
 
@@ -56,8 +56,8 @@ int ah_ce_start(lmac_ah_cipher_ctx_t *ctx, const ah_ce_cfg_t *cfg)
     uint8_t tmp[30];
 
     if (os_mutex_lock(&ctx->mutex, -1) != 0) {
-        hgprintf("CE mutex lock failed\n");
-        hgprintf("CE start error\n");
+        hgprintf("\2cipher engine ce_lock timeout!\r\n");
+        hgprintf("\2LMAC_AH_CE_FAIL\r\n");
         os_mutex_unlock(&ctx->mutex);
         return -1;
     }
@@ -111,7 +111,7 @@ int ah_ce_start(lmac_ah_cipher_ctx_t *ctx, const ah_ce_cfg_t *cfg)
         goto iv_setup;
 
     } else {
-        hgprintf("CE start error\n");
+        hgprintf("\2LMAC_AH_CE_FAIL\r\n");
         os_mutex_unlock(&ctx->mutex);
         return -1;
     }
@@ -158,7 +158,7 @@ iv_setup:
 
     uint8_t key2_len = cfg->key2_len;
     if (key2_len >= 31) {
-        hgprintf("CE start error\n");
+        hgprintf("\2LMAC_AH_CE_FAIL\r\n");
         os_mutex_unlock(&ctx->mutex);
         return -1;
     }
@@ -191,7 +191,7 @@ iv_setup:
     {
         uint16_t data_len = cfg->data_len;
         if (data_len >= 16385) {
-            hgprintf("CE start error\n");
+            hgprintf("\2LMAC_AH_CE_FAIL\r\n");
             os_mutex_unlock(&ctx->mutex);
             return -1;
         }
@@ -211,23 +211,19 @@ iv_setup:
         base[0x64 / 4] |= 1u;
         base[0x60 / 4] |= 1u;
     } else {
-        hgprintf("CE start error\n");
+        hgprintf("\2LMAC_AH_CE_FAIL\r\n");
         os_mutex_unlock(&ctx->mutex);
         return -1;
     }
 
-    /* wait for CE completion (os_sema_down returns 0 on timeout, non-zero on success) */
     if (os_sema_down(&ctx->sema, 100) == 0) {
-        /* timeout */
-        hgprintf("CE timeout\n");
-        hgprintf("CE start error\n");
+        hgprintf("\2cipher engine ce_done timeout!\r\n");
+        hgprintf("\2LMAC_AH_CE_FAIL\r\n");
         os_mutex_unlock(&ctx->mutex);
         return -1;
     }
 
-    /* CE completed */
     if (dir != 1) {
-        /* encrypt success */
         os_mutex_unlock(&ctx->mutex);
         return 0;
     }
@@ -240,12 +236,12 @@ iv_setup:
         uint32_t e2 = base[0x74 / 4];
         uint32_t e3 = base[0x78 / 4];
         uint32_t e4 = base[0x7c / 4];
-        hgprintf("CE decrypt error: %08x %08x %08x %08x\n", e1, e2, e3, e4);
+        hgprintf("\2hw_MIC: %x %x %x %x\r\n", e1, e2, e3, e4);
     }
     status = base[0x68 / 4];
     if (status & 2) {
-        hgprintf("CE decrypt failed mode=%u\n", (unsigned)cfg->mode);
-        dump_hex("CE key", (uint8 *)cfg->key, cfg->mode, 1);
+        hgprintf("\2MIC_ERROR! key_size= %d\r\n", (unsigned)cfg->mode);
+        dump_hex("key: ", (uint8 *)cfg->key, cfg->mode, 1);
         os_mutex_unlock(&ctx->mutex);
         return -1;
     }
