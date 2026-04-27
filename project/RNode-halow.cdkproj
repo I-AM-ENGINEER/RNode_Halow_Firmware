@@ -2362,6 +2362,18 @@ Board: txw4002a
         <File Name="../sdk/lib/lmac/mars_tdma.c" ExcludeProjConfig="">
           <FileOption/>
         </File>
+        <File Name="../sdk/lib/lmac/mars_dbgpath_parameter_v2.c">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/lmac/mars_ahrf_iq_curve.c" ExcludeProjConfig="">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/lmac/mars_ahrf_parameter.c" ExcludeProjConfig="">
+          <FileOption/>
+        </File>
+        <File Name="../sdk/lib/lmac/mars_ah_wphy_parameter_v2.c" ExcludeProjConfig="">
+          <FileOption/>
+        </File>
       </VirtualDirectory>
     </VirtualDirectory>
     <VirtualDirectory Name="hal">
@@ -2539,24 +2551,6 @@ Board: txw4002a
       <FileOption/>
     </File>
   </VirtualDirectory>
-  <DebugSessions>
-    <watchExpressions>psalive:1;sdata:1;__sleep_data_start:1;__sleep_data_stop:1;g_rx_cb:1;g_ops:1;ah_lmac_tx:1;g_ops:1;ah_lmac:1;netif:1</watchExpressions>
-    <memoryExpressions>0x50000000;0x2009e49c;;</memoryExpressions>
-    <statistics>;;MHZ;;MHZ;;up</statistics>
-    <peripheralTabs>
-      <Tab disFormat="Hex">SYSCTRL</Tab>
-      <Tab disFormat="Hex">ZH_RFSPI</Tab>
-      <Tab disFormat="Hex">RFADCDIG</Tab>
-      <Tab disFormat="Hex">RFDIGCAL</Tab>
-      <Tab disFormat="Hex">GMAC</Tab>
-      <Tab disFormat="Hex">MODEM</Tab>
-    </peripheralTabs>
-    <WatchDisplayFormat>1</WatchDisplayFormat>
-    <LocalDisplayFormat>1</LocalDisplayFormat>
-    <debugLayout/>
-    <memoryTabColSizeExpressions>100:4;100:8;100:8;100:8;</memoryTabColSizeExpressions>
-    <QuickWatchDisplayFormat>1</QuickWatchDisplayFormat>
-  </DebugSessions>
   <BuildConfigs>
     <BuildConfig Name="BuildSet">
       <Target>
@@ -2689,7 +2683,7 @@ Board: txw4002a
         <LDFile>$(ProjectPath)\..\gcc_csky.ld</LDFile>
         <LibName>m</LibName>
         <LibPath/>
-        <OtherFlags>-Wl,-zmax-page-size=1024  -Wl,-Map=project.map -Wl,--wrap=lwip_netif_hook_inputdata -Wl,--wrap=lmac_send_bss_announcement -Wl,--wrap=ah_rfspi_write -Wl,--wrap=ah_rfspi_read $(ProjectPath)/../libs/obj/libcommon/common_c_misc.o $(ProjectPath)/../libs/obj/libcommon/common_sleepcb.o $(ProjectPath)/../libs/obj/libcommon/common_sysevt.o $(ProjectPath)/../libs/obj/libcommon/heap_mmpool.o $(ProjectPath)/../libs/obj/libcommon/heap_sysheap.o $(ProjectPath)/../libs/obj/libcommon/ota_eth_ota.o $(ProjectPath)/../libs/obj/libcommon/ota_fw.o $(ProjectPath)/../libs/obj/libcommon/ota_fwinfo.o $(ProjectPath)/../libs/obj/libcommon/skb_skb_list.o $(ProjectPath)/../libs/obj/libcommon/skb_skb_pool.o $(ProjectPath)/../libs/obj/libcommon/syscfg_syscfg.o $(ProjectPath)/../libs/obj/libcommon/xmodem_xmodem.o $(ProjectPath)/../libs/obj/libcommon/xmodem_xmodem_fw.o $(ProjectPath)/../libs/obj/libcore/emac_hg_gmac_eva.o $(ProjectPath)/../libs/obj/libcore/slave_hgsdio20_slave.o $(ProjectPath)/../libs/obj/libcore/txw4002ack803_startup.o $(ProjectPath)/../libs/obj/libcore/txw4002ack803_sysctrl.o $(ProjectPath)/../libs/obj/libcore/usb11_hgusb11_base.o $(ProjectPath)/../libs/obj/libcore/usb11_hgusb11_dev_api.o $(ProjectPath)/../libs/obj/libcore/usb11_hgusb11_dev_ep0.o $(ProjectPath)/../libs/obj/libcore/usb11_hgusb11_dev_tbl.o $(ProjectPath)/../libs/obj/liblmac/mars_ah_dsleep.o $(ProjectPath)/../libs/obj/liblmac/mars_ah_wphy.o $(ProjectPath)/../libs/obj/liblmac/mars_ah_wphy_parameter_v2.o $(ProjectPath)/../libs/obj/liblmac/mars_ahrf.o $(ProjectPath)/../libs/obj/liblmac/mars_ahrf_iq_curve.o $(ProjectPath)/../libs/obj/liblmac/mars_ahrf_parameter.o $(ProjectPath)/../libs/obj/liblmac/mars_dbgpath.o $(ProjectPath)/../libs/obj/liblmac/mars_dbgpath_parameter_v2.o $(ProjectPath)/../libs/obj/liblmac/mars_lmac.o $(ProjectPath)/../libs/obj/liblmac/mars_lmac_cfg.o $(ProjectPath)/../libs/obj/liblmac/mars_lmac_cipher.o $(ProjectPath)/../libs/obj/liblmac/mars_lmac_hw.o $(ProjectPath)/../libs/obj/liblmac/mars_lmac_rc.o $(ProjectPath)/../libs/obj/liblmac/mars_lmac_rx.o $(ProjectPath)/../libs/obj/liblmac/mars_lmac_test.o $(ProjectPath)/../libs/obj/liblmac/mars_lmac_tx.o $(ProjectPath)/../libs/obj/liblmac/mars_lmac_util.o $(ProjectPath)/../libs/obj/liblmac/mars_rfdigicali.o $(ProjectPath)/../libs/obj/libnetutils/dhcpd_dhcpd.o $(ProjectPath)/../libs/obj/libnetutils/utils_chksum.o $(ProjectPath)/../libs/obj/libnetutils/utils_dnsred.o $(ProjectPath)/../libs/obj/libnetutils/utils_netat.o $(ProjectPath)/../libs/obj/libnetutils/utils_netlog.o $(ProjectPath)/../libs/obj/libnetutils/utils_sntp.o $(ProjectPath)/../libs/obj/libnetutils/utils_udp.o $(ProjectPath)/../libs/obj/libnetutils/utils_wnbota.o $(ProjectPath)/../libs/obj/libosal/csky_condv.o $(ProjectPath)/../libs/obj/libosal/csky_msgqueue.o $(ProjectPath)/../libs/obj/libosal/csky_mutex.o $(ProjectPath)/../libs/obj/libosal/csky_semaphore.o $(ProjectPath)/../libs/obj/libosal/csky_sleep.o $(ProjectPath)/../libs/obj/libosal/csky_task.o $(ProjectPath)/../libs/obj/libosal/csky_time.o $(ProjectPath)/../libs/obj/libosal/csky_timer.o $(ProjectPath)/../libs/obj/libosal/osal_work.o</OtherFlags>
+        <OtherFlags>-Wl,-zmax-page-size=1024  -Wl,-Map=project.map -Wl,--wrap=lwip_netif_hook_inputdata -Wl,--wrap=lmac_send_bss_announcement -Wl,--wrap=ah_rfspi_write -Wl,--wrap=ah_rfspi_read $(ProjectPath)/../libs/obj/libcommon/common_c_misc.o $(ProjectPath)/../libs/obj/libcommon/common_sleepcb.o $(ProjectPath)/../libs/obj/libcommon/common_sysevt.o $(ProjectPath)/../libs/obj/libcommon/heap_mmpool.o $(ProjectPath)/../libs/obj/libcommon/heap_sysheap.o $(ProjectPath)/../libs/obj/libcommon/ota_eth_ota.o $(ProjectPath)/../libs/obj/libcommon/ota_fw.o $(ProjectPath)/../libs/obj/libcommon/ota_fwinfo.o $(ProjectPath)/../libs/obj/libcommon/skb_skb_list.o $(ProjectPath)/../libs/obj/libcommon/skb_skb_pool.o $(ProjectPath)/../libs/obj/libcommon/syscfg_syscfg.o $(ProjectPath)/../libs/obj/libcommon/xmodem_xmodem.o $(ProjectPath)/../libs/obj/libcommon/xmodem_xmodem_fw.o $(ProjectPath)/../libs/obj/libcore/emac_hg_gmac_eva.o $(ProjectPath)/../libs/obj/libcore/slave_hgsdio20_slave.o $(ProjectPath)/../libs/obj/libcore/txw4002ack803_startup.o $(ProjectPath)/../libs/obj/libcore/txw4002ack803_sysctrl.o $(ProjectPath)/../libs/obj/libcore/usb11_hgusb11_base.o $(ProjectPath)/../libs/obj/libcore/usb11_hgusb11_dev_api.o $(ProjectPath)/../libs/obj/libcore/usb11_hgusb11_dev_ep0.o $(ProjectPath)/../libs/obj/libcore/usb11_hgusb11_dev_tbl.o $(ProjectPath)/../libs/obj/liblmac/mars_ah_dsleep.o $(ProjectPath)/../libs/obj/liblmac/mars_ah_wphy.o $(ProjectPath)/../libs/obj/liblmac/mars_ahrf.o $(ProjectPath)/../libs/obj/liblmac/mars_dbgpath.o $(ProjectPath)/../libs/obj/liblmac/mars_lmac.o $(ProjectPath)/../libs/obj/liblmac/mars_lmac_cfg.o $(ProjectPath)/../libs/obj/liblmac/mars_lmac_cipher.o $(ProjectPath)/../libs/obj/liblmac/mars_lmac_hw.o $(ProjectPath)/../libs/obj/liblmac/mars_lmac_rc.o $(ProjectPath)/../libs/obj/liblmac/mars_lmac_rx.o $(ProjectPath)/../libs/obj/liblmac/mars_lmac_test.o $(ProjectPath)/../libs/obj/liblmac/mars_lmac_tx.o $(ProjectPath)/../libs/obj/liblmac/mars_lmac_util.o $(ProjectPath)/../libs/obj/liblmac/mars_rfdigicali.o $(ProjectPath)/../libs/obj/libnetutils/dhcpd_dhcpd.o $(ProjectPath)/../libs/obj/libnetutils/utils_chksum.o $(ProjectPath)/../libs/obj/libnetutils/utils_dnsred.o $(ProjectPath)/../libs/obj/libnetutils/utils_netat.o $(ProjectPath)/../libs/obj/libnetutils/utils_netlog.o $(ProjectPath)/../libs/obj/libnetutils/utils_sntp.o $(ProjectPath)/../libs/obj/libnetutils/utils_udp.o $(ProjectPath)/../libs/obj/libnetutils/utils_wnbota.o $(ProjectPath)/../libs/obj/libosal/csky_condv.o $(ProjectPath)/../libs/obj/libosal/csky_msgqueue.o $(ProjectPath)/../libs/obj/libosal/csky_mutex.o $(ProjectPath)/../libs/obj/libosal/csky_semaphore.o $(ProjectPath)/../libs/obj/libosal/csky_sleep.o $(ProjectPath)/../libs/obj/libosal/csky_task.o $(ProjectPath)/../libs/obj/libosal/csky_time.o $(ProjectPath)/../libs/obj/libosal/csky_timer.o $(ProjectPath)/../libs/obj/libosal/osal_work.o</OtherFlags>
         <AutoLDFile>no</AutoLDFile>
         <LinkType/>
         <IncludeAllLibs>no</IncludeAllLibs>
@@ -2782,4 +2776,15 @@ Board: txw4002a
       </Flash>
     </BuildConfig>
   </BuildConfigs>
+  <DebugSessions>
+    <watchExpressions>psalive:1;sdata:1;__sleep_data_start:1;__sleep_data_stop:1;g_rx_cb:1;g_ops:1;ah_lmac_tx:1;g_ops:1;ah_lmac:1;netif:1</watchExpressions>
+    <memoryExpressions>0x50000000;0x2009e49c;;</memoryExpressions>
+    <statistics>;;MHZ;;MHZ;;up</statistics>
+    <peripheralTabs/>
+    <WatchDisplayFormat>1</WatchDisplayFormat>
+    <LocalDisplayFormat>1</LocalDisplayFormat>
+    <debugLayout/>
+    <memoryTabColSizeExpressions>100:4;100:8;100:8;100:8;</memoryTabColSizeExpressions>
+    <QuickWatchDisplayFormat>1</QuickWatchDisplayFormat>
+  </DebugSessions>
 </Project>
