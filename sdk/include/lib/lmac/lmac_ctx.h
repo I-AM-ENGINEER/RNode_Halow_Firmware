@@ -347,6 +347,38 @@ typedef struct {
 } lmac_ah_rx_ctx_t;
 
 /* ============================================================================
+   Cipher Engine Context
+   ============================================================================
+   Layout confirmed from mars_lmac_cipher.S disassembly:
+     ah_ce_init:  mutex at +4, sema at +12, irq_num at +0x14
+     ah_ce_start: base_addr at +0, mutex at +4, sema at +12
+   ========================================================================== */
+
+typedef struct lmac_ah_cipher_ctx {
+    volatile uint32_t   *base_addr;    // [0x00] CE hardware register base
+    struct os_mutex      mutex;        // [0x04] access mutex (8 bytes)
+    struct os_semaphore  sema;         // [0x0C] completion semaphore (8 bytes)
+    uint32_t             irq_num;      // [0x14] interrupt number
+} lmac_ah_cipher_ctx_t;
+
+/* Config struct passed to ah_ce_start (layout from assembly offsets) */
+typedef struct ah_ce_cfg {
+    const uint8_t *key;        // [0x00] key pointer
+    uint8_t        mode;       // [0x04] cipher mode (0=AES-CCM, 2=WEP-like)
+    uint8_t        ctrl5;      // [0x05] lower nibble → CE_MODE bits[3:0]
+    uint8_t        ctrl6;      // [0x06] bit0 → CE_MODE bit4
+    uint8_t        ctrl7;      // [0x07] bit0 → CE_MODE bit5
+    const uint8_t *iv;         // [0x08] IV pointer (6 bytes used)
+    const uint8_t *aad;        // [0x0C] AAD pointer (6 bytes used)
+    const uint8_t *key2;       // [0x10] secondary/GHASH key pointer
+    uint8_t        key2_len;   // [0x14] secondary key length (must be < 31)
+    uint8_t        direction;  // [0x15] 0=encrypt, 1=decrypt
+    uint16_t       data_len;   // [0x16] data length (must be < 16385)
+    uint32_t       src_addr;   // [0x18]
+    uint32_t       dst_addr;   // [0x1C]
+} ah_ce_cfg_t;
+
+/* ============================================================================
    External Global Variables (from lmac_globals.h)
    ========================================================================== */
 

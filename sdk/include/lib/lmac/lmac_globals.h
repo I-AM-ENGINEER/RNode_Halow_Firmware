@@ -17,7 +17,6 @@ extern lmac_ctx_t ah_lmac;
 extern lmac_ah_tx_ctx_t ah_lmac_tx;
 
 // RX subsystem context (1416 bytes, opaque) @ 0x20054f68
-typedef struct { uint8_t _opaque[0x588]; } lmac_ah_rx_ctx_t;
 extern lmac_ah_rx_ctx_t ah_lmac_rx;
 
 // Factory-test/calibration context (76 bytes) @ 0x20064348
@@ -68,7 +67,6 @@ extern uint32_t sys_con8_bak;  // saved SYS_CON8 register @ 0x20055e04
 extern uint32_t LMAC;
 
 // Deep-sleep context (300 bytes, opaque) @ 0x20005504
-typedef struct { uint8_t _opaque[0x12c]; } lmac_dsleep_ctx_t;
 extern lmac_dsleep_ctx_t ah_dsleep;
 
 // PHY power/config state (88 bytes, opaque) @ 0x20050e28
