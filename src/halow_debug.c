@@ -3,7 +3,7 @@
 
 extern int __real_ah_rfspi_write(uint32_t addr, uint32_t val);
 extern uint16_t __real_ah_rfspi_read(uint32_t addr);
-extern uint16_t __real_ah_rfspi_write_and_read(uint32_t v);
+extern uint16_t __real_ah_rfspi_write_and_read(uint32_t addr, uint32_t data);
 
 volatile uint32_t g_rfspi_last_write_arg0;
 volatile uint32_t g_rfspi_last_write_arg1;

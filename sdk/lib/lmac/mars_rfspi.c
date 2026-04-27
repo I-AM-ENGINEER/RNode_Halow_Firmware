@@ -22,7 +22,7 @@ void ah_rfspi_close(void) {
     val = reg_base[1];
     val &= ~0x07U;
     reg_base[1] = val;
-    ah_rfspi_get_pd();
+    rfspi_pin_func(0);
 }
 
 uint32_t ah_rfspi_get_pd(void) {
@@ -61,7 +61,7 @@ int ah_rfspi_open(int arg0, uint32_t arg1, uint32_t arg2) {
     calc >>= 1;
     uint32_t mul = arg1 * 1000000;
     int call_arg = (mul != calc) ? 0 : 1;
-    ah_rfspi_set_trig_mode((uint32_t)call_arg);
+    ah_rfspi_set_rx_dly((uint32_t)call_arg);
     return result;
 }
 
@@ -78,6 +78,7 @@ uint16_t ah_rfspi_read(uint16_t reg_addr) {
     rfspi_base[9] = 0U;
     rfspi_base[4] = ((uint32_t)reg_addr << 16) & 0x7FFF0000U;
     while ((rfspi_base[3] & 0x400U) == 0) {}
+    ah_rfspi_clear_pd();
     reg_val = rfspi_base[1];
     reg_val |= 8U;
     rfspi_base[1] = reg_val;
@@ -145,11 +146,11 @@ void ah_rfspi_write(uint16_t addr, uint32_t data) {
     
     reg_base[8] = 1U;
     reg_base[9] = 0U;
-    
+
     data &= 0x7FFFFFFFU;
     data |= (1U << 31);
-    data |= ((uint32_t)addr << 16);
-    
+    data |= ((uint32_t)addr << 16) & 0x7FFF0000U;
+
     reg_base[4] = data;
     
     timeout = 128U << 9;
@@ -162,16 +163,15 @@ void ah_rfspi_write(uint16_t addr, uint32_t data) {
             break;
         }
     }
-    
+    ah_rfspi_clear_pd();
     reg_val = reg_base[1];
     reg_val |= (1U << 3);
     reg_base[1] = reg_val;
 }
 
-void ah_rfspi_write_and_read(uint32_t arg0) {
-    // uint32_t r4 = arg0;
-    // ah_rfspi_write_and_read(r4);
-    // ah_rfspi_write_and_read(r4);
+uint16_t ah_rfspi_write_and_read(uint32_t addr, uint32_t data) {
+    ah_rfspi_write((uint16_t)addr, data);
+    return ah_rfspi_read((uint16_t)addr);
 }
 
 void rfspi_pin_func(uint32_t mode) {

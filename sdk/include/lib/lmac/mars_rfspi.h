@@ -31,8 +31,8 @@ int ah_rfspi_set_trig_mode(uint32_t mode);
 // conf=95%  compile=ok  // Writes a 32-bit data word to RF SPI register at given 16-bit address, with hardware handshake and timeout.
 void ah_rfspi_write(uint16_t addr, uint32_t data);
 
-// conf=0%  compile=ok  // Infinite recursion due to self-call; likely a placeholder or stub function.
-void ah_rfspi_write_and_read(uint32_t arg0);
+// conf=95%  compile=ok  // Writes addr/data via ah_rfspi_write, then reads back result via ah_rfspi_read.
+uint16_t ah_rfspi_write_and_read(uint32_t addr, uint32_t data);
 
 // conf=95%  compile=ok  // Configures RF SPI pin multiplexing and direction based on mode (1=alt func 3, 2=alt func 4, 3=alt func 1, else GPIO input).
 void rfspi_pin_func(uint32_t mode);
