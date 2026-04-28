@@ -1,53 +1,50 @@
 // Auto-reconstructed: mars_lmac_hw.c
 #include "typesdef.h"
-
-uint32 LMAC = 0x40008000UL;
+#include "lib/lmac/lmac_regmap.h"
 
 extern void lmac_rx_cleanup_info(void);
 
-static inline volatile uint32 *lmac_regs(void)
-{
-    return (volatile uint32 *)LMAC;
-}
+/* Global LMAC base pointer for compatibility with precompiled libs */
+uint32 LMAC = LMAC_HW_BASE_ADDR;
 
 void lhw_enable_irq_ac(void)
 {
-    volatile uint32 *reg = lmac_regs();
-    reg[0x44 / 4] |= 0x80U;
+    volatile uint32 *base = (volatile uint32 *)LMAC;
+    *(base + LMAC_REG_IDX(LMAC_REG_IRQ_EN)) |= 0x80U;
 }
 
 void lhw_start_rx(uint32 flags)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
     uint32 val;
 
-    if ((reg[0x34 / 4] & 0x00f000f0U) != 0) {
+    if ((*(base + LMAC_REG_IDX(LMAC_REG_FSM_STATE)) & LMAC_FSM_BUSY_MASK) != 0) {
         return;
     }
 
-    reg[0x1c / 4] &= 0xffffff00U;
-    reg[0x1c / 4] |= flags << 8;
-    val = reg[0x30 / 4];
-    val &= ~(1U << 4);
-    val &= ~(1U << 5);
-    reg[0x30 / 4] = val;
-    reg[0x30 / 4] |= 1U << 5;
-    reg[0x30 / 4] |= 1U;
-    reg[0x30 / 4] &= ~(1U << 13);
+    *(base + LMAC_REG_IDX(LMAC_REG_TIMING_CTRL)) &= 0xFFFF0000U;
+    *(base + LMAC_REG_IDX(LMAC_REG_TIMING_CTRL)) |= flags << 8;
+    val = *(base + LMAC_REG_IDX(LMAC_REG_FSM_CTRL));
+    val &= ~LMAC_FSM_TX_SEL;
+    val &= ~LMAC_FSM_RX_SEL;
+    *(base + LMAC_REG_IDX(LMAC_REG_FSM_CTRL)) = val;
+    *(base + LMAC_REG_IDX(LMAC_REG_FSM_CTRL)) |= LMAC_FSM_RX_SEL;
+    *(base + LMAC_REG_IDX(LMAC_REG_FSM_CTRL)) |= LMAC_FSM_START;
+    *(base + LMAC_REG_IDX(LMAC_REG_FSM_CTRL)) &= ~LMAC_FSM_RX_POST_CLEAR;
 }
 
 void lhw_abort_fsm(void)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
     uint32 val;
 
-    reg[0x48 / 4] = 0x1400U;
-    val = reg[0x44 / 4];
+    *(base + LMAC_REG_IDX(LMAC_REG_IRQ_CLR)) = 0x1400U;
+    val = *(base + LMAC_REG_IDX(LMAC_REG_IRQ_EN));
     val &= ~(1U << 10);
     val &= ~(1U << 12);
-    reg[0x44 / 4] = val;
-    reg[0x48 / 4] = 0x1400U;
-    reg[0x30 / 4] |= 2U;
+    *(base + LMAC_REG_IDX(LMAC_REG_IRQ_EN)) = val;
+    *(base + LMAC_REG_IDX(LMAC_REG_IRQ_CLR)) = 0x1400U;
+    *(base + LMAC_REG_IDX(LMAC_REG_FSM_CTRL)) |= LMAC_FSM_ABORT;
 
     for (uint32 i = 20; i != 0; i--) {
         __asm volatile ("nop");
@@ -55,20 +52,20 @@ void lhw_abort_fsm(void)
 
     lmac_rx_cleanup_info();
 
-    reg = lmac_regs();
-    reg[0x30 / 4] |= 2U;
-    reg[0x44 / 4] |= 1U << 10;
-    reg[0x44 / 4] |= 1U << 12;
+    *(base + LMAC_REG_IDX(LMAC_REG_FSM_CTRL)) |= LMAC_FSM_ABORT;
+    *(base + LMAC_REG_IDX(LMAC_REG_IRQ_EN)) |= 1U << 10;
+    *(base + LMAC_REG_IDX(LMAC_REG_IRQ_EN)) |= 1U << 12;
 }
 
 uint32 lhw_get_cca_remain(void)
 {
-    return lmac_regs()[0x20 / 4] & 0x7ffU;
+    volatile uint32 *base = (volatile uint32 *)LMAC;
+    return *(base + LMAC_REG_IDX(LMAC_REG_CCA_CTRL)) & 0x7ffU;
 }
 
 void lhw_start_cca(uint32 bw, uint32 dur)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
 
     if (bw >= 16) {
         bw = 15;
@@ -77,248 +74,249 @@ void lhw_start_cca(uint32 bw, uint32 dur)
         dur = 2047;
     }
 
-    reg[0x20 / 4] = ((uint8)bw << 12) + (uint16)dur + 2048U;
+    *(base + LMAC_REG_IDX(LMAC_REG_CCA_CTRL)) = ((uint8)bw << 12) + (uint16)dur + 2048U;
 }
 
 void lhw_start_tx(uint32 flags)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
     uint32 val;
 
-    reg[0x1c / 4] &= 0xffffff00U;
-    reg[0x1c / 4] |= flags;
-    val = reg[0x30 / 4];
-    val &= ~(1U << 4);
-    val &= ~(1U << 5);
-    reg[0x30 / 4] = val;
-    reg[0x30 / 4] |= 1U << 4;
-    reg[0x30 / 4] |= 1U;
+    *(base + LMAC_REG_IDX(LMAC_REG_TIMING_CTRL)) &= 0xffffff00U;
+    *(base + LMAC_REG_IDX(LMAC_REG_TIMING_CTRL)) |= flags;
+    val = *(base + LMAC_REG_IDX(LMAC_REG_FSM_CTRL));
+    val &= ~LMAC_FSM_TX_SEL;
+    val &= ~LMAC_FSM_RX_SEL;
+    *(base + LMAC_REG_IDX(LMAC_REG_FSM_CTRL)) = val;
+    *(base + LMAC_REG_IDX(LMAC_REG_FSM_CTRL)) |= LMAC_FSM_TX_SEL;
+    *(base + LMAC_REG_IDX(LMAC_REG_FSM_CTRL)) |= LMAC_FSM_START;
 }
 
 void lhw_irq_init(void)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
 
-    reg[0x44 / 4] = 0;
-    reg[0x48 / 4] = 0xffffffffU;
-    reg[0x44 / 4] |= 0x80U;
-    reg[0x44 / 4] |= 0x20U;
-    reg[0x44 / 4] |= 0x04U;
-    reg[0x44 / 4] |= 0x400U;
-    reg[0x44 / 4] |= 0x8000U;
-    reg[0x44 / 4] |= 0x2000U;
-    reg[0x44 / 4] |= 0x4000U;
-    reg[0x44 / 4] |= 1U << 18;
-    reg[0x5c / 4] = 25000U;
-    reg[0x44 / 4] |= 1U << 20;
-    reg[0x44 / 4] |= 0x1000U;
+    *(base + LMAC_REG_IDX(LMAC_REG_IRQ_EN)) = 0;
+    *(base + LMAC_REG_IDX(LMAC_REG_IRQ_CLR)) = 0xffffffffU;
+    *(base + LMAC_REG_IDX(LMAC_REG_IRQ_EN)) |= 0x80U;
+    *(base + LMAC_REG_IDX(LMAC_REG_IRQ_EN)) |= 0x20U;
+    *(base + LMAC_REG_IDX(LMAC_REG_IRQ_EN)) |= 0x04U;
+    *(base + LMAC_REG_IDX(LMAC_REG_IRQ_EN)) |= 0x400U;
+    *(base + LMAC_REG_IDX(LMAC_REG_IRQ_EN)) |= 0x8000U;
+    *(base + LMAC_REG_IDX(LMAC_REG_IRQ_EN)) |= 0x2000U;
+    *(base + LMAC_REG_IDX(LMAC_REG_IRQ_EN)) |= 0x4000U;
+    *(base + LMAC_REG_IDX(LMAC_REG_IRQ_EN)) |= 1U << 18;
+    *(base + LMAC_REG_IDX(LMAC_REG_END_TO_LIMIT)) = 25000U;
+    *(base + LMAC_REG_IDX(LMAC_REG_IRQ_EN)) |= 1U << 20;
+    *(base + LMAC_REG_IDX(LMAC_REG_IRQ_EN)) |= 0x1000U;
 }
 
 void lhw_cfg_sifs(uint32 sifs, uint32 slot, uint32 eifs)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
 
-    reg[0x1c / 4] = 0;
-    reg[0x1c / 4] |= sifs | (slot << 8) | (eifs << 24);
+    *(base + LMAC_REG_IDX(LMAC_REG_TIMING_CTRL)) &= 0U;
+    *(base + LMAC_REG_IDX(LMAC_REG_TIMING_CTRL)) |= sifs | (slot << 8) | (eifs << 24);
 }
 
 void lhw_cfg_tx_delay_before(uint32 unused, uint32 b, uint32 c, uint32 a)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
     uint32 val;
     (void)unused;
 
-    reg[0x78 / 4] &= ~0x7fffU;
+    *(base + LMAC_REG_IDX(LMAC_REG_TX_DELAY_BEFORE)) &= ~0x7fffU;
     val = (a & 0x1fU) | ((c & 0x1fU) << 5) | ((b & 0x1fU) << 10);
-    reg[0x78 / 4] |= val;
+    *(base + LMAC_REG_IDX(LMAC_REG_TX_DELAY_BEFORE)) |= val;
 }
 
 void lhw_cfg_tx_delay_after(uint32 a, uint32 b, uint32 c, uint32 d)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
     uint32 val;
 
-    reg[0x84 / 4] &= 0xc0c0c0c0U;
+    *(base + LMAC_REG_IDX(LMAC_REG_TX_DELAY_AFTER)) &= 0xc0c0c0c0U;
     val = ((a & 0x3fU) << 24) | ((b & 0x3fU) << 16) |
           ((c & 0x3fU) << 8) | (d & 0x3fU);
-    reg[0x84 / 4] |= val;
+    *(base + LMAC_REG_IDX(LMAC_REG_TX_DELAY_AFTER)) |= val;
 }
 
 void lhw_cfg_tx_dalay_dac_rf(uint32 dac, uint32 rf, uint32 pa)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
     uint32 val;
 
-    reg[0x8c / 4] &= ~0x0f3fU;
+    *(base + LMAC_REG_IDX(LMAC_REG_TX_DAC_RF_DELAY)) &= ~0x0f3fU;
     val = ((dac & 0x0fU) << 8) | (rf & 0x0fU) | ((pa & 3U) << 4);
-    reg[0x8c / 4] |= val;
+    *(base + LMAC_REG_IDX(LMAC_REG_TX_DAC_RF_DELAY)) |= val;
 }
 
 void lhw_cfg_phy_rx_delay(uint32 delay)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
 
-    reg[0xa0 / 4] &= 0x0fffffffU;
-    reg[0xa0 / 4] |= delay << 28;
+    *(base + LMAC_REG_IDX(LMAC_REG_PHY_RX_DELAY)) &= 0x0fffffffU;
+    *(base + LMAC_REG_IDX(LMAC_REG_PHY_RX_DELAY)) |= delay << 28;
 }
 
 void lhw_cfg_dma_list_cnt(uint32 cnt)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
 
-    reg[0x100 / 4] &= ~0x7fU;
-    reg[0x100 / 4] |= cnt & 0x7fU;
+    *(base + LMAC_REG_IDX(LMAC_REG_DMA_LIST_CNT)) &= ~0x7fU;
+    *(base + LMAC_REG_IDX(LMAC_REG_DMA_LIST_CNT)) |= cnt & 0x7fU;
 }
 
 void lhw_cfg_tx_sub_frm(uint32 idx, uint32 v0, uint32 v1)
 {
-    volatile uint32 *reg = lmac_regs();
-
-    *(volatile uint32 *)((uint32)reg + ((idx + 36U) << 3)) = v0;
-    *(volatile uint32 *)((uint32)reg + (idx << 3) + 0x124U) = v1;
+    volatile uint32 *base = (volatile uint32 *)LMAC;
+    *(base + LMAC_REG_IDX(LMAC_REG_TX_SUB_FRM_BASE + (idx << 3))) = v0;
+    *(base + LMAC_REG_IDX(LMAC_REG_TX_SUB_FRM_BASE + 4 + (idx << 3))) = v1;
 }
 
 void lhw_cfg_tx_delay_pa(uint32 delay)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
 
-    reg[0x8c / 4] &= 0xf8000000U;
-    reg[0x8c / 4] |= (delay & 0x1fU) << 12;
+    *(base + LMAC_REG_IDX(LMAC_REG_TX_DAC_RF_DELAY)) &= 0xFFFE0000U;
+    *(base + LMAC_REG_IDX(LMAC_REG_TX_DAC_RF_DELAY)) |= (delay & 0x1fU) << 12;
 }
 
 uint32 lhw_get_rx_frm_type(void)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
 
-    if ((reg[0xb4 / 4] & 0x100U) == 0) {
+    if ((*(base + LMAC_REG_IDX(LMAC_REG_RX_FRM_TYPE)) & 0x100U) == 0) {
         return 0;
     }
 
-    return (reg[0xb4 / 4] & 0x200U) ? 2U : 1U;
+    return (*(base + LMAC_REG_IDX(LMAC_REG_RX_FRM_TYPE)) & 0x200U) ? 2U : 1U;
 }
 
 uint32 lhw_get_rx_ndp_ind(void)
 {
-    volatile uint32 *reg;
+    volatile uint32 *base = (volatile uint32 *)LMAC;
     uint32 frm_type = lhw_get_rx_frm_type();
 
     if (frm_type == 2) {
         return 0;
     }
 
-    reg = lmac_regs();
     if (frm_type == 0) {
-        return (reg[0xa4 / 4] >> 25) & 1U;
+        return (*(base + LMAC_REG_IDX(LMAC_REG_NDP2M_LO)) >> 25) & 1U;
     }
 
-    return (reg[0xa8 / 4] >> 5) & 1U;
+    return (*(base + LMAC_REG_IDX(LMAC_REG_NDP2M_HI)) >> 5) & 1U;
 }
 
 uint64 lhw_get_ndp2m(void)
 {
-    volatile uint32 *reg = lmac_regs();
-    return ((uint64)reg[0xa8 / 4] << 32) | reg[0xa4 / 4];
+    volatile uint32 *base = (volatile uint32 *)LMAC;
+    return ((uint64)*(base + LMAC_REG_IDX(LMAC_REG_NDP2M_HI)) << 32) | *(base + LMAC_REG_IDX(LMAC_REG_NDP2M_LO));
 }
 
 void lmac_rf_sw_ctrl(void)
 {
-    lmac_regs()[0x40 / 4] |= 0x200U;
+    volatile uint32 *base = (volatile uint32 *)LMAC;
+    *(base + LMAC_REG_IDX(LMAC_REG_RF_CTRL)) |= LMAC_RF_SW_CTRL;
 }
 
 void lmac_rf_hw_ctrl(void)
 {
-    lmac_regs()[0x40 / 4] &= ~(1U << 9);
+    volatile uint32 *base = (volatile uint32 *)LMAC;
+    *(base + LMAC_REG_IDX(LMAC_REG_RF_CTRL)) &= ~LMAC_RF_SW_CTRL;
 }
 
 void lmac_cfg_rf_en(uint32 enable)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
     if (enable) {
-        reg[0x40 / 4] |= 0x100U;
+        *(base + LMAC_REG_IDX(LMAC_REG_RF_CTRL)) |= LMAC_RF_EN;
     } else {
-        reg[0x40 / 4] &= ~0x100U;
+        *(base + LMAC_REG_IDX(LMAC_REG_RF_CTRL)) &= ~LMAC_RF_EN;
     }
 }
 
 void lmac_cfg_tx_en(uint32 enable)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
     if (enable) {
-        reg[0x40 / 4] |= 0x400U;
+        *(base + LMAC_REG_IDX(LMAC_REG_RF_CTRL)) |= LMAC_RF_TX_EN;
     } else {
-        reg[0x40 / 4] &= ~0x400U;
+        *(base + LMAC_REG_IDX(LMAC_REG_RF_CTRL)) &= ~LMAC_RF_TX_EN;
     }
 }
 
 void lmac_cfg_rx_en(uint32 enable)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
     if (enable) {
-        reg[0x40 / 4] |= 0x800U;
+        *(base + LMAC_REG_IDX(LMAC_REG_RF_CTRL)) |= LMAC_RF_RX_EN;
     } else {
-        reg[0x40 / 4] &= ~0x800U;
+        *(base + LMAC_REG_IDX(LMAC_REG_RF_CTRL)) &= ~LMAC_RF_RX_EN;
     }
 }
 
 void lmac_cfg_pa_en(uint32 enable)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
     if (enable) {
-        reg[0x40 / 4] |= 1U << 16;
+        *(base + LMAC_REG_IDX(LMAC_REG_RF_CTRL)) |= LMAC_RF_PA_EN;
     } else {
-        reg[0x40 / 4] &= ~(1U << 16);
+        *(base + LMAC_REG_IDX(LMAC_REG_RF_CTRL)) &= ~LMAC_RF_PA_EN;
     }
 }
 
 void lmac_cfg_dac_en(uint32 enable)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
     if (enable) {
-        reg[0x40 / 4] |= 1U << 17;
+        *(base + LMAC_REG_IDX(LMAC_REG_RF_CTRL)) |= LMAC_RF_DAC_EN;
     } else {
-        reg[0x40 / 4] &= ~(1U << 17);
+        *(base + LMAC_REG_IDX(LMAC_REG_RF_CTRL)) &= ~LMAC_RF_DAC_EN;
     }
 }
 
 void lmac_cfg_end_to_limit(uint32 value)
 {
-    lmac_regs()[0x5c / 4] = value;
+    volatile uint32 *base = (volatile uint32 *)LMAC;
+    *(base + LMAC_REG_IDX(LMAC_REG_END_TO_LIMIT)) = value;
 }
 
 void lhw_set_bo_bypass(uint32 enable)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
     if (enable) {
-        reg[0x30 / 4] |= 0x100U;
+        *(base + LMAC_REG_IDX(LMAC_REG_FSM_CTRL)) |= LMAC_FSM_BO_BYPASS;
     } else {
-        reg[0x30 / 4] &= ~0x100U;
+        *(base + LMAC_REG_IDX(LMAC_REG_FSM_CTRL)) &= ~LMAC_FSM_BO_BYPASS;
     }
 }
 
 void lhw_set_tsf(uint32 low, uint32 high)
 {
-    volatile uint32 *reg = lmac_regs();
-    reg[0x10 / 4] = low;
-    reg[0x14 / 4] = high;
+    volatile uint32 *base = (volatile uint32 *)LMAC;
+    *(base + LMAC_REG_IDX(0x10)) = low;
+    *(base + LMAC_REG_IDX(0x14)) = high;
 }
 
 void lhw_start_cca_observ(uint32 mode)
 {
-    volatile uint32 *reg = lmac_regs();
-    reg[0x630 / 4] = (mode << 1) & 0x0eU;
-    reg[0x630 / 4] |= 1U;
+    volatile uint32 *base = (volatile uint32 *)LMAC;
+    *(base + LMAC_REG_IDX(LMAC_REG_CCA_OBSERV_CTRL)) = (mode << 1) & 0x0eU;
+    *(base + LMAC_REG_IDX(LMAC_REG_CCA_OBSERV_CTRL)) |= 1U;
 }
 
 int32 lhw_get_cca_observ(uint32 *out)
 {
-    volatile uint32 *reg = lmac_regs();
+    volatile uint32 *base = (volatile uint32 *)LMAC;
 
-    if ((reg[0x630 / 4] & 0x10U) != 0) {
-        out[0] = reg[0x634 / 4];
-        out[1] = reg[0x638 / 4];
-        out[2] = reg[0x63c / 4];
-        out[3] = reg[0x640 / 4];
-        out[4] = reg[0x644 / 4];
+    if ((*(base + LMAC_REG_IDX(LMAC_REG_CCA_OBSERV_CTRL)) & 0x10U) != 0) {
+        out[0] = *(base + LMAC_REG_IDX(LMAC_REG_CCA_OBSERV0 + 0x00));
+        out[1] = *(base + LMAC_REG_IDX(LMAC_REG_CCA_OBSERV0 + 0x04));
+        out[2] = *(base + LMAC_REG_IDX(LMAC_REG_CCA_OBSERV0 + 0x08));
+        out[3] = *(base + LMAC_REG_IDX(LMAC_REG_CCA_OBSERV0 + 0x0c));
+        out[4] = *(base + LMAC_REG_IDX(LMAC_REG_CCA_OBSERV0 + 0x10));
         return 0;
     }
 
