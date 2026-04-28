@@ -14,6 +14,7 @@ typedef struct {
 
 void net_log_init_early( void );
 void net_log_init( void );
+void net_log_task_init( void );
 void net_log_config_load( net_log_config_t *cfg );
 void net_log_config_save( const net_log_config_t *cfg );
 void net_log_config_apply( const net_log_config_t *cfg );
