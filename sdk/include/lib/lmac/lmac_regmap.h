@@ -115,7 +115,7 @@ typedef struct {
     volatile uint32 RESERVED_000[4]; /* 0x000..0x00c: Reserved area */
     volatile uint32 TSF_LO;          /* 0x010: TSF low word */
     volatile uint32 TSF_HI;          /* 0x014: TSF high word */
-    volatile uint32 RESERVED_018[2]; /* 0x018..0x01c */
+    volatile uint32 RESERVED_018[1]; /* 0x018..0x01b */
     volatile uint32 TIMING_CTRL;     /* 0x01c: SIFS/slot/EIFS + TX/RX flags */
     volatile uint32 CCA_CTRL;        /* 0x020: CCA control */
     volatile uint32 RESERVED_024[3]; /* 0x024..0x02f */
@@ -141,9 +141,9 @@ typedef struct {
     volatile uint32 RX_FRM_TYPE;     /* 0x0b4: RX frame type status */
     volatile uint32 RESERVED_0B8[18];/* 0x0b8..0x0ff */
     volatile uint32 DMA_LIST_CNT;    /* 0x100: DMA list count */
-    volatile uint32 RESERVED_104[8]; /* 0x104..0x123 */
-    volatile uint32 TX_SUB_FRM[16];  /* 0x124..0x163: TX sub-frame descriptors */
-    volatile uint32 RESERVED_164[371]; /* 0x164..0x62f: Large gap to CCA observation */
+    volatile uint32 RESERVED_104[7]; /* 0x104..0x11f */
+    volatile uint32 TX_SUB_FRM[16];  /* 0x120..0x15f: TX sub-frame descriptors */
+    volatile uint32 RESERVED_160[308]; /* 0x160..0x62f: Large gap to CCA observation */
     volatile uint32 CCA_OBSERV_CTRL; /* 0x630: CCA observation control */
     volatile uint32 CCA_OBSERV[5];   /* 0x634..0x644: Five CCA observation results */
 } LMAC_HW_t;
@@ -200,7 +200,7 @@ typedef struct {
 #define LMAC_REG_NDP2M_HI           0x0a8U /* NDP2M high word; bit5 is NDP indicator for frame type 1. */
 #define LMAC_REG_RX_FRM_TYPE        0x0b4U /* RX frame-type status: present/type bits. */
 #define LMAC_REG_DMA_LIST_CNT       0x100U /* DMA list count, low 7 bits. */
-#define LMAC_REG_TX_SUB_FRM_BASE    0x124U /* TX sub-frame descriptor register area. */
+#define LMAC_REG_TX_SUB_FRM_BASE    0x120U /* TX sub-frame descriptor register area. */
 #define LMAC_REG_CCA_OBSERV_CTRL    0x630U /* CCA observation start/mode/valid register. */
 #define LMAC_REG_CCA_OBSERV0        0x634U /* First of five CCA observation result words. */
 
