@@ -388,10 +388,7 @@ typedef struct lmac_ah_tx_ctx {
     uint8_t             ce_bw;
     uint8_t             rsv_6c9[0x6cc - 0x6c9];
     uint32_t            seq_num_space;
-    uint8_t             rsv_6d0[0x760 - 0x6d0];
-    uint32_t            tx_latency_max;
-    uint32_t            tx_latency_sum;
-    uint8_t             rsv_768[0x768 - 0x6d4];
+    uint8_t             rsv_6d0[0x6d4 - 0x6d0];   /* pad to 0x6d4 — struct end confirmed by ASM: movi r2, 1748 (=0x6d4) */
 } lmac_ah_tx_ctx_t;
 
 extern lmac_ctx_t ah_lmac;

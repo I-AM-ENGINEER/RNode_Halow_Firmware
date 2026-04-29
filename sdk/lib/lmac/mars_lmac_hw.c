@@ -13,24 +13,24 @@ uint32 LMAC = LMAC_HW_BASE_ADDR;
 
 void lhw_enable_irq_ac(void) {
     log_debug("lhw_enable_irq_ac called\n");
-    LMAC_SET_BIT(LMAC_HW->IRQ_EN, 0x80U);
+    LMAC_HW->IRQ_EN |= 0x80U;
 }
 
 void lhw_start_rx(uint32 flags) {
     log_debug("lhw_start_rx called with flags=0x%x\n", flags);
 
-    if (LMAC_READ_BIT(LMAC_HW->FSM_STATE, LMAC_FSM_BUSY_MASK) != 0) {
+    if ((LMAC_HW->FSM_STATE & LMAC_FSM_BUSY_MASK) != 0) {
         return;
     }
 
-    LMAC_MODIFY_REG(LMAC_HW->TIMING_CTRL, 0x0000FFFFU, flags << 8);
+    LMAC_HW->TIMING_CTRL = (LMAC_HW->TIMING_CTRL & ~0x0000FFFFU) | (flags << 8);
 
     uint32 val = LMAC_HW->FSM_CTRL;
     val &= ~(LMAC_FSM_TX_SEL | LMAC_FSM_RX_SEL);
     LMAC_HW->FSM_CTRL = val;
-    LMAC_SET_BIT(LMAC_HW->FSM_CTRL, LMAC_FSM_RX_SEL);
-    LMAC_SET_BIT(LMAC_HW->FSM_CTRL, LMAC_FSM_START);
-    LMAC_CLEAR_BIT(LMAC_HW->FSM_CTRL, LMAC_FSM_RX_POST_CLEAR);
+    LMAC_HW->FSM_CTRL |= LMAC_FSM_RX_SEL;
+    LMAC_HW->FSM_CTRL |= LMAC_FSM_START;
+    LMAC_HW->FSM_CTRL &= ~LMAC_FSM_RX_POST_CLEAR;
 }
 
 void lhw_abort_fsm(void) {
@@ -42,7 +42,7 @@ void lhw_abort_fsm(void) {
     val &= ~(1U << 12);
     LMAC_HW->IRQ_EN = val;
     LMAC_HW->IRQ_CLR = 0x1400U;
-    LMAC_SET_BIT(LMAC_HW->FSM_CTRL, LMAC_FSM_ABORT);
+    LMAC_HW->FSM_CTRL |= LMAC_FSM_ABORT;
 
     for (uint32 i = 20; i != 0; i--) {
         __asm volatile ("nop");
@@ -50,9 +50,9 @@ void lhw_abort_fsm(void) {
 
     lmac_rx_cleanup_info();
 
-    LMAC_SET_BIT(LMAC_HW->FSM_CTRL, LMAC_FSM_ABORT);
-    LMAC_SET_BIT(LMAC_HW->IRQ_EN, 1U << 10);
-    LMAC_SET_BIT(LMAC_HW->IRQ_EN, 1U << 12);
+    LMAC_HW->FSM_CTRL |= LMAC_FSM_ABORT;
+    LMAC_HW->IRQ_EN   |= 1U << 10;
+    LMAC_HW->IRQ_EN   |= 1U << 12;
 }
 
 uint32 lhw_get_cca_remain(void) {
@@ -76,13 +76,13 @@ void lhw_start_cca(uint32 bw, uint32 dur) {
 void lhw_start_tx(uint32 flags) {
     log_debug("lhw_start_tx called with flags=0x%x\n", flags);
 
-    LMAC_MODIFY_REG(LMAC_HW->TIMING_CTRL, 0x000000FFU, flags);
+    LMAC_HW->TIMING_CTRL = (LMAC_HW->TIMING_CTRL & ~0x000000FFU) | flags;
 
     uint32 val = LMAC_HW->FSM_CTRL;
     val &= ~(LMAC_FSM_TX_SEL | LMAC_FSM_RX_SEL);
     LMAC_HW->FSM_CTRL = val;
-    LMAC_SET_BIT(LMAC_HW->FSM_CTRL, LMAC_FSM_TX_SEL);
-    LMAC_SET_BIT(LMAC_HW->FSM_CTRL, LMAC_FSM_START);
+    LMAC_HW->FSM_CTRL |= LMAC_FSM_TX_SEL;
+    LMAC_HW->FSM_CTRL |= LMAC_FSM_START;
 }
 
 void lhw_irq_init(void) {
@@ -92,7 +92,7 @@ void lhw_irq_init(void) {
     LMAC_HW->IRQ_CLR = 0xffffffffU;
     LMAC_HW->IRQ_EN  = 0x80U | 0x20U | 0x04U | 0x400U | 0x8000U | 0x2000U | 0x4000U | (1U << 18);
     LMAC_HW->END_TO_LIMIT = 25000U;
-    LMAC_SET_BIT(LMAC_HW->IRQ_EN, (1U << 20) | 0x1000U);
+    LMAC_HW->IRQ_EN |= (1U << 20) | 0x1000U;
 }
 
 void lhw_cfg_sifs(uint32 sifs, uint32 slot, uint32 eifs) {
@@ -104,30 +104,30 @@ void lhw_cfg_tx_delay_before(uint32 unused, uint32 b, uint32 c, uint32 a) {
     log_debug("lhw_cfg_tx_delay_before called with b=0x%x, c=0x%x, a=0x%x\n", b, c, a);
     (void)unused;
     uint32 val = (a & 0x1fU) | ((c & 0x1fU) << 5) | ((b & 0x1fU) << 10);
-    LMAC_MODIFY_REG(LMAC_HW->TX_DELAY_BEFORE, 0x7fffU, val);
+    LMAC_HW->TX_DELAY_BEFORE = (LMAC_HW->TX_DELAY_BEFORE & ~0x7fffU) | val;
 }
 
 void lhw_cfg_tx_delay_after(uint32 a, uint32 b, uint32 c, uint32 d) {
     log_debug("lhw_cfg_tx_delay_after called with a=0x%x, b=0x%x, c=0x%x, d=0x%x\n", a, b, c, d);
     uint32 val = ((a & 0x3fU) << 24) | ((b & 0x3fU) << 16) |
                  ((c & 0x3fU) << 8)  |  (d & 0x3fU);
-    LMAC_MODIFY_REG(LMAC_HW->TX_DELAY_AFTER, 0x3f3f3f3fU, val);
+    LMAC_HW->TX_DELAY_AFTER = (LMAC_HW->TX_DELAY_AFTER & ~0x3f3f3f3fU) | val;
 }
 
 void lhw_cfg_tx_dalay_dac_rf(uint32 dac, uint32 rf, uint32 pa) {
     log_debug("lhw_cfg_tx_dalay_dac_rf called with dac=0x%x, rf=0x%x, pa=0x%x\n", dac, rf, pa);
     uint32 val = ((dac & 0x0fU) << 8) | (rf & 0x0fU) | ((pa & 3U) << 4);
-    LMAC_MODIFY_REG(LMAC_HW->TX_DAC_RF_DELAY, 0x0f3fU, val);
+    LMAC_HW->TX_DAC_RF_DELAY = (LMAC_HW->TX_DAC_RF_DELAY & ~0x0f3fU) | val;
 }
 
 void lhw_cfg_phy_rx_delay(uint32 delay) {
     log_debug("lhw_cfg_phy_rx_delay called with delay=0x%x\n", delay);
-    LMAC_MODIFY_REG(LMAC_HW->PHY_RX_DELAY, 0xf0000000U, delay << 28);
+    LMAC_HW->PHY_RX_DELAY = (LMAC_HW->PHY_RX_DELAY & ~0xf0000000U) | (delay << 28);
 }
 
 void lhw_cfg_dma_list_cnt(uint32 cnt) {
     log_debug("lhw_cfg_dma_list_cnt called with cnt=0x%x\n", cnt);
-    LMAC_MODIFY_REG(LMAC_HW->DMA_LIST_CNT, 0x7fU, cnt & 0x7fU);
+    LMAC_HW->DMA_LIST_CNT = (LMAC_HW->DMA_LIST_CNT & ~0x7fU) | (cnt & 0x7fU);
 }
 
 void lhw_cfg_tx_sub_frm(uint32 idx, uint32 v0, uint32 v1) {
@@ -138,7 +138,7 @@ void lhw_cfg_tx_sub_frm(uint32 idx, uint32 v0, uint32 v1) {
 
 void lhw_cfg_tx_delay_pa(uint32 delay) {
     log_debug("lhw_cfg_tx_delay_pa called with delay=0x%x\n", delay);
-    LMAC_MODIFY_REG(LMAC_HW->TX_DAC_RF_DELAY, 0x0001FFFFU, (delay & 0x1fU) << 12);
+    LMAC_HW->TX_DAC_RF_DELAY = (LMAC_HW->TX_DAC_RF_DELAY & ~0x0001FFFFU) | ((delay & 0x1fU) << 12);
 }
 
 uint32 lhw_get_rx_frm_type(void) {
@@ -174,56 +174,56 @@ uint64 lhw_get_ndp2m(void) {
 
 void lmac_rf_sw_ctrl(void) {
     log_debug("lmac_rf_sw_ctrl called\n");
-    LMAC_SET_BIT(LMAC_HW->RF_CTRL, LMAC_RF_SW_CTRL);
+    LMAC_HW->RF_CTRL |= LMAC_RF_SW_CTRL;
 }
 
 void lmac_rf_hw_ctrl(void) {
     log_debug("lmac_rf_hw_ctrl called\n");
-    LMAC_CLEAR_BIT(LMAC_HW->RF_CTRL, LMAC_RF_SW_CTRL);
+    LMAC_HW->RF_CTRL &= ~LMAC_RF_SW_CTRL;
 }
 
 void lmac_cfg_rf_en(uint32 enable) {
     log_debug("lmac_cfg_rf_en called with enable=0x%x\n", enable);
     if (enable) {
-        LMAC_SET_BIT(LMAC_HW->RF_CTRL, LMAC_RF_EN);
+        LMAC_HW->RF_CTRL |= LMAC_RF_EN;
     } else {
-        LMAC_CLEAR_BIT(LMAC_HW->RF_CTRL, LMAC_RF_EN);
+        LMAC_HW->RF_CTRL &= ~LMAC_RF_EN;
     }
 }
 
 void lmac_cfg_tx_en(uint32 enable) {
     log_debug("lmac_cfg_tx_en called with enable=0x%x\n", enable);
     if (enable) {
-        LMAC_SET_BIT(LMAC_HW->RF_CTRL, LMAC_RF_TX_EN);
+        LMAC_HW->RF_CTRL |= LMAC_RF_TX_EN;
     } else {
-        LMAC_CLEAR_BIT(LMAC_HW->RF_CTRL, LMAC_RF_TX_EN);
+        LMAC_HW->RF_CTRL &= ~LMAC_RF_TX_EN;
     }
 }
 
 void lmac_cfg_rx_en(uint32 enable) {
     log_debug("lmac_cfg_rx_en called with enable=0x%x\n", enable);
     if (enable) {
-        LMAC_SET_BIT(LMAC_HW->RF_CTRL, LMAC_RF_RX_EN);
+        LMAC_HW->RF_CTRL |= LMAC_RF_RX_EN;
     } else {
-        LMAC_CLEAR_BIT(LMAC_HW->RF_CTRL, LMAC_RF_RX_EN);
+        LMAC_HW->RF_CTRL &= ~LMAC_RF_RX_EN;
     }
 }
 
 void lmac_cfg_pa_en(uint32 enable) {
     log_debug("lmac_cfg_pa_en called with enable=0x%x\n", enable);
     if (enable) {
-        LMAC_SET_BIT(LMAC_HW->RF_CTRL, LMAC_RF_PA_EN);
+        LMAC_HW->RF_CTRL |= LMAC_RF_PA_EN;
     } else {
-        LMAC_CLEAR_BIT(LMAC_HW->RF_CTRL, LMAC_RF_PA_EN);
+        LMAC_HW->RF_CTRL &= ~LMAC_RF_PA_EN;
     }
 }
 
 void lmac_cfg_dac_en(uint32 enable) {
     log_debug("lmac_cfg_dac_en called with enable=0x%x\n", enable);
     if (enable) {
-        LMAC_SET_BIT(LMAC_HW->RF_CTRL, LMAC_RF_DAC_EN);
+        LMAC_HW->RF_CTRL |= LMAC_RF_DAC_EN;
     } else {
-        LMAC_CLEAR_BIT(LMAC_HW->RF_CTRL, LMAC_RF_DAC_EN);
+        LMAC_HW->RF_CTRL &= ~LMAC_RF_DAC_EN;
     }
 }
 
@@ -235,9 +235,9 @@ void lmac_cfg_end_to_limit(uint32 value) {
 void lhw_set_bo_bypass(uint32 enable) {
     log_debug("lhw_set_bo_bypass called with enable=0x%x\n", enable);
     if (enable) {
-        LMAC_SET_BIT(LMAC_HW->FSM_CTRL, LMAC_FSM_BO_BYPASS);
+        LMAC_HW->FSM_CTRL |= LMAC_FSM_BO_BYPASS;
     } else {
-        LMAC_CLEAR_BIT(LMAC_HW->FSM_CTRL, LMAC_FSM_BO_BYPASS);
+        LMAC_HW->FSM_CTRL &= ~LMAC_FSM_BO_BYPASS;
     }
 }
 
@@ -249,14 +249,14 @@ void lhw_set_tsf(uint32 low, uint32 high) {
 
 void lhw_start_cca_observ(uint32 mode) {
     log_debug("lhw_start_cca_observ called with mode=0x%x\n", mode);
-    LMAC_HW->CCA_OBSERV_CTRL = (mode << 1) & 0x0eU;
-    LMAC_SET_BIT(LMAC_HW->CCA_OBSERV_CTRL, 1U);
+    LMAC_HW->CCA_OBSERV_CTRL  = (mode << 1) & 0x0eU;
+    LMAC_HW->CCA_OBSERV_CTRL |= 1U;
 }
 
 int32 lhw_get_cca_observ(uint32 *out) {
     log_debug("lhw_get_cca_observ called\n");
 
-    if (LMAC_REG_IS_SET(LMAC_HW->CCA_OBSERV_CTRL, 0x10U)) {
+    if (LMAC_HW->CCA_OBSERV_CTRL & 0x10U) {
         for (uint32 i = 0; i < 5; i++) {
             out[i] = LMAC_HW->CCA_OBSERV[i];
         }

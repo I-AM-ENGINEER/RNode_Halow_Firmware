@@ -1,4 +1,8 @@
 // Auto-reconstructed: lmac_lmac_rxq.c
+#include "sys_config.h"
+#define LOG_LOCAL_LEVEL LOG_LEVEL_LMAC_RXQ
+#include "lib/logc/log.h"
+
 #include "typesdef.h"
 #include "osal/csky/semaphore.h"
 #include "osal/string.h"
@@ -10,6 +14,7 @@ extern int32 os_sema_up(struct os_semaphore *sem);
 extern void assert_internal(const char *__function, unsigned int __line, const char *__assertion);
 
 int32 lmac_rxq_init(struct lmac_rxq *rxq, uint8 *qbuf, int32 qsize) {
+    log_debug("lmac_rxq_init called with qbuf=%p, qsize=%d\n", qbuf, qsize);
     memset(rxq, 0, sizeof(*rxq));
     os_sema_init(&rxq->sem, 0);
     rxq->rxq = (struct lmac_frm_info *)qbuf;
@@ -18,6 +23,8 @@ int32 lmac_rxq_init(struct lmac_rxq *rxq, uint8 *qbuf, int32 qsize) {
 }
 
 int32 lmac_rxq_put(struct lmac_rxq *rxq, struct lmac_frm_info *frm_info, int32 count) {
+    log_debug("lmac_rxq_put called with count=%d\n", count);
+
     if (count <= 0) {
         return 0;
     }
@@ -58,6 +65,8 @@ int32 lmac_rxq_put(struct lmac_rxq *rxq, struct lmac_frm_info *frm_info, int32 c
 }
 
 int32 lmac_rxq_get(struct lmac_rxq *rxq, struct lmac_frm_info *frm_info, int32 count, int32 tmo) {
+    log_debug("lmac_rxq_get called with count=%d, tmo=%d\n", count, tmo);
+
     if (rxq->wpos == rxq->rpos) {
         os_sema_down(&rxq->sem, tmo);
     }
@@ -78,6 +87,8 @@ int32 lmac_rxq_get(struct lmac_rxq *rxq, struct lmac_frm_info *frm_info, int32 c
 }
 
 int32 lmac_rxq_free(struct lmac_rxq *rxq) {
+    log_debug("lmac_rxq_free called\n");
+
     uint16 rpos = rxq->rpos;
     uint16 wpos = rxq->wpos;
 
@@ -89,6 +100,8 @@ int32 lmac_rxq_free(struct lmac_rxq *rxq) {
 }
 
 int32 lmac_rxq_count(struct lmac_rxq *rxq) {
+    log_debug("lmac_rxq_count called\n");
+
     uint16 wpos = rxq->wpos;
     uint16 rpos = rxq->rpos;
 
