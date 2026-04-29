@@ -10,15 +10,23 @@
 #define NANOPRINTF_USE_ALT_FORM_FLAG 0
 #define NANOPRINTF_USE_FLOAT_SINGLE_PRECISION 0
 
+#include "sys_config.h"
+
 #include "lib/logc/log.h"
 #include "lib/logc/nanoprintf.h"
 #include "net_log.h"
+#include "osal/string.h"
 
 #include <stdarg.h>
 #include <stdint.h>
 #include <stddef.h>
 
 extern int64_t get_time_ms( void );
+
+#if (LOG_OUTPUT_TARGET != LOG_OUTPUT_TARGET_NET) && \
+    (LOG_OUTPUT_TARGET != LOG_OUTPUT_TARGET_UART)
+#error "Unsupported LOG_OUTPUT_TARGET value"
+#endif
 
 static struct {
     void *udata;
@@ -116,7 +124,11 @@ void log_log( int level, const char *file, int line, const char *fmt, ... ){
         n = (int)sizeof(buf) - 1;
     }
 
+#if (LOG_OUTPUT_TARGET == LOG_OUTPUT_TARGET_UART)
+    hgprintf_out(buf, n);
+#else
     net_log_send(buf, (uint16_t)n);
+#endif
 
     unlock();
 }

@@ -96,6 +96,10 @@
 #define NET_LOG_CONFIG_IP_DEF                   PP_HTONL(LWIP_MAKEU32(192,168,7,1))
 #define NET_LOG_CONFIG_PORT_DEF                 (5000)
 
+#define LOG_OUTPUT_TARGET_NET                   (0)
+#define LOG_OUTPUT_TARGET_UART                  (1)
+#define LOG_OUTPUT_TARGET                       LOG_OUTPUT_TARGET_UART
+
 #define HALOW_CONFIG_CENTRAL_FREQ_DEF           (8645)
 #define HALOW_CONFIG_POWER_DEF                  (14)
 #define HALOW_CONFIG_BANDWIDTH_DEF              (1)
@@ -166,8 +170,11 @@
 #define LOG_LEVEL_RNS_LINK_PARSER               (LOG_NONE)
 #define LOG_LEVEL_UART_SLIP                     (LOG_NONE)
 #define LOG_LEVEL_HALOW_PKG_HANDLER             (LOG_NONE)
-#define LOG_LEVEL_MARS_LMAC_HW                  (LOG_DEBUG)
-#define LOG_LEVEL_MARS_RFSPI                    (LOG_DEBUG)
+#define LOG_LEVEL_MARS_LMAC_HW                  (LOG_NONE)
+#define LOG_LEVEL_MARS_LMAC_TX                  (LOG_INFO)
+#define LOG_LEVEL_MARS_RFSPI                    (LOG_NONE)
+#define LOG_LEVEL_MARS_TDMA                     (LOG_NONE)
+#define LOG_LEVEL_LMAC_RXQ                      (LOG_NONE)
 
 #define RNS_STREAM_PARSER_LOG_LEVEL LOG_LEVEL_RNS_STREAM_PARSER
 #define RNS_LINK_PARSER_LOG_LEVEL LOG_LEVEL_RNS_LINK_PARSER

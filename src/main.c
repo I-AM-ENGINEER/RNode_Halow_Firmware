@@ -283,47 +283,78 @@ static int32 sys_blink_work(struct os_work *work) {
 
 __init int main(void) {
     extern uint32 __sinit, __einit;
+    log_debug("mcu_watchdog_timeout");
     mcu_watchdog_timeout(0);
+    log_debug("sys_event_init");
     sys_event_init(32);
+    log_debug("sys_event_take");
     sys_event_take(0xffffffff, sys_event_hdl, 0);
+    log_debug("indication_init");
     indication_init();
+    log_debug("fal_init");
     fal_init();
-	
+
+	log_debug("tcpip_init");
 	tcpip_init(NULL, NULL);
+    log_debug("sock_monitor_init");
     sock_monitor_init();
+    log_debug("uart_slip_early_init");
     uart_slip_early_init();
+    log_debug("net_log_init_early");
     net_log_init_early();
-	
+
+    log_debug("boot_recovery_check");
     if(boot_recovery_check()){
+		log_debug("recovery mode: sys_network_init");
 		sys_network_init();
         return 0;
     }
+    log_debug("configdb_init");
     configdb_init();
+    log_debug("boot_counter_update");
     boot_counter_update();
+    log_debug("littlefs_init");
     littlefs_init();
+    log_debug("halow_pkg_handler_init");
     halow_pkg_handler_init();
+    log_debug("skbpool_init");
     skbpool_init(SKB_POOL_ADDR, (uint32)SKB_POOL_SIZE, 90, 0);
+    log_debug("halow_init");
     halow_init(WIFI_RX_BUFF_ADDR, WIFI_RX_BUFF_SIZE, TDMA_BUFF_ADDR, TDMA_BUFF_SIZE);
-	
+
+    log_debug("sys_network_init");
     sys_network_init();
+    log_debug("uart_slip_init");
     uart_slip_init();
+    log_debug("net_log_init");
     net_log_init();
+    log_debug("net_ip_init");
     net_ip_init();
-	//return 0;
+	log_debug("halow_lbt_init");
     halow_lbt_init();
+	log_debug("halow_set_rx_cb");
     halow_set_rx_cb(halow_rx_handler);
-    config_page_init(); 
+    log_debug("config_page_init");
+    config_page_init();
+    log_debug("tftp_server_init");
     tftp_server_init();
+    log_debug("statistics_init");
     statistics_init();
+    log_debug("tcp_server_init");
     tcp_server_init(tcp_to_halow_send);
+    log_debug("telemetry_init");
     telemetry_init();
+    log_debug("rns_stream_decoder_init");
     rns_stream_decoder_init(&tcp_rns_decoder, rns_tcp_rx_handler);
+    log_debug("OS_WORK_INIT blink");
     OS_WORK_INIT(&blink_wk, sys_blink_work,0);
+    log_debug("OS_WORK_INIT stats");
     OS_WORK_INIT(&stats_wk, sys_stats_work,0);
+    log_debug("os_run_work_delay blink");
     os_run_work_delay(&blink_wk, 1000);
-    //os_run_work_delay(&stats_wk, 1000);
+    log_debug("sysheap_collect_init");
+    sysheap_collect_init(&sram_heap, (uint32)&__sinit, (uint32)&__einit);
     log_info("Init done");
-    sysheap_collect_init(&sram_heap, (uint32)&__sinit, (uint32)&__einit); // delete init code from heap
     return 0;
 }
 
