@@ -15,34 +15,6 @@ extern "C" {
  */
 
 /**
- * @brief Check if TX queue is empty and update PD bits
- */
-void lmac_check_tx_queue_empty(void);
-
-/**
- * @brief Initialize TX queues (TXQ, TXSQ, AC queues, STATQ)
- * @return 0 on success, negative on error
- */
-int32 lmac_tx_queue_init(void);
-
-/**
- * @brief Reload TX data from queues to hardware
- */
-void lmac_tx_data_reload(void);
-
-/**
- * @brief Main TX task - processes packets from TX queue
- * @param arg Task argument (unused)
- */
-void lmac_tx_task(void *arg);
-
-/**
- * @brief TX status task - handles completed TX packets
- * @param arg Task argument (unused)
- */
-void lmac_tx_status_task(void *arg);
-
-/**
  * @brief Initialize TX subsystem (queues, tasks, semaphores)
  */
 void lmac_tx_init(void);
@@ -196,12 +168,6 @@ int32 lmac_tx_pv0_cfpoll(struct sk_buff *skb);
 int32 lmac_tx_pv0_cfend(struct sk_buff *skb);
 
 /**
- * @brief Handle S1G beacon transmission
- * @param skb Beacon frame
- */
-void lmac_tx_pv0_s1g_beacon(struct sk_buff *skb);
-
-/**
  * @brief Dispatch PV0 frame based on frame type
  * @param skb Frame to dispatch
  * @param fc Frame control field
@@ -223,28 +189,6 @@ int32 lmac_tx_dispatch_pv1(struct sk_buff *skb, uint16 fc);
  * @return 0 on success, negative on error
  */
 int32 lmac_send_data_to_phy(uint32 ac);
-
-/**
- * @brief Attempt TX for OBSS (Overlapping BSS)
- * @param lo_id Listen-off ID
- * @return 0 on success, negative on error
- */
-int32 lmac_attempt_tx_obss(int32 lo_id);
-
-/**
- * @brief Attempt TX on specified AC
- * @param ac Access category
- * @return 0 on success, negative on error
- */
-int32 lmac_attempt_tx(uint32 ac);
-
-/**
- * @brief Check aggregation compatibility between two SKBs
- * @param skb0 First SKB
- * @param skb1 Second SKB
- * @return 0 if compatible, negative if not
- */
-int32 lmac_check_aggregation(struct sk_buff *skb0, struct sk_buff *skb1);
 
 /**
  * @brief Get maximum frame length for current PHY
@@ -330,16 +274,6 @@ int32 lmac_update_tx_state_ba(uint32 start_ssn, uint32 bitmap_lo, uint32 bitmap_
  * @return 0 on success, negative on error
  */
 int32 lmac_update_tx_state_cts(uint32 ok);
-
-/**
- * @brief Generate TX vector for aggregation list
- * @param ac Access category
- * @param ac_hint AC hint
- * @param mcs MCS index
- * @param arg Additional argument
- * @return Pointer to TX info or NULL
- */
-void *lmac_gen_tx_agglist(uint32 ac, uint32 ac_hint, uint32 mcs, void *arg);
 
 /**
  * @brief Generate TX vector for frame
@@ -436,14 +370,6 @@ int32 lmac_tx_date_prepared(void);
 /*
  * TX Power Control Functions
  */
-
-/**
- * @brief Adjust TX power by MCS
- * @param tx_pwr Base TX power
- * @param mcs MCS index
- * @return Adjusted TX power
- */
-uint32 tx_pwr_adjust_by_mcs(uint32 tx_pwr, uint32 mcs);
 
 /**
  * @brief Select TX power for frame
@@ -670,14 +596,6 @@ uint32 lmac_get_hdr_len_pv0(void *hdr);
  * @return Header length
  */
 uint32 lmac_get_hdr_len_pv1(void *hdr);
-
-/**
- * @brief Update sequence number space
- * @param sta Station pointer
- * @param tid TID value
- * @return Updated sequence number
- */
-uint32 seq_num_space_update(void *sta, uint32 tid);
 
 /**
  * @brief Convert SID to MAC address
@@ -1167,7 +1085,6 @@ extern uint32 lmac_get_seq_num(void *hdr);
 extern uint32 lmac_get_hdr_len_pv0(void *hdr);
 extern uint32 lmac_get_hdr_len_pv1(void *hdr);
 extern uint8 *lmac_convert_sid2mac(uint16 sid);
-extern void lmac_tx_pv0_s1g_beacon(struct sk_buff *skb);
 extern uint32 calc_max_agg_bytes(uint32 bw, uint32 mcs);
 extern uint32 calc_symbol_len(uint32 bytes, uint32 bw, uint32 mcs);
 extern void ah_rfdigicali_tx_pwr(uint32 arg0);

@@ -53,7 +53,7 @@ extern uint32 lmac_get_seq_num(void *hdr);
 extern uint32 lmac_get_hdr_len_pv0(void *hdr);
 extern uint32 lmac_get_hdr_len_pv1(void *hdr);
 extern uint8 *lmac_convert_sid2mac(uint16 sid);
-extern void lmac_tx_pv0_s1g_beacon(struct sk_buff *skb);
+static void lmac_tx_pv0_s1g_beacon(struct sk_buff *skb);
 extern uint32 calc_max_agg_bytes(uint32 bw, uint32 mcs);
 extern uint32 calc_symbol_len(uint32 bytes, uint32 bw, uint32 mcs);
 extern void ah_rfdigicali_tx_pwr(uint32 arg0);
@@ -173,22 +173,22 @@ extern void lmac_beacon_timer_start(uint32 us);
 #define AH_AGGQ_DECR(idx) (*(uint8 *)(AH_TX_BYTES() + 0x554U + (idx)))
 #define LMAC_REG32(ofs)   (*(volatile uint32 *)((uintptr_t)LMAC + (ofs)))
 
-__attribute__((weak)) void lmac_check_tx_queue_empty(void);
-__attribute__((weak)) int32 lmac_tx_queue_init(void);
-__attribute__((weak)) void lmac_tx_data_reload(void);
-__attribute__((weak)) void lmac_tx_task(void *arg);
-__attribute__((weak)) void lmac_tx_status_task(void *arg);
+static void lmac_check_tx_queue_empty(void);
+static int32 lmac_tx_queue_init(void);
+static void lmac_tx_data_reload(void);
+static void lmac_tx_task(void *arg);
+static void lmac_tx_status_task(void *arg);
 __attribute__((weak)) void ndp_tx_vec_init_one(uint8 *txvec);
-__attribute__((weak)) int32 lmac_check_aggregation(struct sk_buff *skb0, struct sk_buff *skb1);
+static int32 lmac_check_aggregation(struct sk_buff *skb0, struct sk_buff *skb1);
 __attribute__((weak)) void lmac_partial_aid_update(void *txi);
-__attribute__((weak)) uint32 seq_num_space_update(void *sta, uint32 tid);
+static uint32 seq_num_space_update(void *sta, uint32 tid);
 __attribute__((weak)) uint32 lmac_hdr_dur_calc(uint32 len);
 __attribute__((weak)) uint32 lmac_dtim_timer_rem(void);
 __attribute__((weak)) int32 lmac_tx_to_pm_ap(void);
 __attribute__((weak)) int32 lmac_cfg_txvec_part1(void);
 __attribute__((weak)) int32 lmac_cfg_txvec_part2(void);
 __attribute__((weak)) uint32 lmac_get_ack_policy(void *txi);
-__attribute__((weak)) uint32 tx_pwr_adjust_by_mcs(uint32 tx_pwr, uint32 mcs);
+static uint32 tx_pwr_adjust_by_mcs(uint32 tx_pwr, uint32 mcs);
 __attribute__((weak)) int32 lmac_tx_pwr_sel(void *txi, uint32 mcs);
 __attribute__((weak)) uint32 pv0_ctrl_uplink_txpwr_gen(void);
 __attribute__((weak)) uint32 lmac_select_resp_ind(void);
@@ -196,7 +196,9 @@ __attribute__((weak)) uint32 lmac_select_tx_acq(void);
 __attribute__((weak)) int32 lmac_tx_frame_regen(uint32 ac, uint32 ac_hint, uint32 mcs, void *arg);
 __attribute__((weak)) int32 lmac_tx_date_prepared(void);
 __attribute__((weak)) void *lmac_gen_txvec(uint32 ac, uint32 ac_hint, uint32 mcs);
-__attribute__((weak)) void *lmac_gen_tx_agglist(uint32 ac, uint32 ac_hint, uint32 mcs, void *arg);
+static void *lmac_gen_tx_agglist(uint32 ac, uint32 ac_hint, uint32 mcs, void *arg);
+static int32 lmac_attempt_tx_obss(int32 lo_id);
+static int32 lmac_attempt_tx(uint32 ac);
 __attribute__((weak)) void ndp_tx_vec_init(void);
 __attribute__((weak)) void lmac_pv0_rts_init(void);
 __attribute__((weak)) void lmac_pv0_wpcts_init(void);
@@ -249,7 +251,7 @@ __attribute__((weak)) uint32 lmac_txagg_count(uint32 ac) {
 
     return AH_AGGCNT(ac);
 }
-__attribute__((weak)) void lmac_check_tx_queue_empty(void) {
+static void lmac_check_tx_queue_empty(void) {
     static const uint8 ac_pd_bits[4] = { 1U, 0U, 2U, 3U };
 
     log_debug("lmac_check_tx_queue_empty called\n");
@@ -268,7 +270,7 @@ __attribute__((weak)) void lmac_kick_tx_task(void) {
     log_debug("lmac_kick_tx_task called\n");
     os_sema_up(&ah_lmac_tx.tx_sem);
 }
-__attribute__((weak)) int32 lmac_tx_queue_init(void) {
+static int32 lmac_tx_queue_init(void) {
     log_debug("lmac_tx_queue_init called\n");
 
     int32 ret = skb_list_init(AH_TXQ());
@@ -869,7 +871,7 @@ static int32 lmac_tx_dispatch_pv1(struct sk_buff *skb, uint16 fc) {
 
     return 0;
 }
-__attribute__((weak)) void lmac_tx_task(void *arg) {
+static void lmac_tx_task(void *arg) {
     static const uint8 ieee802_1d_to_ac[8] = { 0U, 1U, 1U, 0U, 2U, 2U, 3U, 3U };
 
     (void)arg;
@@ -1146,7 +1148,7 @@ __attribute__((weak)) void lmac_tx_task(void *arg) {
         lmac_tx_data_reload();
     }
 }
-__attribute__((weak)) void lmac_tx_status_task(void *arg) {
+static void lmac_tx_status_task(void *arg) {
     (void)arg;
 
     for (;;) {
@@ -1235,7 +1237,7 @@ __attribute__((weak)) int32 lmac_send_data_to_phy(uint32 ac) {
                        (((agg_cnt != 1U) ? 1U : 0U) << 1) | 1U;
     return 0;
 }
-__attribute__((weak)) int32 lmac_attempt_tx_obss(int32 lo_id) {
+static int32 lmac_attempt_tx_obss(int32 lo_id) {
     uint32 reg34;
 
     if (lmac_tx_to_pm_ap() != 0) {
@@ -1280,7 +1282,7 @@ __attribute__((weak)) int32 lmac_attempt_tx_obss(int32 lo_id) {
     lmac_cfg_txvec_part1();
     return 0;
 }
-__attribute__((weak)) int32 lmac_attempt_tx(uint32 ac) {
+static int32 lmac_attempt_tx(uint32 ac) {
     uint8 *lmac;
     uint32 reg34;
     uint16 cca_limit;
@@ -1616,7 +1618,7 @@ __attribute__((weak)) int32 lmac_tx_frm(struct sk_buff *skb) {
     (*tx_cnt)++;
     return 0;
 }
-__attribute__((weak)) void lmac_tx_pv0_s1g_beacon(struct sk_buff *skb) {
+static void lmac_tx_pv0_s1g_beacon(struct sk_buff *skb) {
     uint8 *hdr;
     uint16 fc;
 
@@ -2522,7 +2524,7 @@ __attribute__((weak)) void lmac_pv0_qos_null_init(void) {
 }
 
 
-__attribute__((weak)) int32 lmac_check_aggregation(struct sk_buff *skb0, struct sk_buff *skb1) {
+static int32 lmac_check_aggregation(struct sk_buff *skb0, struct sk_buff *skb1) {
     void *txinfo0;
     void *txinfo1;
     uint16 fc;
@@ -2602,7 +2604,7 @@ __attribute__((weak)) int32 lmac_check_aggregation(struct sk_buff *skb0, struct 
 
     return 0;
 }
-__attribute__((weak)) void lmac_tx_data_reload(void) {
+static void lmac_tx_data_reload(void) {
     static const uint8 reg_ac_pd_mapping[4] = { 1U, 0U, 2U, 3U };
     static const uint8 ieee802_1d_to_ac[8] = { 0U, 1U, 1U, 0U, 2U, 2U, 3U, 3U };
 
@@ -2777,7 +2779,7 @@ __attribute__((weak)) int32 lmac_reorder_tx_agglist(void) {
 
     return completed;
 }
-__attribute__((weak)) void *lmac_gen_tx_agglist(uint32 ac, uint32 ac_hint, uint32 mcs, void *arg) {
+static void *lmac_gen_tx_agglist(uint32 ac, uint32 ac_hint, uint32 mcs, void *arg) {
     uint8 *ac_ctx;
     uint32 max_syms;
     uint32 max_bytes;
@@ -3081,7 +3083,7 @@ __attribute__((weak)) int32 tx_skbs_cached(void) {
 }
 
 
-__attribute__((weak)) uint32 tx_pwr_adjust_by_mcs(uint32 tx_pwr, uint32 mcs) {
+static uint32 tx_pwr_adjust_by_mcs(uint32 tx_pwr, uint32 mcs) {
     if ((((uint8 *)&ah_lmac)[0x36d] & 0x0cU) == 0U) {
         return tx_pwr;
     }
@@ -3738,7 +3740,7 @@ __attribute__((weak)) uint32 lmac_hdr_dur_calc(uint32 len) {
 
     return len;
 }
-__attribute__((weak)) uint32 seq_num_space_update(void *sta, uint32 tid) {
+static uint32 seq_num_space_update(void *sta, uint32 tid) {
     uint16 seq;
 
     if (sta == NULL) {
