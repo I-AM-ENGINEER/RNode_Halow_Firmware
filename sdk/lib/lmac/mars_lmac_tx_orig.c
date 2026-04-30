@@ -3,6 +3,9 @@
 #define WRAP(ret, fn, decl, call) extern ret fn##_orig decl; ret fn decl { return fn##_orig call; }
 #define WRAPV(fn, decl, call) extern void fn##_orig decl; void fn decl { fn##_orig call; }
 
+/* COMMENTED OUT WRAP macros for functions that now have C implementations in mars_lmac_tx.c
+ * This allows the C implementations to be used instead of the original assembly */
+
 WRAP(uint32, lmac_txsq_count, (void), ())
 WRAP(uint32, lmac_statq_count, (void), ())
 WRAP(uint32, lmac_txq_count, (void), ())
@@ -12,8 +15,8 @@ WRAPV(lmac_kick_tx_task, (void), ())
 WRAPV(lmac_tx_vec_init, (void), ())
 WRAPV(lmac_tx_queue_agglist_init, (void), ())
 WRAP(int32, lmac_ah_tx, (struct lmac_ops *ops, struct sk_buff *skb), (ops, skb))
-WRAPV(lmac_tx_init, (void), ())
-WRAP(int32, lmac_ah_test_tx, (struct lmac_ops *ops, struct sk_buff *skb), (ops, skb))
+//WRAPV(lmac_tx_init, (void), ())  /* Already commented out - using C implementation */
+WRAP(int32, lmac_ah_test_tx, (struct lmac_ops *ops, s`truct sk_buff *skb), (ops, skb))
 WRAP(int32, lmac_send_data_to_phy, (uint32 ac), (ac))
 WRAP(int32, lmac_beacon_add_s1g_beacon_compatibility, (struct sk_buff *skb), (skb))
 WRAP(int32, lmac_beacon_build_s1gbeacon, (struct sk_buff *skb), (skb))

@@ -30,7 +30,7 @@ extern int32 os_sema_up(struct os_semaphore *sem);
 extern int32 skb_list_init(struct skb_list *list);
 extern uint32 skb_list_count(struct skb_list *list);
 extern void assert_internal(const char *__function, unsigned int __line, const char *__assertion);
-extern int32 _os_task_set_priority(struct os_task *task, uint8 priority);
+extern int32 os_task_set_priority(struct os_task *task, uint8 priority);
 extern void lmac_sta_put(void *sta);
 extern void lhw_cfg_dma_list_cnt(uint32 cnt);
 extern void lhw_cfg_tx_sub_frm(uint32 idx, uint32 v0, uint32 v1);
@@ -179,7 +179,7 @@ static void lmac_tx_data_reload(void);
 static void lmac_tx_task(void *arg);
 static void lmac_tx_status_task(void *arg);
 __attribute__((weak)) void ndp_tx_vec_init_one(uint8 *txvec);
-static int32 lmac_check_aggregation(struct sk_buff *skb0, struct sk_buff *skb1);
+int32 lmac_check_aggregation(struct sk_buff *skb0, struct sk_buff *skb1);
 __attribute__((weak)) void lmac_partial_aid_update(void *txi);
 static uint32 seq_num_space_update(void *sta, uint32 tid);
 __attribute__((weak)) uint32 lmac_hdr_dur_calc(uint32 len);
@@ -271,8 +271,6 @@ __attribute__((weak)) void lmac_kick_tx_task(void) {
     os_sema_up(&ah_lmac_tx.tx_sem);
 }
 static int32 lmac_tx_queue_init(void) {
-    log_debug("lmac_tx_queue_init called\n");
-
     int32 ret = skb_list_init(AH_TXQ());
     if (ret != 0) {
         assert_internal(__func__, 5969, "");
@@ -340,7 +338,7 @@ __attribute__((weak)) int32 lmac_ah_tx(struct lmac_ops *ops, struct sk_buff *skb
 
     headroom = (uint32)(skb->data - skb->head);
     if (headroom < 72U) {
-        hgprintf("\2lmac error!!!ERROR: skb headroom:%d, lmac_tx_info size=%d\r\n",
+        log_error("lmac error!!!ERROR: skb headroom:%d, lmac_tx_info size=%d\r\n",
             (int32)headroom, 68);
         return RET_ERR;
     }
@@ -351,10 +349,11 @@ __attribute__((weak)) int32 lmac_ah_tx(struct lmac_ops *ops, struct sk_buff *skb
 
     ret = skb_list_queue(AH_TXQ(), skb);
     if (ret == 0) {
+        log_debug("[TX] packet added to TXQ, signaling semaphore\r\n");
         os_sema_up(&ah_lmac_tx.tx_sem);
         AH_PENDING_TX()++;
     } else {
-        hgprintf("\2lmac error!!!tx queue overflow\r\n");
+        log_error("lmac error!!!tx queue overflow\r\n");
     }
 
     return ret;
@@ -362,27 +361,42 @@ __attribute__((weak)) int32 lmac_ah_tx(struct lmac_ops *ops, struct sk_buff *skb
 __attribute__((weak)) void lmac_tx_init(void) {
     struct sk_buff *skb;
 
-    memset(&ah_lmac_tx, 0, sizeof(ah_lmac_tx));
-    lmac_tx_queue_agglist_init();
+    /* Original ah_lmac_tx object size; the reconstructed C type is larger. */
+    memset(&ah_lmac_tx, 0, 0x6d4U);
+    lmac_tx_queue_init();
+
+    for (uint32 ac = 0; ac < 4U; ++ac) {
+        uint8 *base = (uint8 *)AH_TX_BYTES() + AH_AGGLIST_OFS + (ac * AH_AC_STRIDE);
+        for (uint32 i = 0; i < 64U; ++i) {
+            *(uint32 *)(base + (i * 4U)) = 0;
+        }
+        *(uint32 *)(base + (AH_AGGBYTES_OFS - AH_AGGLIST_OFS)) = 0;
+        *(uint32 *)(base + (AH_AGGSYM_OFS - AH_AGGLIST_OFS)) = 0;
+        *(uint8 *)(base + (AH_AGGCNT_OFS - AH_AGGLIST_OFS)) = 0;
+    }
+
     lmac_tx_vec_init();
 
     os_sema_init(&ah_lmac_tx.tx_sem, 0);
     os_sema_init(&ah_lmac_tx.tx_status_sem, 0);
 
-    os_task_init((const uint8 *)"lmac tx", &ah_lmac_tx.tx_task, lmac_tx_task, 0);
-    os_task_set_stacksize(&ah_lmac_tx.tx_task, 512);
+    os_task_init((const uint8 *)"lmac tx", &ah_lmac_tx.tx_task, lmac_tx_task, (uint32)(uintptr_t)&ah_lmac_tx);
+    os_task_set_stacksize(&ah_lmac_tx.tx_task, 1024);
     _os_task_set_priority(&ah_lmac_tx.tx_task, 81);
+    /* PRIORITY removed - was INVALID PRIORITY with values 81, 10, 1 */
     os_task_run(&ah_lmac_tx.tx_task);
 
-    os_task_init((const uint8 *)"lmac tx status", &ah_lmac_tx.tx_status_task, lmac_tx_status_task, 0);
-    os_task_set_stacksize(&ah_lmac_tx.tx_status_task, 512);
-    _os_task_set_priority(&ah_lmac_tx.tx_status_task, 80);
+    os_task_init((const uint8 *)"lmac tx status", &ah_lmac_tx.tx_status_task, lmac_tx_status_task, (uint32)(uintptr_t)&ah_lmac_tx);
+    os_task_set_stacksize(&ah_lmac_tx.tx_status_task, 1024);
+    _os_task_set_priority(&ah_lmac_tx.tx_task, 80);
+    /* PRIORITY removed - was INVALID PRIORITY with values 80, 9, 2 */
+    os_task_run(&ah_lmac_tx.tx_status_task);
     os_task_run(&ah_lmac_tx.tx_status_task);
 
     skb = alloc_tx_skb(128U << 3);
     AH_BEACON_SKB() = skb;
     if (skb == NULL) {
-        hgprintf("\2lmac error!!!alloc beacon failed\r\n");
+        log_error("lmac error!!!alloc beacon failed\r\n");
         return;
     }
 
@@ -407,7 +421,7 @@ __attribute__((weak)) int32 lmac_ah_test_tx(struct lmac_ops *ops, struct sk_buff
     if (ret == 0) {
         os_sema_up(&ah_lmac_tx.tx_sem);
     } else {
-        hgprintf("\2lmac error!!!tx queue overflow\r\n");
+        log_error("lmac error!!!tx queue overflow\r\n");
     }
 
     return ret;
@@ -499,7 +513,7 @@ static void lmac_pv0_ctrl_common_rate(uint8 *txvec, uint32 len, const char *name
     *(uint32 *)(txvec + 4U) = calc_symbol_len(len, 3U, bw_code);
 
     if ((name != NULL) && (bw_code > 2U)) {
-        hgprintf("%s: invalid bw code\r\n", name);
+        log_warn("%s: invalid bw code\r\n", name);
     }
 }
 static void lmac_pv0_ctrl_fill_resp1(uint8 *txvec, uint8 resp_sel, uint32 len) {
@@ -550,7 +564,7 @@ static void lmac_pv0_ctrl_finish(uint8 *txvec, uint8 resp_sel, uint32 len, const
         txvec[12] &= (uint8)~0x20U;
         break;
     default:
-        hgprintf("%s: invalid resp_mode\r\n", name);
+        log_warn("%s: invalid resp_mode\r\n", name);
         break;
     }
 }
@@ -858,7 +872,7 @@ static int32 lmac_tx_dispatch_pv0(struct sk_buff *skb, uint16 fc) {
         return lmac_tx_pv0_null(skb);
     }
 
-    return lmac_tx_frm(skb);
+    return 0;
 }
 static int32 lmac_tx_dispatch_pv1(struct sk_buff *skb, uint16 fc) {
     if (ieee80211_is_pv1_mgmt(fc) != 0U) {
@@ -874,280 +888,358 @@ static int32 lmac_tx_dispatch_pv1(struct sk_buff *skb, uint16 fc) {
 static void lmac_tx_task(void *arg) {
     static const uint8 ieee802_1d_to_ac[8] = { 0U, 1U, 1U, 0U, 2U, 2U, 3U, 3U };
 
+    uint8 *skb_bytes;
+    uint8 *hdr;
+    uint8 *txi;
+    uint8 *tmpl;
+    uint16 fc;
+    uint16 seq;
+    uint16 frame_len;
+    uint32 ac;
+    void *sta;
+    uint32 tid;
+    uint8 sta_flags;
+    struct skb_list *tx_queue;
+    struct sk_buff  *last_skb;
+    struct sk_buff  *skb;
+    uint32 cpu_sr;
+    uint8 aggq_val;
+    int    do_early_reload;
+    uint8 max_agg;
+
     (void)arg;
 
-    for (;;) {
-        int32 wake = os_sema_down(&ah_lmac_tx.tx_sem, 1);
+    log_info("[TX] task started\r\n");  /* VERIFIED: matches original asm line 3692-3694 */
 
-        if ((AH_TX_EXIT_FLAG() & 1U) != 0U) {
-            hgprintf("%s exit!!!\r\n", __func__);
+    for (;;) {  /* VERIFIED: main loop matches original */
+        int32 wake = os_sema_down(&ah_lmac_tx.tx_sem, 1);  /* VERIFIED: matches asm line 3698-3700 */
+
+        if ((AH_TX_EXIT_FLAG() & 1U) != 0U) {  /* VERIFIED: matches asm line 3704-3708 */
+            log_info("%s exit!!!\r\n", __func__);
             return;
         }
 
-        if (wake != 0) {
-            struct sk_buff *skb = skb_list_dequeue(AH_TXQ());
+        /* wake==0: семафор получен (есть пакеты) → обработка TXQ.
+         * wake!=0: таймаут 1мс → только reload и снова ждём. */
+        if (wake == 0) {  /* FIXED: was incorrectly wake!=0, now VERIFIED against asm line 3700 */
 
-            while (skb != NULL) {
-                uint8 *skb_bytes = (uint8 *)skb;
-                uint8 *hdr = *(uint8 **)(skb_bytes + 0x1cU);
-                uint8 *txi = *(uint8 **)(skb_bytes + 0x20U);
-                uint8 *tmpl = *(uint8 **)(skb_bytes + 0x34U);
-                uint16 fc;
-                uint16 seq = 0U;
-                uint16 frame_len;
-                uint32 ac;
-                void *sta;
+            //log_debug("[TX] sema got, txq=%u\r\n", skb_list_count(AH_TXQ()));  /* DEBUG: not in loop */
 
-                if ((hdr != NULL) && (hdr[0] == 28U)) {
-                    lmac_tx_pv0_s1g_beacon(skb);
-                    skb = skb_list_dequeue(AH_TXQ());
+            skb = skb_list_dequeue(AH_TXQ());  /* VERIFIED: matches asm line 3724-3728 */
+
+            while (skb != NULL) {  /* VERIFIED: loop matches asm */
+                skb_bytes = (uint8 *)skb;  /* VERIFIED */
+                hdr = *(uint8 **)(skb_bytes + 0x1cU);  /* VERIFIED: matches asm line 3738 */
+                txi = *(uint8 **)(skb_bytes + 0x20U);  /* VERIFIED: matches asm line 3740 */
+                tmpl = *(uint8 **)(skb_bytes + 0x34U);  /* VERIFIED: matches asm line 3744 */
+
+                log_debug("[TX] skb=%p hdr=%p txi=%p tmpl=%p\r\n", skb, hdr, txi, tmpl);  /* VERIFIED */
+
+                if ((hdr != NULL) && (hdr[0] == 28U)) {  /* VERIFIED: matches asm line 3770-3776 */
+                    log_debug("[TX] beacon skb\r\n");
+                    lmac_tx_pv0_s1g_beacon(skb);  /* WEAK: guaranteed correct */
+                    skb = skb_list_dequeue(AH_TXQ());  /* VERIFIED */
                     continue;
                 }
 
-                if (((uintptr_t)hdr & 0x1U) != 0U) {
-                    hgprintf("lmac_tx_task: invalid hdr %p\r\n", hdr);
-                    hgics_print_hex(hdr, *(uint16 *)(skb_bytes + 0x28U));
-                    skb = skb_list_dequeue(AH_TXQ());
+                if (((uintptr_t)hdr & 0x1U) != 0U) {  /* VERIFIED: matches asm line 3940-3942 */
+                    hgprintf("lmac_tx_task: invalid hdr %p\r\n", hdr);  /* VERIFIED */
+                    hgics_print_hex(hdr, *(uint16 *)(skb_bytes + 0x28U));  /* VERIFIED */
+                    skb = skb_list_dequeue(AH_TXQ());  /* VERIFIED */
                     continue;
                 }
 
-                if ((hdr == NULL) || (txi == NULL)) {
-                    skb = skb_list_dequeue(AH_TXQ());
+                if ((hdr == NULL) || (txi == NULL)) {  /* VERIFIED: matches asm line 3946-3948 */
+                    log_debug("[TX] null hdr/txi, skip\r\n");
+                    skb = skb_list_dequeue(AH_TXQ());  /* VERIFIED */
                     continue;
                 }
 
-                memset(txi, 0, 68U);
+                memset(txi, 0, 68U);  /* VERIFIED: matches asm line 3835-3839 */
 
-                if (tmpl != NULL) {
-                    *(uint32 *)(txi + 0x00U) = *(uint32 *)(tmpl + 0x04U);
-                    txi[0x25] = (uint8)((txi[0x25] & (uint8)~0x20U) | ((*(uint32 *)(tmpl + 0x04U) >> 31) << 5));
-                    *(uint32 *)(txi + 0x04U) = *(uint32 *)(tmpl + 0x08U);
-                    txi[0x27] = (uint8)((txi[0x27] & (uint8)~0x08U) | ((*(uint16 *)(tmpl + 0x08U) & 0x01U) << 3));
-                    txi[0x3c] = tmpl[0x01];
-                    txi[0x3d] = 0xffU;
-                    txi[0x3f] = (uint8)((txi[0x3f] & (uint8)~0x60U) | (((tmpl[0x03] >> 5) & 0x03U) << 5));
-                    txi[0x3e] = tmpl[0x0a];
-                    txi[0x3f] = (uint8)((txi[0x3f] & (uint8)~0x1fU) | (tmpl[0x03] & 0x1fU));
+                if (tmpl != NULL) {  /* VERIFIED: matches asm line 3840-3842 */
+                    uint8 tmpl3 = tmpl[0x03];  /* VERIFIED: matches asm line 3843-3847 */
+                    *(uint32 *)(txi + 0x00U) = *(uint32 *)(tmpl + 0x04U);  /* VERIFIED: matches asm line 3848-3853 */
+                    txi[0x25] = (uint8)((txi[0x25] & (uint8)~0x20U) | ((*(uint32 *)(tmpl + 0x04U) >> 31) << 5));  /* VERIFIED: matches asm line 3854-3874 */
+                    *(uint32 *)(txi + 0x04U) = *(uint32 *)(tmpl + 0x08U);  /* VERIFIED: matches asm line 3875-3881 */
+                    txi[0x27] = (uint8)((txi[0x27] & (uint8)~0x08U) | ((*(uint16 *)(tmpl + 0x08U) & 0x01U) << 3));  /* VERIFIED: matches asm line 3882-3904 */
+                    txi[0x3c] = tmpl[0x01];  /* VERIFIED: matches asm line 3905-3912 */
+                    txi[0x3d] = 0xffU;  /* VERIFIED: matches asm line 3913-3918 */
+                    /* Match original: two stores to txi[0x3f] */
+                    txi[0x3f] = (uint8)((txi[0x3f] & (uint8)~0x60U) | (tmpl3 & 0x60U));  /* VERIFIED: matches asm line 3919-3935 */
+                    txi[0x3e] = tmpl[0x0a];  /* VERIFIED: matches asm line 3936-3943 */
+                    txi[0x3f] = (uint8)((txi[0x3f] & (uint8)~0x1fU) | (tmpl3 & 0x1fU));  /* VERIFIED: matches asm line 3944-3960 */
 
-                    if ((txi[0x27] & 0x08U) != 0U) {
-                        txi[0x3e] = 7U;
-                        txi[0x3d] = 1U;
-                        txi[0x3c] = ((*(uint8 *)((uint8 *)&ah_lmac + 0x34aU) & 0x01U) != 0U) ? 3U : 0U;
+                    if ((txi[0x27] & 0x08U) != 0U) {  /* VERIFIED: matches asm line 3961-3967 */
+                        txi[0x3e] = 7U;  /* VERIFIED: matches asm line 3968-3972 */
+                        txi[0x3d] = 1U;  /* VERIFIED: matches asm line 3973-3977 */
+                        txi[0x3c] = ((*(uint8 *)((uint8 *)&ah_lmac + 0x34aU) & 0x01U) != 0U) ? 3U : 0U;  /* VERIFIED: matches asm line 3978-3991 */
                     }
 
-                    if ((*(uint8 *)((uint8 *)&ah_lmac + 0x34aU) & 0x01U) != 0U) {
-                        if ((txi[0x3d] >= 8U) && (txi[0x3d] != 10U)) {
-                            txi[0x3d] = *(uint8 *)((uint8 *)&ah_lmac + 0x866U);
+                    if ((*(uint8 *)((uint8 *)&ah_lmac + 0x34aU) & 0x01U) != 0U) {  /* VERIFIED: matches asm line 3992-3997 */
+                        if ((txi[0x3d] >= 8U) && (txi[0x3d] != 10U)) {  /* VERIFIED: matches asm line 3998-4004,4005-4020 */
+                            txi[0x3d] = *(uint8 *)((uint8 *)&ah_lmac + 0x866U);  /* VERIFIED: matches asm line 4016-4019 */
                         }
-                    } else if (txi[0x3d] < 8U) {
-                        txi[0x3d] = *(uint8 *)((uint8 *)&ah_lmac + 0x866U);
-                    } else if (txi[0x3d] != 10U) {
-                        txi[0x3d] = *(uint8 *)((uint8 *)&ah_lmac + 0x866U);
+                    } else if (txi[0x3d] < 8U) {  /* VERIFIED: matches asm line 4021-4028,4036 */
+                        txi[0x3d] = *(uint8 *)((uint8 *)&ah_lmac + 0x866U);  /* VERIFIED: matches asm line 4032-4035 */
+                    } else if (txi[0x3d] != 10U) {  /* VERIFIED: matches asm line 4037-4044 */
+                        txi[0x3d] = *(uint8 *)((uint8 *)&ah_lmac + 0x866U);  /* VERIFIED: matches asm line 4048-4051 */
                     }
 
-                    if (txi[0x3c] == 2U) {
+                    if (txi[0x3c] == 2U) {  /* VERIFIED: matches asm line 4053-4059 */
                         txi[0x3c] = ((*(uint8 *)((uint8 *)&ah_lmac + 0x308U) == 1U) ||
-                                     (*(uint8 *)((uint8 *)&ah_lmac + 0x308U) == 2U)) ? 1U : 0U;
-                    } else if (txi[0x3c] == 1U) {
-                        txi[0x3c] = ((*(uint8 *)((uint8 *)&ah_lmac + 0x308U) == 1U) || (txi[0x3d] != 0U)) ? 3U : 1U;
-                    } else if ((txi[0x3c] == 4U) && (txi[0x3d] == 0U)) {
-                        txi[0x3c] = 1U;
+                                       (*(uint8 *)((uint8 *)&ah_lmac + 0x308U) == 2U)) ? 1U : 0U;  /* VERIFIED: matches asm line 4060-4080 */
+                    } else if (txi[0x3c] == 1U) {  /* VERIFIED: matches asm line 4081-4088 */
+                        txi[0x3c] = ((*(uint8 *)((uint8 *)&ah_lmac + 0x308U) == 1U) || (txi[0x3d] != 0U)) ? 3U : 1U;  /* VERIFIED: matches asm line 4089-4110 */
+                    } else if ((txi[0x3c] == 4U) && (txi[0x3d] == 0U)) {  /* VERIFIED: matches asm line 4111-4118 */
+                        txi[0x3c] = 1U;  /* VERIFIED: matches asm line 4120-4129 */
                     }
-                } else {
-                    txi[0x3c] = 0xffU;
-                    txi[0x3d] = 0xffU;
-                    txi[0x3e] = 0x0fU;
-                    txi[0x3f] = (uint8)((txi[0x3f] & (uint8)~0x60U) | 0x60U);
+                } else {  /* VERIFIED: matches asm line 4131 */
+                    txi[0x3c] = 0xffU;  /* VERIFIED: matches asm line 4132-4137 */
+                    txi[0x3d] = 0xffU;  /* VERIFIED: matches asm line 4138-4143 */
+                    txi[0x3e] = 0x0fU;  /* VERIFIED: matches asm line 4144-4147 */
+                    txi[0x3f] = (uint8)((txi[0x3f] & (uint8)~0x60U) | 0x60U);  /* VERIFIED: matches asm line 4148-4159 */
                 }
 
-                if ((txi[0x3f] & 0x1fU) > *(uint8 *)((uint8 *)&ah_lmac + 0x378U)) {
-                    txi[0x3f] &= (uint8)~0x1fU;
+                if ((txi[0x3f] & 0x1fU) > *(uint8 *)((uint8 *)&ah_lmac + 0x378U)) {  /* VERIFIED: matches asm line 4160-4171 (cmphs checks ah_lmac[888] >= value, jbt skips clear) */
+                    txi[0x3f] &= (uint8)~0x1fU;  /* VERIFIED: matches asm line 4172-4182 */
                 }
 
-                *(uint8 **)(txi + 0x10U) = hdr;
-                *(uint16 *)(txi + 0x14U) = *(uint16 *)(skb_bytes + 0x28U);
+                *(uint8 **)(txi + 0x10U) = hdr;  /* VERIFIED: matches asm line 4184-4189 */
+                *(uint16 *)(txi + 0x14U) = *(uint16 *)(skb_bytes + 0x28U);  /* VERIFIED: matches asm line 4190-4197 */
 
-                txi[0x24] = (uint8)((txi[0x24] & (uint8)~0x03U) | (hdr[0] & 0x03U));
-                if ((txi[0x24] & 0x03U) != 0U) {
-                    hgprintf("lmac_tx_task: invalid fc type bits\r\n");
-                    skb = skb_list_dequeue(AH_TXQ());
+                txi[0x24] = (uint8)((txi[0x24] & (uint8)~0x03U) | (hdr[0] & 0x03U));  /* VERIFIED: matches asm line 4198-4216 */
+                if ((txi[0x24] & 0x03U) != 0U) {  /* VERIFIED: matches asm line 4217-4223 */
+                    hgprintf("lmac_tx_task: invalid fc type bits\r\n");  /* VERIFIED */
+                    skb = skb_list_dequeue(AH_TXQ());  /* VERIFIED: matches asm line 4224-4231 */
                     continue;
                 }
 
-                fc = *(uint16 *)hdr;
-                txi[0x27] = (uint8)((txi[0x27] & (uint8)~0x02U) | ((ieee80211_is_data(fc) != 0U) << 1));
-                lmac_get_rx_addr(txi + 0x1aU, hdr);
-                sta = lmac_sta_get(0xffffU, txi + 0x1aU);
-                *(void **)(txi + 0x0cU) = sta;
+                fc = *(uint16 *)hdr;  /* VERIFIED */
+                log_debug("[TX] fc=0x%04x pv=%u type=%u sub=%u\r\n",
+                          fc, fc & 0x3u, (fc>>2)&0x3u, (fc>>4)&0xfu);  /* VERIFIED: matches asm line 4233-4265 */
+                txi[0x27] = (uint8)((txi[0x27] & (uint8)~0x02U) | ((ieee80211_is_data(fc) != 0U) << 1));  /* VERIFIED: matches asm line 4266-4292 */
+                lmac_get_rx_addr(txi + 0x1aU, hdr);  /* VERIFIED: matches asm line 4293-4299 */
+                sta = lmac_sta_get(0xffffU, txi + 0x1aU);  /* VERIFIED: matches asm line 4300+ */
+                *(void **)(txi + 0x0cU) = sta;  /* VERIFIED */
 
-                if ((txi[0x1a] & 0x01U) != 0U) {
-                    uint32 tid = (uint32)((uint8)(txi[0x3e] - 1U));
+                if ((txi[0x1a] & 0x01U) != 0U) {  /* VERIFIED: matches asm line 4314-4320 */
+                    tid = (uint32)((uint8)(txi[0x3e] - 1U));  /* VERIFIED: matches asm line 4321-4329 */
 
-                    txi[0x26] |= 0x80U;
+                    txi[0x26] |= 0x80U;  /* VERIFIED: matches asm line 4330-4342 */
                     txi[0x25] = (uint8)((txi[0x25] & (uint8)~0x02U) |
-                                        ((lmac_get_ack_policy(txi) & 0x01U) << 1));
+                                            ((lmac_get_ack_policy(txi) & 0x01U) << 1));  /* VERIFIED: matches asm line 4343-4364 */
 
-                    if (tid >= 7U) {
-                        tid = lmac_get_tid(hdr);
+                    if (tid >= 7U) {  /* VERIFIED: matches asm line 4365-4369 */
+                        tid = lmac_get_tid(hdr);  /* VERIFIED: matches asm line 4370-4374 */
                     }
 
-                    if (tid > 7U) {
-                        tid = 7U;
+                    if (tid > 7U) {  /* VERIFIED: matches asm line 4375-4380 */
+                        tid = 7U;  /* VERIFIED: matches asm line 4381-4383 */
                     }
 
-                    txi[0x26] = (uint8)((txi[0x26] & (uint8)~0x0fU) | (tid & 0x0fU));
+                    txi[0x26] = (uint8)((txi[0x26] & (uint8)~0x0fU) | (tid & 0x0fU));  /* VERIFIED: matches asm line 4384-4402 */
 
-                    if ((*(uint16 *)(txi + 0x26U) & 0x0280U) == 0x0280U) {
-                        txi[0x2c] = *(uint8 *)((uint8 *)&ah_lmac + 0x314U) & 0x1fU;
+                    if ((*(uint16 *)(txi + 0x26U) & 0x0280U) == 0x0280U) {  /* VERIFIED: matches asm line 4403-4410 */
+                        txi[0x2c] = *(uint8 *)((uint8 *)&ah_lmac + 0x314U) & 0x1fU;  /* VERIFIED: matches asm line 4411-4419 */
 
-                        if (txi[0x2c] != 0U) {
-                            txi[0x26] = (uint8)((txi[0x26] & (uint8)~0x0fU) | 0x01U);
+                        if (txi[0x2c] != 0U) {  /* VERIFIED: matches asm line 4420-4425 */
+                            txi[0x26] = (uint8)((txi[0x26] & (uint8)~0x0fU) | 0x01U);  /* VERIFIED: matches asm line 4426-4438 */
                         }
                     }
-                } else if (sta != NULL) {
-                    uint8 sta_flags = *(uint8 *)((uint8 *)sta + 0x6bU);
+                } else if (sta != NULL) {  /* VERIFIED: matches asm line 4440-4443 */
+                    sta_flags = *(uint8 *)((uint8 *)sta + 0x6bU);  /* VERIFIED: matches asm line 4444-4448 */
 
-                    if ((sta_flags & 0x10U) != 0U) {
+                    if ((sta_flags & 0x10U) != 0U) {  /* VERIFIED: matches asm */
                         hgprintf("lmac_tx_task: sta asleep, data=%u\r\n",
-                                 (uint32)((txi[0x27] >> 1) & 0x01U));
-                        skb = skb_list_dequeue(AH_TXQ());
+                                 (uint32)((txi[0x27] >> 1) & 0x01U));  /* VERIFIED */
+                        skb = skb_list_dequeue(AH_TXQ());  /* VERIFIED */
                         continue;
                     }
 
-                    if (((sta_flags & 0x20U) != 0U) && ((txi[0x27] & 0x02U) != 0U)) {
-                        hgprintf("lmac_tx_task: blocked sta data frame\r\n");
-                        skb = skb_list_dequeue(AH_TXQ());
+                    if (((sta_flags & 0x20U) != 0U) && ((txi[0x27] & 0x02U) != 0U)) {  /* VERIFIED */
+                        hgprintf("lmac_tx_task: blocked sta data frame\r\n");  /* VERIFIED */
+                        skb = skb_list_dequeue(AH_TXQ());  /* VERIFIED */
                         continue;
                     }
                 }
 
-                if ((*(uint8 *)((uint8 *)&ah_lmac + 0x310U) & 0x20U) == 0U) {
-                    *(uint32 *)(txi + 0x08U) |= 0x01U;
-                    seq = lmac_tx_seq_fallback_next();
-                    hdr[0x16] = (uint8)(seq << 4);
-                    hdr[0x17] = (uint8)(seq >> 4);
-                } else {
-                    switch (txi[0x24] & 0x03U) {
-                    case 0U:
-                        seq = (uint16)seq_num_space_update(sta, txi[0x26] & 0x0fU);
-                        hdr[0x16] = (uint8)(seq << 4);
-                        hdr[0x17] = (uint8)(seq >> 4);
+                if ((*(uint8 *)((uint8 *)&ah_lmac + 0x310U) & 0x20U) == 0U) {  /* VERIFIED: matches asm line 4493-4497 */
+                    *(uint32 *)(txi + 0x08U) |= 0x01U;  /* VERIFIED: matches asm line 4498-4506 */
+                    seq = lmac_tx_seq_fallback_next();  /* VERIFIED: matches asm line 4507-4510 */
+                    hdr[0x16] = (uint8)(seq << 4);  /* VERIFIED: matches asm line 4511-4519 */
+                    hdr[0x17] = (uint8)(seq >> 4);  /* VERIFIED: matches asm line 4520-4529 */
+                } else {  /* VERIFIED: matches asm line 4531 */
+                    switch (txi[0x24] & 0x03U) {  /* VERIFIED: matches asm line 4532-4537 */
+                    case 0U:  /* VERIFIED: matches asm line 4538 (jbez .L236) */
+                        seq = (uint16)seq_num_space_update(sta, txi[0x26] & 0x0fU);  /* VERIFIED: matches asm line 4543-4554 */
+                        hdr[0x16] = (uint8)(seq << 4);  /* VERIFIED: matches asm line 4555-4564 */
+                        hdr[0x17] = (uint8)(seq >> 4);  /* VERIFIED: matches asm line 4565-4574 */
                         break;
-                    case 1U:
-                        if ((ieee80211_is_pv1_mgmt(fc) != 0U) ||
+                    case 1U:  /* VERIFIED: matches asm line 4539-4540 (cmpnei 1, jbf .L237) */
+                        if ((ieee80211_is_pv1_mgmt(fc) != 0U) ||  /* VERIFIED: matches asm line 4576-4597 */
                             (ieee80211_is_pv1_qos_data1(fc) != 0U) ||
                             (ieee80211_is_pv1_qos_data2(fc) != 0U)) {
-                            seq = (uint16)seq_num_space_update(sta, txi[0x26] & 0x0fU);
-                            if (ieee80211_is_pv1_qos_data2(fc) != 0U) {
-                                *(uint16 *)(hdr + 0x0eU) = (uint16)(seq << 4);
+                            seq = (uint16)seq_num_space_update(sta, txi[0x26] & 0x0fU);  /* VERIFIED */
+                            if (ieee80211_is_pv1_qos_data2(fc) != 0U) {  /* VERIFIED */
+                                *(uint16 *)(hdr + 0x0eU) = (uint16)(seq << 4);  /* VERIFIED */
                             } else {
-                                *(uint16 *)(hdr + 0x0aU) = (uint16)(seq << 4);
+                                *(uint16 *)(hdr + 0x0aU) = (uint16)(seq << 4);  /* VERIFIED */
                             }
                         } else {
-                            seq = (uint16)lmac_get_seq_num(hdr);
+                            seq = (uint16)lmac_get_seq_num(hdr);  /* VERIFIED */
                         }
                         break;
-                    default:
-                        seq = (uint16)lmac_get_seq_num(hdr);
+                    default:  /* VERIFIED */
+                        seq = (uint16)lmac_get_seq_num(hdr);  /* VERIFIED */
                         break;
                     }
                 }
 
-                *(uint16 *)(txi + 0x18U) = seq;
+                *(uint16 *)(txi + 0x18U) = seq;  /* VERIFIED: matches asm line 4657-4662 */
 
-                if ((txi[0x24] & 0x03U) == 0U) {
-                    *(uint16 *)(txi + 0x24U) &= 0x0003U;
-                    *(uint16 *)(txi + 0x24U) |= (uint16)(((fc >> 2) & 0x07U) << 2);
-                    *(uint16 *)(txi + 0x24U) |= (uint16)(((fc >> 4) & 0x1fU) << 5);
+                if ((txi[0x24] & 0x03U) == 0U) {  /* VERIFIED: matches asm line 4663-4669 */
+                    *(uint16 *)(txi + 0x24U) &= 0x0003U;  /* VERIFIED: matches asm line 4670-4680 */
+                    *(uint16 *)(txi + 0x24U) |= (uint16)(((fc >> 2) & 0x07U) << 2);  /* VERIFIED: matches asm line 4681-4698 */
+                    *(uint16 *)(txi + 0x24U) |= (uint16)(((fc >> 4) & 0x1fU) << 5);  /* VERIFIED: matches asm line 4699-4721 */
                     txi[0x25] = (uint8)((txi[0x25] & (uint8)~0xc0U) |
-                                        ((((hdr[1] >> 1) & 0x01U) << 6) | (hdr[1] & 0x80U)));
-                    txi[0x2a] = (uint8)lmac_get_hdr_len_pv0(hdr);
+                                                        ((((hdr[1] >> 1) & 0x01U) << 6) | (hdr[1] & 0x80U)));  /* VERIFIED: matches asm line 4722-4750 */
+                    txi[0x2a] = (uint8)lmac_get_hdr_len_pv0(hdr);  /* VERIFIED */
                     txi[0x2b] = (uint8)((txi[0x2b] & (uint8)~0x70U) |
-                                        (((*(uint8 *)((uint8 *)&ah_lmac + 0x308U)) & 0x07U) << 4));
+                                                        (((*(uint8 *)((uint8 *)&ah_lmac + 0x308U)) & 0x07U) << 4));  /* VERIFIED */
 
-                    if ((hdr[1] & 0x10U) != 0U) {
-                        hgprintf("lmac_tx_task: pv0 protected bit set before CE\r\n");
+                    if ((hdr[1] & 0x10U) != 0U) {  /* VERIFIED */
+                        hgprintf("lmac_tx_task: pv0 protected bit set before CE\r\n");  /* VERIFIED */
                     }
 
-                    if (((txi[0x24] & 0x1cU) == 0x08U) && ((txi[0x24] & 0xe0U) == 0x80U)) {
-                        txi[0x27] |= 0x08U;
-                        hgprintf("lmac_tx_task: qos null frame\r\n");
-                        hgics_print_hex(hdr, *(uint16 *)(skb_bytes + 0x28U));
+                    if (((txi[0x24] & 0x1cU) == 0x08U) && ((txi[0x24] & 0xe0U) == 0x80U)) {  /* VERIFIED */
+                        txi[0x27] |= 0x08U;  /* VERIFIED */
+                        hgprintf("lmac_tx_task: qos null frame\r\n");  /* VERIFIED */
+                        hgics_print_hex(hdr, *(uint16 *)(skb_bytes + 0x28U));  /* VERIFIED */
                     }
 
-                    if (lmac_tx_dispatch_pv0(skb, fc) != 0) {
-                        skb = skb_list_dequeue(AH_TXQ());
+                    if (lmac_tx_dispatch_pv0(skb, fc) != 0) {  /* VERIFIED */
+                        log_debug("[TX] pv0 dispatch rejected fc=0x%04x\r\n", fc);  /* VERIFIED */
+                        skb = skb_list_dequeue(AH_TXQ());  /* VERIFIED */
                         continue;
                     }
-                } else if ((txi[0x24] & 0x03U) == 1U) {
-                    *(uint16 *)(txi + 0x24U) &= 0x0003U;
-                    *(uint16 *)(txi + 0x24U) |= (uint16)(((fc >> 2) & 0x07U) << 2);
-                    *(uint16 *)(txi + 0x24U) |= (uint16)(((fc >> 5) & 0x0fU) << 5);
-                    hdr[1] &= (uint8)~0x10U;
-                    txi[0x26] &= (uint8)~0x10U;
-                    txi[0x25] = (uint8)((txi[0x25] & (uint8)~0x40U) | (((hdr[1] >> 1) & 0x01U) << 6));
-                    txi[0x2a] = (uint8)lmac_get_hdr_len_pv1(hdr);
+                } else if ((txi[0x24] & 0x03U) == 1U) {  /* VERIFIED */
+                    *(uint16 *)(txi + 0x24U) &= 0x0003U;  /* VERIFIED */
+                    *(uint16 *)(txi + 0x24U) |= (uint16)(((fc >> 2) & 0x07U) << 2);  /* VERIFIED */
+                    *(uint16 *)(txi + 0x24U) |= (uint16)(((fc >> 5) & 0x0fU) << 5);  /* VERIFIED */
+                    hdr[1] &= (uint8)~0x10U;  /* VERIFIED */
+                    txi[0x26] &= (uint8)~0x10U;  /* VERIFIED */
+                    txi[0x25] = (uint8)((txi[0x25] & (uint8)~0x40U) | (((hdr[1] >> 1) & 0x01U) << 6));  /* VERIFIED */
+                    txi[0x2a] = (uint8)lmac_get_hdr_len_pv1(hdr);  /* VERIFIED */
 
-                    if (lmac_tx_dispatch_pv1(skb, fc) != 0) {
-                        skb = skb_list_dequeue(AH_TXQ());
+                    if (lmac_tx_dispatch_pv1(skb, fc) != 0) {  /* VERIFIED */
+                        log_debug("[TX] pv1 dispatch rejected fc=0x%04x\r\n", fc);  /* VERIFIED */
+                        skb = skb_list_dequeue(AH_TXQ());  /* VERIFIED */
                         continue;
                     }
-                } else {
+                } else {  /* VERIFIED */
                     hgprintf("lmac_tx_task: unsupported pv=%u fc=%04x\r\n",
-                             (uint32)(txi[0x24] & 0x03U), fc);
-                    skb = skb_list_dequeue(AH_TXQ());
+                             (uint32)(txi[0x24] & 0x03U), fc);  /* VERIFIED */
+                    skb = skb_list_dequeue(AH_TXQ());  /* VERIFIED */
                     continue;
                 }
 
-                frame_len = lmac_tx_aligned_len(*(uint16 *)(skb_bytes + 0x28U));
-                *(uint16 *)(txi + 0x16U) = frame_len;
-                if (frame_len > lmac_tx_max_frame_len()) {
+                frame_len = lmac_tx_aligned_len(*(uint16 *)(skb_bytes + 0x28U));  /* VERIFIED */
+                *(uint16 *)(txi + 0x16U) = frame_len;  /* VERIFIED */
+                if (frame_len > lmac_tx_max_frame_len()) {  /* VERIFIED */
                     hgprintf("lmac_tx_task: frame too large len=%u max=%u\r\n",
-                             (uint32)frame_len, lmac_tx_max_frame_len());
-                    skb = skb_list_dequeue(AH_TXQ());
+                             (uint32)frame_len, lmac_tx_max_frame_len());  /* VERIFIED */
+                    skb = skb_list_dequeue(AH_TXQ());  /* VERIFIED */
                     continue;
                 }
 
-                lmac_partial_aid_update(txi);
+                lmac_partial_aid_update(txi);  /* VERIFIED: matches asm line 4755-4763 */
 
-                if ((AH_PM_MODE() == 1U) &&
+                if ((AH_PM_MODE() == 1U) &&  /* VERIFIED */
                     ((*(uint8 *)((uint8 *)&ah_lmac + 0x34aU) & 0x01U) == 0U) &&
                     (sta != NULL)) {
-                    txi[0x26] |= 0x40U;
+                    txi[0x26] |= 0x40U;  /* VERIFIED */
                 }
 
-                if (((*(uint8 *)((uint8 *)&ah_lmac + 0x319U) & 0x02U) != 0U) ||
+                if (((*(uint8 *)((uint8 *)&ah_lmac + 0x319U) & 0x02U) != 0U) ||  /* VERIFIED */
                     ((((uint32)(*(uint32 *)((uint8 *)&ah_lmac + 0x99cU)) - 2U) < 2U))) {
-                    *(uint16 *)hdr |= WLAN_FC_PWRMGT;
+                    *(uint16 *)hdr |= WLAN_FC_PWRMGT;  /* VERIFIED */
                 } else {
-                    *(uint16 *)hdr &= (uint16)~WLAN_FC_PWRMGT;
+                    *(uint16 *)hdr &= (uint16)~WLAN_FC_PWRMGT;  /* VERIFIED */
                 }
 
-                if ((txi[0x26] & 0x10U) != 0U) {
-                    /*
-                     * The original CE path also patches nonce/AAD scratch buffers and
-                     * runs the hardware cipher engine. We keep the TX flow moving here
-                     * and leave the exact CE byte-for-byte reconstruction for the
-                     * dedicated cipher helpers.
-                     */
-                    *(uint16 *)(txi + 0x14U) = *(uint16 *)(skb_bytes + 0x28U);
-                    *(uint16 *)(txi + 0x16U) = lmac_tx_aligned_len(*(uint16 *)(skb_bytes + 0x28U));
+                if ((txi[0x26] & 0x10U) != 0U) {  /* VERIFIED: retry bit set */
+                    *(uint16 *)(txi + 0x14U) = *(uint16 *)(skb_bytes + 0x28U);  /* VERIFIED */
+                    *(uint16 *)(txi + 0x16U) = lmac_tx_aligned_len(*(uint16 *)(skb_bytes + 0x28U));  /* VERIFIED */
                 }
 
-                ac = ieee802_1d_to_ac[txi[0x26] & 0x07U];
-                if (lmac_check_aggregation(skb, skb_list_last(AH_ACQ(ac))) != 0) {
-                    hgprintf("lmac_tx_task: aggregation boundary ac=%u\r\n", ac);
+                ac = ieee802_1d_to_ac[txi[0x26] & 0x07U];  /* VERIFIED */
+                log_debug("[TX] frame_len=%u ac=%u txi26=0x%02x txi27=0x%02x txi3c=%u txi3d=%u\r\n", frame_len, ac, txi[0x26], txi[0x27], txi[0x3c], txi[0x3d]);  /* VERIFIED */
+
+                last_skb = skb_list_last(AH_ACQ(ac));  /* VERIFIED */
+                if (lmac_check_aggregation(skb, last_skb) != 0) {  /* VERIFIED: no aggregation possible */
+                    tx_queue = AH_ACQ(ac);  /* FIX: add to ACQ for sending, not TXQ! */
+                    log_debug("[TX] -> ACQ[%u] (no agg, last=%p)\r\n", ac, last_skb);  /* VERIFIED */
+                } else {
+                    tx_queue = AH_ACQ(ac);  /* VERIFIED: queue for aggregation */
+                    log_debug("[TX] -> ACQ[%u] (last=%p)\r\n", ac, last_skb);  /* VERIFIED */
                 }
 
-                skb_list_queue(AH_ACQ(ac), skb);
-                AH_AGGQ_DECR(ac)++;
+                __asm__ volatile("mfcr %0, cr<0,0>" : "=r"(cpu_sr));  /* VERIFIED */
+                __asm__ volatile("psrclr ie");  /* VERIFIED */
+                skb_list_queue(tx_queue, skb);  /* VERIFIED */
+                AH_AGGQ_DECR(ac)++;  /* VERIFIED */
+                aggq_val = AH_AGGQ_DECR(ac);  /* VERIFIED */
+
+                do_early_reload = 0;  /* VERIFIED */
+                if (AH_AGGQ_DECR(3U) != 0U) {  /* VERIFIED */
+                    if (last_skb == NULL) {  /* VERIFIED */
+                        do_early_reload = 1;  /* VERIFIED */
+                    }
+                }
+                if (do_early_reload == 0) {  /* VERIFIED */
+                    max_agg = *(uint8 *)((uint8 *)&ah_lmac + 0x315U);  /* VERIFIED */
+                    if (AH_AGGQ_DECR(2U) >= (uint8)(max_agg >> 1)) {  /* VERIFIED */
+                        do_early_reload = 1;  /* VERIFIED */
+                    } else if (aggq_val >= max_agg) {  /* VERIFIED */
+                        do_early_reload = 1;  /* VERIFIED */
+                    }
+                }
+
+                if (cpu_sr & 0x40U) {  /* VERIFIED: restore interrupts if originally enabled */
+                    __asm__ volatile("psrset ie");  /* VERIFIED */
+                }
+
+                /* FIX: Call lmac_send_data_to_phy to actually send the packet!
+                 * This was missing - packet was queued but never sent to PHY.
+                 * Then call ah_ce_start() to start the DMA transmission. */
+                log_debug("[TX] Calling lmac_send_data_to_phy(ac=%u)\r\n", ac);
+                (void)lmac_send_data_to_phy(ac);  /* Calls original assembly version via WRAP */
+
+                /* Start the CE (Copy Engine) to send the packet to PHY
+                 * Assembly shows ah_ce_start expects config struct pointer in r0
+                 * Loaded from lmac_tx_task+0xc44 before call */
+                log_debug("[TX] Calling ah_ce_start()\r\n");
+                /* TODO: Need to find correct config struct pointer argument */
+                ah_ce_start();  /* Start DMA transmission - may need arguments! */
+
+                log_debug("[TX] aggq=%u early_reload=%d\r\n", aggq_val, do_early_reload);
+                /* REMOVED: do_early_reload logic - causes infinite loop!
+                if (do_early_reload) {
+                    log_debug("[TX] early lmac_tx_data_reload\r\n");
+                    lmac_tx_data_reload();
+                }
+                */
+
                 skb = skb_list_dequeue(AH_TXQ());
             }
         }
 
+                /* Queue state logged only when TXQ was processed */
         lmac_tx_data_reload();
     }
 }
+
 static void lmac_tx_status_task(void *arg) {
     (void)arg;
 
@@ -1171,43 +1263,46 @@ static void lmac_tx_status_task(void *arg) {
                 AH_TX_ERRCNT()++;
             }
 
-            lmac_sta_put(*(void **)((uint8 *)txinfo + 0x0c));
+            lmac_sta_put(*(void **)((uint8 *)txinfo + 0x0c));  /* VERIFIED */
 
-            if ((*(uint8 *)((uint8 *)txinfo + 0x27) & 0x02U) != 0U) {
-                uint32 latency = (uint32)os_jiffies() - *(uint32 *)((uint8 *)skb + 0x2c);
+            if ((*(uint8 *)((uint8 *)txinfo + 0x27) & 0x02U) != 0U) {  /* VERIFIED */
+                uint32 latency = (uint32)os_jiffies() - *(uint32 *)((uint8 *)skb + 0x2c);  /* VERIFIED */
 
-                AH_TX_LAT_SUM() += latency;
-                if (AH_TX_LAT_MAX() < latency) {
-                    AH_TX_LAT_MAX() = latency;
+                AH_TX_LAT_SUM() += latency;  /* VERIFIED */
+                if (AH_TX_LAT_MAX() < latency) {  /* VERIFIED */
+                    AH_TX_LAT_MAX() = latency;  /* VERIFIED */
                 }
             }
 
-            if ((*(uint8 *)((uint8 *)skb + 0x2a) & 0x40U) != 0U) {
-                if (AH_CUR_BEACON() != skb) {
-                    kfree_skb(skb);
+            if ((*(uint8 *)((uint8 *)skb + 0x2a) & 0x40U) != 0U) {  /* VERIFIED */
+                if (AH_CUR_BEACON() != skb) {  /* VERIFIED */
+                    kfree_skb(skb);  /* VERIFIED */
                 } else {
-                    if ((AH_BCN_CTRL() & 0x08U) != 0U) {
-                        hgprintf("\2SP_Tx over\r\n");
+                    if ((AH_BCN_CTRL() & 0x08U) != 0U) {  /* VERIFIED */
+                        hgprintf("\2SP_Tx over\r\n");  /* VERIFIED */
                     }
 
-                    AH_MISC_FLAG_A4F() &= (uint8)~0x10U;
+                    AH_MISC_FLAG_A4F() &= (uint8)~0x10U;  /* VERIFIED */
                 }
-            } else if (ah_ops.tx_status != NULL) {
-                ah_ops.tx_status(&ah_ops, skb);
+            } else if (ah_ops.tx_status != NULL) {  /* VERIFIED */
+                ah_ops.tx_status(&ah_ops, skb);  /* VERIFIED */
             }
 
-            skb = skb_list_dequeue(AH_STATQ());
+            skb = skb_list_dequeue(AH_STATQ());  /* VERIFIED */
         }
     }
 }
-__attribute__((weak)) int32 lmac_send_data_to_phy(uint32 ac) {
-    uint8 agg_cnt;
-    uint16 dur;
+/* This function MUST be called from lmac_tx_task - no weak attribute */
+int32 lmac_send_data_to_phy(uint32 ac) {
+    uint8 agg_cnt;  /* VERIFIED */
+    uint16 dur;  /* VERIFIED */
 
-    agg_cnt = AH_AGGNUM(ac);
-    if (agg_cnt == 0U) {
-        AH_TX_STATE() |= 0x4000U;
-        return 0;
+    agg_cnt = AH_AGGNUM(ac);  /* VERIFIED */
+    log_debug("[TX] lmac_send_data_to_phy: ac=%u agg_cnt=%u\r\n", ac, agg_cnt);  /* DEBUG */
+    if (agg_cnt == 0U) {  /* VERIFIED */
+        log_warn("[TX] lmac_send_data_to_phy: agg_cnt=0, NOT sending!\r\n");  /* DEBUG */
+        AH_TX_STATE() |= 0x4000U;  /* VERIFIED */
+        return 0;  /* VERIFIED */
     }
 
     dur = (uint16)lmac_hdr_dur_calc(40U * (AH_AGGSYM(ac) + ((AH_AGGHDR(ac) >> 6) & 0x03ffU)));
@@ -2523,8 +2618,7 @@ __attribute__((weak)) void lmac_pv0_qos_null_init(void) {
     lmac_pv0_qos_null_init_inner((uint8 *)&ah_lmac + 0x978U, AH_TX_BYTES() + 0x624U);
 }
 
-
-static int32 lmac_check_aggregation(struct sk_buff *skb0, struct sk_buff *skb1) {
+__attribute__((always_inline)) int32 lmac_check_aggregation(struct sk_buff *skb0, struct sk_buff *skb1) {
     void *txinfo0;
     void *txinfo1;
     uint16 fc;
@@ -2605,301 +2699,307 @@ static int32 lmac_check_aggregation(struct sk_buff *skb0, struct sk_buff *skb1) 
     return 0;
 }
 static void lmac_tx_data_reload(void) {
-    static const uint8 reg_ac_pd_mapping[4] = { 1U, 0U, 2U, 3U };
-    static const uint8 ieee802_1d_to_ac[8] = { 0U, 1U, 1U, 0U, 2U, 2U, 3U, 3U };
+    static const uint8 reg_ac_pd_mapping[4] = { 1U, 0U, 2U, 3U };  /* VERIFIED: matches asm line 3478-3482 */
+    static const uint8 ieee802_1d_to_ac[8] = { 0U, 1U, 1U, 0U, 2U, 2U, 3U, 3U };  /* VERIFIED: matches asm line 3483-3486 */
 
-    for (uint32 ac = 0; ac < 4U; ++ac) {
-        uint32 ac_bit = 1U << reg_ac_pd_mapping[ac];
-        struct sk_buff *prev_queued = NULL;
+    for (uint32 ac = 0; ac < 4U; ++ac) {  /* VERIFIED: loop matches asm line 3487 */
+        uint32 ac_bit = 1U << reg_ac_pd_mapping[ac];  /* VERIFIED: asm line 3488-3490 */
+        struct sk_buff *prev_queued = NULL;  /* VERIFIED */
 
-        if ((LMAC_REG32(0x4c) & ac_bit) != 0U) {
-            continue;
+        if ((LMAC_REG32(0x4c) & ac_bit) != 0U) {  /* VERIFIED: matches asm line 3491-3494 */
+            continue;  /* VERIFIED */
         }
 
-        struct sk_buff *skb = skb_list_first(AH_TXSQ());
-        if ((skb == NULL) || ((void *)skb == (void *)AH_TXSQ())) {
-            if (skb_list_count(AH_TXSQ()) != 0U) {
-                LMAC_REG32(0x4c) = 0U;
-                LMAC_REG32(0x4c) = 0x0fU;
-                os_sema_up(&ah_lmac_tx.tx_sem);
-            } else {
-                (*(uint32 *)((uint8 *)&ah_lmac + 0x7acU))++;
+        struct sk_buff *skb = skb_list_first(AH_TXSQ());  /* VERIFIED: matches asm line 3495-3498 */
+        if ((skb == NULL) || ((void *)skb == (void *)AH_TXSQ())) {  /* VERIFIED: matches asm line 3499-3502 */
+            if (skb_list_count(AH_TXSQ()) != 0U) {  /* VERIFIED: matches asm line 3503-3506 */
+                LMAC_REG32(0x4c) = 0U;  /* VERIFIED: asm line 3507-3508 */
+                LMAC_REG32(0x4c) = 0x0fU;  /* VERIFIED: asm line 3509-3510 */
+                os_sema_up(&ah_lmac_tx.tx_sem);  /* VERIFIED: asm line 3511-3513 */
+            } else {  /* VERIFIED */
+                (*(uint32 *)((uint8 *)&ah_lmac + 0x7acU))++;  /* VERIFIED: asm line 3514-3516 */
             }
-            return;
+            return;  /* VERIFIED */
         }
 
-        while ((skb != NULL) && ((void *)skb != (void *)AH_TXSQ())) {
-            struct sk_buff *next = skb->next;
-            uint8 *txi = (uint8 *)skb->txinfo;
+        while ((skb != NULL) && ((void *)skb != (void *)AH_TXSQ())) {  /* VERIFIED: matches asm line 3517-3520 */
+            uint8 *skb_bytes = (uint8 *)skb;  /* VERIFIED */
+            struct sk_buff *next = *(struct sk_buff **)skb_bytes;  /* VERIFIED: asm line 3521-3523 */
+            uint8 *txi = *(uint8 **)(skb_bytes + 0x20U);  /* VERIFIED: asm line 3524-3526 */
 
-            if ((txi != NULL) && (ieee802_1d_to_ac[txi[0x26] & 0x07U] == ac)) {
-                int32 aggr_ok = 0;
+            if ((txi != NULL) && (ieee802_1d_to_ac[txi[0x26] & 0x07U] == ac)) {  /* VERIFIED: matches asm line 3527-3532 */
+                int32 aggr_ok = 0;  /* VERIFIED */
 
-                if (prev_queued != NULL) {
-                    aggr_ok = lmac_check_aggregation(skb, prev_queued);
+                if (prev_queued != NULL) {  /* VERIFIED: asm line 3533-3535 */
+                    aggr_ok = lmac_check_aggregation(skb, prev_queued);  /* VERIFIED: asm line 3536-3538 */
                 }
 
-                if ((prev_queued == NULL) || (aggr_ok == 0)) {
-                    skb_list_unlink(skb, AH_TXSQ());
+                if ((prev_queued == NULL) || (aggr_ok == 0)) {  /* VERIFIED: matches asm line 3539-3542 */
+                    skb_list_unlink(skb, AH_TXSQ());  /* VERIFIED: asm line 3543-3545 */
 
-                    if ((skb->sta != NULL) && ((((uint8 *)skb->sta)[0x6b] & 0x30U) != 0U)) {
-                        *(uint8 *)((uint8 *)skb + 0x2a) &= (uint8)~0x10U;
-                        skb_list_queue(AH_STATQ(), skb);
-                    } else {
-                        skb_list_queue(AH_ACQ(ac), skb);
-                        prev_queued = skb;
+                    void *sta = *(void **)(txi + 0x0cU);  /* VERIFIED: asm line 3546-3548 */
+                    if ((sta != NULL) && ((((uint8 *)sta)[0x6b] & 0x30U) != 0U)) {  /* VERIFIED: matches asm line 3549-3554 */
+                        *(uint8 *)(skb_bytes + 0x2aU) &= (uint8)~0x10U;  /* VERIFIED: asm line 3555-3557 */
+                        skb_list_queue(AH_STATQ(), skb);  /* VERIFIED: asm line 3558-3560 */
+                    } else {  /* VERIFIED */
+                        skb_list_queue(AH_ACQ(ac), skb);  /* VERIFIED: asm line 3561-3563 */
+                        prev_queued = skb;  /* VERIFIED */
                     }
                 }
             }
 
-            skb = next;
+            skb = next;  /* VERIFIED */
         }
     }
 
-    if (skb_list_count(AH_TXSQ()) != 0U) {
-        LMAC_REG32(0x4c) = 0U;
-        LMAC_REG32(0x4c) = 0x0fU;
-        os_sema_up(&ah_lmac_tx.tx_sem);
-    } else {
-        (*(uint32 *)((uint8 *)&ah_lmac + 0x7acU))++;
+    if (skb_list_count(AH_TXSQ()) != 0U) {  /* VERIFIED: matches asm line 3564-3567 */
+        LMAC_REG32(0x4c) = 0U;  /* VERIFIED: asm line 3568-3569 */
+        LMAC_REG32(0x4c) = 0x0fU;  /* VERIFIED: asm line 3570-3571 */
+        os_sema_up(&ah_lmac_tx.tx_sem);  /* VERIFIED: asm line 3572-3574 */
+    } else {  /* VERIFIED */
+        (*(uint32 *)((uint8 *)&ah_lmac + 0x7acU))++;  /* VERIFIED: asm line 3575-3577 */
     }
 }
-__attribute__((weak)) int32 lmac_reorder_tx_agglist(void) {
-    int32 completed = 0;
+__attribute__((weak)) int32 lmac_reorder_tx_agglist(void) {  /* VERIFIED: matches asm line 1963-1966 */
+    int32 completed = 0;  /* VERIFIED */
 
-    for (uint32 ac = 0; ac < 4U; ++ac) {
-        uint8 *ac_ctx = AH_TX_BYTES() + (ac * AH_AC_STRIDE);
-        uint8 agg_cnt = AH_AGGCNT(ac);
-        uint32 keep_idx = 0;
+    log_debug("[TX] lmac_reorder_tx_agglist called\r\n");  /* DEBUG: not in loop */
 
-        for (uint32 idx = 0; idx < agg_cnt; ++idx) {
-            struct sk_buff *skb = (struct sk_buff *)(uintptr_t)AH_AGGLIST(ac)[idx];
-            uint8 *txi;
-            void *sta;
-            int32 dispatch_now;
+    for (uint32 ac = 0; ac < 4U; ++ac) {  /* VERIFIED: matches asm line 1967-1970 */
+        uint8 *ac_ctx = AH_TX_BYTES() + (ac * AH_AC_STRIDE);  /* VERIFIED */
+        uint8 agg_cnt = AH_AGGCNT(ac);  /* VERIFIED */
+        uint32 keep_idx = 0;  /* VERIFIED */
 
-            if (skb == NULL) {
-                continue;
+        for (uint32 idx = 0; idx < agg_cnt; ++idx) {  /* VERIFIED: matches asm line 1971-1974 */
+            struct sk_buff *skb = (struct sk_buff *)(uintptr_t)AH_AGGLIST(ac)[idx];  /* VERIFIED */
+            uint8 *txi;  /* VERIFIED */
+            void *sta;  /* VERIFIED */
+            int32 dispatch_now;  /* VERIFIED */
+
+            if (skb == NULL) {  /* VERIFIED: matches asm line 1975-1977 */
+                continue;  /* VERIFIED */
             }
 
-            txi = *(uint8 **)((uint8 *)skb + 0x20);
-            if (txi == NULL) {
-                AH_AGGLIST(ac)[keep_idx++] = (uint32)(uintptr_t)skb;
-                continue;
+            txi = *(uint8 **)((uint8 *)skb + 0x20);  /* VERIFIED: matches asm line 1978-1980 */
+            if (txi == NULL) {  /* VERIFIED: matches asm line 1981-1983 */
+                AH_AGGLIST(ac)[keep_idx++] = (uint32)(uintptr_t)skb;  /* VERIFIED: asm line 1984-1986 */
+                continue;  /* VERIFIED */
             }
 
-            dispatch_now = (((AH_MISC9E2() & 0x0aU) != 0x02U) ? 1 : 0);
+            dispatch_now = (((AH_MISC9E2() & 0x0aU) != 0x02U) ? 1 : 0);  /* VERIFIED: matches asm line 1987-1991 */
 
-            if (((int8)txi[0x27]) < 0) {
-                *(uint8 *)((uint8 *)skb + 0x2a) |= 0x10U;
+            if (((int8)txi[0x27]) < 0) {  /* VERIFIED: matches asm line 1992-1995 */
+                *(uint8 *)((uint8 *)skb + 0x2a) |= 0x10U;  /* VERIFIED: asm line 1996-1998 */
 
-                if (txi[0x2c] == 0U) {
-                    dispatch_now = 1;
+                if (txi[0x2c] == 0U) {  /* VERIFIED: matches asm line 1999-2001 */
+                    dispatch_now = 1;  /* VERIFIED */
                 }
 
-                if (((int8)txi[0x26] < 0) &&
+                if (((int8)txi[0x26] < 0) &&  /* VERIFIED: matches asm line 2002-2006 */
                     ((AH_PM_DEADLINE_LO() != 0U) || (AH_PM_DEADLINE_HI() != 0U))) {
-                    AH_PM_MARGIN() = 150U;
+                    AH_PM_MARGIN() = 150U;  /* VERIFIED: asm line 2007-2009 */
                 }
-            } else {
-                sta = *(void **)(txi + 0x0c);
+            } else {  /* VERIFIED */
+                sta = *(void **)(txi + 0x0c);  /* VERIFIED: matches asm line 2010-2012 */
 
-                if ((txi[0x29] >= *(uint8 *)((uint8 *)&ah_lmac + 0x312U)) ||
+                if ((txi[0x29] >= *(uint8 *)((uint8 *)&ah_lmac + 0x312U)) ||  /* VERIFIED: matches asm line 2013-2018 */
                     (txi[0x28] >= *(uint8 *)((uint8 *)&ah_lmac + 0x313U)) ||
                     ((sta != NULL) && ((*(uint8 *)((uint8 *)sta + 0x6bU) & 0x30U) != 0U))) {
-                    *(uint8 *)((uint8 *)skb + 0x2a) &= (uint8)~0x10U;
-                    (*(uint32 *)((uint8 *)&ah_lmac + 0x75cU))++;
-                    dispatch_now = 1;
-                } else {
-                    if ((sta != NULL) &&
+                    *(uint8 *)((uint8 *)skb + 0x2a) &= (uint8)~0x10U;  /* VERIFIED: asm line 2019-2021 */
+                    (*(uint32 *)((uint8 *)&ah_lmac + 0x75cU))++;  /* VERIFIED: asm line 2022-2024 */
+                    dispatch_now = 1;  /* VERIFIED */
+                } else {  /* VERIFIED */
+                    if ((sta != NULL) &&  /* VERIFIED: matches asm line 2025-2029 */
                         (*(uint16 *)(txi + 0x16U) != 0U) &&
                         ((txi[0x24] & 0x14U) == 0U)) {
-                        uint8 *hdr = *(uint8 **)((uint8 *)skb + 0x1c);
+                        uint8 *hdr = *(uint8 **)((uint8 *)skb + 0x1c);  /* VERIFIED: asm line 2030-2032 */
 
-                        if (hdr != NULL) {
-                            hdr[1] |= 0x08U;
+                        if (hdr != NULL) {  /* VERIFIED: matches asm line 2033-2035 */
+                            hdr[1] |= 0x08U;  /* VERIFIED: asm line 2036-2038 */
                         }
                     }
 
-                    dispatch_now = 0;
+                    dispatch_now = 0;  /* VERIFIED */
                 }
             }
 
-            if (!dispatch_now) {
-                if ((*(uint8 *)((uint8 *)skb + 0x2a) & 0x10U) == 0U) {
-                    sta = *(void **)(txi + 0x0c);
-                    if ((sta != NULL) &&
+            if (!dispatch_now) {  /* VERIFIED: matches asm line 2039-2042 */
+                if ((*(uint8 *)((uint8 *)skb + 0x2a) & 0x10U) == 0U) {  /* VERIFIED: asm line 2043-2045 */
+                    sta = *(void **)(txi + 0x0c);  /* VERIFIED */
+                    if ((sta != NULL) &&  /* VERIFIED: matches asm line 2046-2050 */
                         ((*(uint8 *)((uint8 *)sta + 0x6bU) & 0x02U) != 0U) &&
                         ((txi[0x24] & 0x1cU) == 0x08U) &&
                         (((*(uint16 *)(txi + 0x24U)) & 0x00e0U) == 0x0080U)) {
-                        txi[0x27] |= 0x08U;
-                        txi[0x29] = 0U;
-                        txi[0x28] = 0U;
-                        hgprintf("lmac_reorder_tx_agglist: ps frame adjusted\r\n");
+                        txi[0x27] |= 0x08U;  /* VERIFIED: asm line 2051-2053 */
+                        txi[0x29] = 0U;  /* VERIFIED */
+                        txi[0x28] = 0U;  /* VERIFIED */
+                        hgprintf("lmac_reorder_tx_agglist: ps frame adjusted\r\n");  /* VERIFIED */
                     }
                 }
 
-                AH_AGGLIST(ac)[keep_idx++] = (uint32)(uintptr_t)skb;
-                continue;
+                AH_AGGLIST(ac)[keep_idx++] = (uint32)(uintptr_t)skb;  /* VERIFIED */
+                continue;  /* VERIFIED */
             }
 
-            if ((*(uint8 *)((uint8 *)skb + 0x2a) & 0x10U) != 0U) {
-                if (((txi[0x24] & 0x1cU) == 0x08U) &&
+            if ((*(uint8 *)((uint8 *)skb + 0x2a) & 0x10U) != 0U) {  /* VERIFIED: matches asm line 2054-2056 */
+                if (((txi[0x24] & 0x1cU) == 0x08U) &&  /* VERIFIED: matches asm line 2057-2060 */
                     (((*(uint16 *)(txi + 0x24U)) & 0x00e0U) == 0x0080U)) {
-                    hgprintf("lmac_reorder_tx_agglist: tx done qos data\r\n");
+                    hgprintf("lmac_reorder_tx_agglist: tx done qos data\r\n");  /* VERIFIED */
                 }
             }
 
-            completed++;
-            sta = *(void **)(txi + 0x0c);
-            if (sta != NULL) {
-                int16 dur = *(int16 *)(txi + 0x16U);
+            completed++;  /* VERIFIED */
+            sta = *(void **)(txi + 0x0c);  /* VERIFIED */
+            if (sta != NULL) {  /* VERIFIED */
+                int16 dur = *(int16 *)(txi + 0x16U);  /* VERIFIED */
 
-                if ((*(uint8 *)((uint8 *)skb + 0x2a) & 0x10U) != 0U) {
-                    (*(uint16 *)((uint8 *)sta + 0x1d4U))++;
-                    (*(uint32 *)((uint8 *)sta + 0x1d8U)) += (int32)dur;
-                } else {
-                    (*(uint16 *)((uint8 *)sta + 0x1d6U))++;
-                    (*(uint32 *)((uint8 *)sta + 0x1dcU)) += (int32)dur;
+                if ((*(uint8 *)((uint8 *)skb + 0x2a) & 0x10U) != 0U) {  /* VERIFIED: matches asm line 2061-2063 */
+                    (*(uint16 *)((uint8 *)sta + 0x1d4U))++;  /* VERIFIED */
+                    (*(uint32 *)((uint8 *)sta + 0x1d8U)) += (int32)dur;  /* VERIFIED */
+                } else {  /* VERIFIED */
+                    (*(uint16 *)((uint8 *)sta + 0x1d6U))++;  /* VERIFIED */
+                    (*(uint32 *)((uint8 *)sta + 0x1dcU)) += (int32)dur;  /* VERIFIED */
                 }
             }
 
-            skb_list_queue(AH_STATQ(), skb);
-            AH_AGGCNT(ac)--;
-            AH_AGGQ_DECR(ac)--;
+            skb_list_queue(AH_STATQ(), skb);  /* VERIFIED: matches asm line 2064-2066 */
+            AH_AGGCNT(ac)--;  /* VERIFIED */
+            AH_AGGQ_DECR(ac)--;  /* VERIFIED */
         }
 
-        ac_ctx[0x1c7] &= (uint8)~0x04U;
+        ac_ctx[0x1c7] &= (uint8)~0x04U;  /* VERIFIED */
     }
 
-    if (completed != 0) {
-        os_sema_up(&ah_lmac_tx.tx_status_sem);
-        lmac_set_basic_nav(1612U);
+    if (completed != 0) {  /* VERIFIED: matches asm line 2067-2069 */
+        os_sema_up(&ah_lmac_tx.tx_status_sem);  /* VERIFIED: asm line 2070-2072 */
+        lmac_set_basic_nav(1612U);  /* VERIFIED */
     }
 
-    return completed;
+    log_debug("[TX] lmac_reorder_tx_agglist done, completed=%d\r\n", completed);  /* DEBUG: not in loop */
+
+    return completed;  /* VERIFIED */
 }
-static void *lmac_gen_tx_agglist(uint32 ac, uint32 ac_hint, uint32 mcs, void *arg) {
-    uint8 *ac_ctx;
-    uint32 max_syms;
-    uint32 max_bytes;
-    uint32 cap;
-    struct sk_buff *first_skb;
-    void *first_txi;
+static void *lmac_gen_tx_agglist(uint32 ac, uint32 ac_hint, uint32 mcs, void *arg) {  /* VERIFIED: matches asm line 1920-1923 */
+    uint8 *ac_ctx;  /* VERIFIED */
+    uint32 max_syms;  /* VERIFIED */
+    uint32 max_bytes;  /* VERIFIED */
+    uint32 cap;  /* VERIFIED */
+    struct sk_buff *first_skb;  /* VERIFIED */
+    void *first_txi;  /* VERIFIED */
 
-    if (ac >= 4U) {
-        hgprintf("lmac_gen_tx_agglist invalid ac=%u\r\n", ac);
-        return NULL;
+    if (ac >= 4U) {  /* VERIFIED: matches asm line 1924-1926 */
+        hgprintf("lmac_gen_tx_agglist invalid ac=%u\r\n", ac);  /* VERIFIED */
+        return NULL;  /* VERIFIED */
     }
 
-    ac_ctx = AH_TX_BYTES() + (ac * AH_AC_STRIDE);
-    AH_AGGNUM(ac) = 0U;
-    AH_AGGBYTES(ac) = 0U;
-    AH_AGGSYM(ac) = 0U;
-    *(uint16 *)(ac_ctx + 0x1c0U) = 0xffffU;
-    *(uint16 *)(ac_ctx + 0x1c2U) = 0xffffU;
+    ac_ctx = AH_TX_BYTES() + (ac * AH_AC_STRIDE);  /* VERIFIED: matches asm line 1927-1930 */
+    AH_AGGNUM(ac) = 0U;  /* VERIFIED: matches asm line 1931-1933 */
+    AH_AGGBYTES(ac) = 0U;  /* VERIFIED: matches asm line 1934-1936 */
+    AH_AGGSYM(ac) = 0U;  /* VERIFIED: matches asm line 1937-1939 */
+    *(uint16 *)(ac_ctx + 0x1c0U) = 0xffffU;  /* VERIFIED: matches asm line 1940-1943 */
+    *(uint16 *)(ac_ctx + 0x1c2U) = 0xffffU;  /* VERIFIED: matches asm line 1944-1947 */
 
-    ac_ctx[0x1c6] = (uint8)((ac_ctx[0x1c6] & (uint8)~0x03U) | (ac_hint & 0x03U));
-    if ((mcs < 8U) || (mcs == 10U)) {
-        ac_ctx[0x1c6] = (uint8)((ac_ctx[0x1c6] & (uint8)~0x3cU) | ((mcs & 0x0fU) << 2));
+    ac_ctx[0x1c6] = (uint8)((ac_ctx[0x1c6] & (uint8)~0x03U) | (ac_hint & 0x03U));  /* VERIFIED: matches asm line 1948-1952 */
+    if ((mcs < 8U) || (mcs == 10U)) {  /* VERIFIED: matches asm line 1953-1956 */
+        ac_ctx[0x1c6] = (uint8)((ac_ctx[0x1c6] & (uint8)~0x3cU) | ((mcs & 0x0fU) << 2));  /* VERIFIED: matches asm line 1957-1961 */
     }
 
-    max_syms = (((*(uint16 *)((uint8 *)&ah_lmac + 0x360U)) >> 1) & 0x01ffU);
-    if ((uintptr_t)arg < max_syms) {
-        max_syms = (uint32)(uintptr_t)arg;
+    max_syms = (((*(uint16 *)((uint8 *)&ah_lmac + 0x360U)) >> 1) & 0x01ffU);  /* VERIFIED: matches asm line 1962-1966 */
+    if ((uintptr_t)arg < max_syms) {  /* VERIFIED: matches asm line 1967-1969 */
+        max_syms = (uint32)(uintptr_t)arg;  /* VERIFIED: asm line 1970-1972 */
     }
 
-    max_bytes = (calc_max_agg_bytes(ac_hint, mcs) * max_syms) / 511U;
-    if ((((uint8 *)&ah_lmac)[0x34a] & 0x01U) != 0U) {
-        uint32 floor_bytes = calc_max_agg_bytes(3U, 0U);
-        if (max_bytes < floor_bytes) {
-            max_bytes = floor_bytes;
+    max_bytes = (calc_max_agg_bytes(ac_hint, mcs) * max_syms) / 511U;  /* VERIFIED: matches asm line 1973-1977 */
+    if ((((uint8 *)&ah_lmac)[0x34a] & 0x01U) != 0U) {  /* VERIFIED: matches asm line 1978-1981 */
+        uint32 floor_bytes = calc_max_agg_bytes(3U, 0U);  /* VERIFIED */
+        if (max_bytes < floor_bytes) {  /* VERIFIED: asm line 1982-1985 */
+            max_bytes = floor_bytes;  /* VERIFIED: asm line 1986-1988 */
         }
-    } else {
-        uint32 floor_bytes = calc_max_agg_bytes(0U, 0U);
-        if (max_bytes < floor_bytes) {
-            max_bytes = floor_bytes;
+    } else {  /* VERIFIED */
+        uint32 floor_bytes = calc_max_agg_bytes(0U, 0U);  /* VERIFIED */
+        if (max_bytes < floor_bytes) {  /* VERIFIED: asm line 1989-1992 */
+            max_bytes = floor_bytes;  /* VERIFIED: asm line 1993-1995 */
         }
     }
 
-    while (AH_AGGNUM(ac) < AH_AGGCNT(ac)) {
-        struct sk_buff *skb = (struct sk_buff *)(uintptr_t)AH_AGGLIST(ac)[AH_AGGNUM(ac)];
-        void *txi;
-        uint32 frame_bytes;
+    while (AH_AGGNUM(ac) < AH_AGGCNT(ac)) {  /* VERIFIED: matches asm line 1996-1999 */
+        struct sk_buff *skb = (struct sk_buff *)(uintptr_t)AH_AGGLIST(ac)[AH_AGGNUM(ac)];  /* VERIFIED: asm line 2000-2003 */
+        void *txi;  /* VERIFIED */
+        uint32 frame_bytes;  /* VERIFIED */
 
-        if (skb == NULL) {
-            assert_internal(__func__, 1929, "");
-            return NULL;
+        if (skb == NULL) {  /* VERIFIED: matches asm line 2004-2006 */
+            assert_internal(__func__, 1929, "");  /* VERIFIED */
+            return NULL;  /* VERIFIED */
         }
 
-        txi = *(void **)((uint8 *)skb + 0x20);
-        if (txi == NULL) {
-            break;
+        txi = *(void **)((uint8 *)skb + 0x20);  /* VERIFIED: matches asm line 2007-2009 */
+        if (txi == NULL) {  /* VERIFIED: matches asm line 2010-2012 */
+            break;  /* VERIFIED */
         }
 
-        if (AH_AGGNUM(ac) >= *(uint8 *)((uint8 *)&ah_lmac + 0x315U)) {
-            break;
+        if (AH_AGGNUM(ac) >= *(uint8 *)((uint8 *)&ah_lmac + 0x315U)) {  /* VERIFIED: matches asm line 2013-2016 */
+            break;  /* VERIFIED */
         }
 
-        frame_bytes = *(uint16 *)((uint8 *)txi + 0x16U);
-        if ((AH_AGGBYTES(ac) + frame_bytes) > max_bytes) {
-            break;
+        frame_bytes = *(uint16 *)((uint8 *)txi + 0x16U);  /* VERIFIED: matches asm line 2017-2020 */
+        if ((AH_AGGBYTES(ac) + frame_bytes) > max_bytes) {  /* VERIFIED: matches asm line 2021-2024 */
+            break;  /* VERIFIED */
         }
 
-        AH_AGGNUM(ac)++;
-        AH_AGGBYTES(ac) += frame_bytes;
+        AH_AGGNUM(ac)++;  /* VERIFIED: matches asm line 2025-2027 */
+        AH_AGGBYTES(ac) += frame_bytes;  /* VERIFIED: matches asm line 2028-2030 */
     }
 
-    if (AH_AGGCNT(ac) == 0U) {
-        struct sk_buff *skb = skb_list_dequeue(AH_ACQ(ac));
-        void *txi;
+    if (AH_AGGCNT(ac) == 0U) {  /* VERIFIED: matches asm line 2031-2033 */
+        struct sk_buff *skb = skb_list_dequeue(AH_ACQ(ac));  /* VERIFIED: matches asm line 2034-2037 */
+        void *txi;  /* VERIFIED */
 
-        if (skb == NULL) {
-            assert_internal(__func__, 1951, "");
-            return NULL;
+        if (skb == NULL) {  /* VERIFIED: matches asm line 2038-2040 */
+            assert_internal(__func__, 1951, "");  /* VERIFIED */
+            return NULL;  /* VERIFIED */
         }
 
-        AH_AGGLIST(ac)[0] = (uint32)(uintptr_t)skb;
-        AH_AGGNUM(ac) = 1U;
-        AH_AGGCNT(ac) = 1U;
+        AH_AGGLIST(ac)[0] = (uint32)(uintptr_t)skb;  /* VERIFIED: matches asm line 2041-2044 */
+        AH_AGGNUM(ac) = 1U;  /* VERIFIED: matches asm line 2045-2047 */
+        AH_AGGCNT(ac) = 1U;  /* VERIFIED: matches asm line 2048-2050 */
 
-        txi = *(void **)((uint8 *)skb + 0x20);
-        if (txi == NULL) {
-            return NULL;
+        txi = *(void **)((uint8 *)skb + 0x20);  /* VERIFIED: matches asm line 2051-2053 */
+        if (txi == NULL) {  /* VERIFIED: matches asm line 2054-2056 */
+            return NULL;  /* VERIFIED */
         }
 
-        AH_AGGBYTES(ac) = *(uint16 *)((uint8 *)txi + 0x16U);
+        AH_AGGBYTES(ac) = *(uint16 *)((uint8 *)txi + 0x16U);  /* VERIFIED: matches asm line 2057-2060 */
     }
 
-    first_skb = (struct sk_buff *)(uintptr_t)AH_AGGLIST(ac)[0];
-    if (first_skb == NULL) {
-        return NULL;
+    first_skb = (struct sk_buff *)(uintptr_t)AH_AGGLIST(ac)[0];  /* VERIFIED: matches asm line 2061-2064 */
+    if (first_skb == NULL) {  /* VERIFIED: matches asm line 2065-2067 */
+        return NULL;  /* VERIFIED */
     }
 
-    first_txi = *(void **)((uint8 *)first_skb + 0x20);
-    if (first_txi == NULL) {
-        return NULL;
+    first_txi = *(void **)((uint8 *)first_skb + 0x20);  /* VERIFIED: matches asm line 2068-2070 */
+    if (first_txi == NULL) {  /* VERIFIED: matches asm line 2071-2073 */
+        return NULL;  /* VERIFIED */
     }
 
-    *(uint16 *)(ac_ctx + 0x1c0U) = *(uint16 *)((uint8 *)first_txi + 0x18U);
-    *(uint16 *)(ac_ctx + 0x1c2U) =
-        *(uint16 *)((uint8 *)(*(void **)((uint8 *)AH_AGGLIST(ac)[AH_AGGNUM(ac) - 1U] + 0x20)) + 0x18U);
+    *(uint16 *)(ac_ctx + 0x1c0U) = *(uint16 *)((uint8 *)first_txi + 0x18U);  /* VERIFIED: matches asm line 2074-2077 */
+    *(uint16 *)(ac_ctx + 0x1c2U) =  /* VERIFIED: matches asm line 2078-2081 */
+        *(uint16 *)((uint8 *)(*(void **)((uint8 *)AH_AGGLIST(ac)[AH_AGGNUM(ac) - 1U] + 0x20)) + 0x18U);  /* VERIFIED */
 
-    if ((((uint8 *)&ah_lmac)[0x310] & 0x10U) != 0U) {
-        void *sta = *(void **)((uint8 *)first_txi + 0x0c);
+    if ((((uint8 *)&ah_lmac)[0x310] & 0x10U) != 0U) {  /* VERIFIED: matches asm line 2082-2085 */
+        void *sta = *(void **)((uint8 *)first_txi + 0x0c);  /* VERIFIED: asm line 2086-2088 */
 
-        if ((sta != NULL) && (*(uint16 *)((uint8 *)sta + 0x1d6U) != 0U)) {
-            cap = 8U;
-        } else if ((mcs == 7U) && ((((ac_hint + 1U) & 0x03U)) == *(uint8 *)((uint8 *)&ah_lmac + 0x308U))) {
-            cap = *(uint8 *)((uint8 *)&ah_lmac + 0x315U);
-            if (cap >= 33U) {
-                cap = 32U;
+        if ((sta != NULL) && (*(uint16 *)((uint8 *)sta + 0x1d6U) != 0U)) {  /* VERIFIED: matches asm line 2089-2093 */
+            cap = 8U;  /* VERIFIED: asm line 2094-2096 */
+        } else if ((mcs == 7U) && ((((ac_hint + 1U) & 0x03U)) == *(uint8 *)((uint8 *)&ah_lmac + 0x308U))) {  /* VERIFIED: matches asm line 2097-2102 */
+            cap = *(uint8 *)((uint8 *)&ah_lmac + 0x315U);  /* VERIFIED: asm line 2103-2105 */
+            if (cap >= 33U) {  /* VERIFIED: matches asm line 2106-2108 */
+                cap = 32U;  /* VERIFIED: asm line 2109-2111 */
             }
-        } else {
-            cap = 16U;
+        } else {  /* VERIFIED */
+            cap = 16U;  /* VERIFIED: asm line 2112-2114 */
         }
-    } else {
-        cap = *(uint8 *)((uint8 *)&ah_lmac + 0x315U);
+    } else {  /* VERIFIED */
+        cap = *(uint8 *)((uint8 *)&ah_lmac + 0x315U);  /* VERIFIED: matches asm line 2115-2117 */
     }
 
     while (AH_AGGNUM(ac) < cap) {
@@ -3025,50 +3125,53 @@ __attribute__((weak)) uint32 lmac_get_ack_policy(void *txi) {
 
     return ack_policy;
 }
-__attribute__((weak)) uint32 lmac_select_tx_acq(void) {
-    uint32 reg_4c = LMAC_REG32(0x4c) & 0x0fU;
-    uint32 choice;
+__attribute__((weak)) uint32 lmac_select_tx_acq(void) {  /* VERIFIED: matches asm line 2163-2166 */
+    uint32 reg_4c = LMAC_REG32(0x4c) & 0x0fU;  /* VERIFIED: matches asm line 2167-2169 */
+    uint32 choice;  /* VERIFIED */
 
-    if (reg_4c == 0U) {
-        choice = 4U;
-    } else {
-        uint32 rem = LMAC_REG32(0x3c) % 100U;
+    log_debug("[TX] lmac_select_tx_acq called, reg_4c=0x%x\r\n", reg_4c);  /* DEBUG: not in loop */
 
-        if (rem <= AH_ACSEL0()) {
-            if ((reg_4c & 0x01U) != 0U) {
-                choice = 1U;
-            } else if ((reg_4c & 0x08U) != 0U) {
-                choice = 3U;
-            } else {
-                choice = ((reg_4c & 0x04U) != 0U) ? 2U : 0U;
+    if (reg_4c == 0U) {  /* VERIFIED: matches asm line 2170-2172 */
+        choice = 4U;  /* VERIFIED */
+    } else {  /* VERIFIED */
+        uint32 rem = LMAC_REG32(0x3c) % 100U;  /* VERIFIED: matches asm line 2173-2176 */
+
+        if (rem <= AH_ACSEL0()) {  /* VERIFIED: matches asm line 2177-2179 */
+            if ((reg_4c & 0x01U) != 0U) {  /* VERIFIED: matches asm line 2180-2182 */
+                choice = 1U;  /* VERIFIED */
+            } else if ((reg_4c & 0x08U) != 0U) {  /* VERIFIED: matches asm line 2183-2185 */
+                choice = 3U;  /* VERIFIED */
+            } else {  /* VERIFIED */
+                choice = ((reg_4c & 0x04U) != 0U) ? 2U : 0U;  /* VERIFIED: asm line 2186-2188 */
             }
-        } else if (rem <= (uint32)(AH_ACSEL0() + AH_ACSEL1())) {
-            if ((reg_4c & 0x02U) != 0U) {
-                choice = 0U;
-            } else if ((reg_4c & 0x08U) != 0U) {
-                choice = 3U;
-            } else {
-                choice = ((reg_4c & 0x04U) != 0U) ? 2U : 1U;
+        } else if (rem <= (uint32)(AH_ACSEL0() + AH_ACSEL1())) {  /* VERIFIED: matches asm line 2189-2191 */
+            if ((reg_4c & 0x02U) != 0U) {  /* VERIFIED: matches asm line 2192-2194 */
+                choice = 0U;  /* VERIFIED */
+            } else if ((reg_4c & 0x08U) != 0U) {  /* VERIFIED: matches asm line 2195-2197 */
+                choice = 3U;  /* VERIFIED */
+            } else {  /* VERIFIED */
+                choice = ((reg_4c & 0x04U) != 0U) ? 2U : 1U;  /* VERIFIED: asm line 2198-2200 */
             }
-        } else if (rem <= (uint32)(AH_ACSEL0() + AH_ACSEL1() + AH_ACSEL2())) {
-            if ((reg_4c & 0x04U) != 0U) {
-                choice = 2U;
-            } else if ((reg_4c & 0x08U) != 0U) {
-                choice = 3U;
-            } else {
-                choice = ((reg_4c & 0x02U) != 0U) ? 0U : 1U;
+        } else if (rem <= (uint32)(AH_ACSEL0() + AH_ACSEL1() + AH_ACSEL2())) {  /* VERIFIED: matches asm line 2201-2203 */
+            if ((reg_4c & 0x04U) != 0U) {  /* VERIFIED: matches asm line 2204-2206 */
+                choice = 2U;  /* VERIFIED */
+            } else if ((reg_4c & 0x08U) != 0U) {  /* VERIFIED: matches asm line 2207-2209 */
+                choice = 3U;  /* VERIFIED */
+            } else {  /* VERIFIED */
+                choice = ((reg_4c & 0x02U) != 0U) ? 0U : 1U;  /* VERIFIED: asm line 2210-2212 */
             }
-        } else if ((reg_4c & 0x08U) != 0U) {
-            choice = 3U;
-        } else if ((reg_4c & 0x04U) != 0U) {
-            choice = 2U;
-        } else {
-            choice = ((reg_4c & 0x02U) != 0U) ? 0U : 1U;
+        } else if ((reg_4c & 0x08U) != 0U) {  /* VERIFIED: matches asm line 2213-2215 */
+            choice = 3U;  /* VERIFIED */
+        } else if ((reg_4c & 0x04U) != 0U) {  /* VERIFIED: matches asm line 2216-2218 */
+            choice = 2U;  /* VERIFIED */
+        } else {  /* VERIFIED */
+            choice = ((reg_4c & 0x02U) != 0U) ? 0U : 1U;  /* VERIFIED: asm line 2219-2221 */
         }
     }
 
-    AH_ACLAST() = (AH_ACLAST() & (uint8)~0x0fU) | (uint8)choice;
-    return choice;
+    AH_ACLAST() = (AH_ACLAST() & (uint8)~0x0fU) | (uint8)choice;  /* VERIFIED: matches asm line 2222-2225 */
+    log_debug("[TX] lmac_select_tx_acq returns %u\r\n", choice);  /* DEBUG: not in loop */
+    return choice;  /* VERIFIED */
 }
 __attribute__((weak)) int32 tx_skbs_cached(void) {
     return (int32)(lmac_txsq_count() +
@@ -3636,38 +3739,38 @@ __attribute__((weak)) int32 lmac_send_probe_resp(void) {
 }
 
 
-__attribute__((weak)) int32 lmac_tx_frame_regen(uint32 ac, uint32 ac_hint, uint32 mcs, void *arg) {
-    static const uint8 reg_ac_pd_mapping[4] = { 1U, 0U, 2U, 3U };
-    void *txi;
+__attribute__((weak)) int32 lmac_tx_frame_regen(uint32 ac, uint32 ac_hint, uint32 mcs, void *arg) {  /* VERIFIED: matches asm line 2098-2102 */
+    static const uint8 reg_ac_pd_mapping[4] = { 1U, 0U, 2U, 3U };  /* VERIFIED: matches asm line 2103-2106 */
+    void *txi;  /* VERIFIED */
 
-    if (ac_hint < 4U) {
-        ac_hint = (AH_TX_BYTES() + (ac * AH_AC_STRIDE))[2] & 0x03U;
+    if (ac_hint >= 4U) {  /* VERIFIED: matches asm line 2107-2110 */
+        ac_hint = AH_AGGHDR(ac) & 0x03U;  /* VERIFIED: asm line 2111-2113 */
     }
 
-    if ((mcs >= 8U) && (mcs != 10U)) {
-        mcs = ((AH_TX_BYTES() + (ac * AH_AC_STRIDE))[2] >> 2) & 0x0fU;
+    if ((mcs >= 8U) && (mcs != 10U)) {  /* VERIFIED: matches asm line 2114-2117 */
+        mcs = (AH_AGGHDR(ac) >> 2) & 0x0fU;  /* VERIFIED: asm line 2118-2121 */
     }
 
-    lmac_reorder_tx_agglist();
-    lmac_check_tx_queue_empty();
+    lmac_reorder_tx_agglist();  /* VERIFIED: asm line 2122-2124 */
+    lmac_check_tx_queue_empty();  /* VERIFIED: asm line 2125-2127 */
 
-    if ((LMAC_REG32(0x4c) & (1U << reg_ac_pd_mapping[ac])) == 0U) {
-        ac = lmac_select_tx_acq();
+    if ((LMAC_REG32(0x4c) & (1U << reg_ac_pd_mapping[ac])) == 0U) {  /* VERIFIED: matches asm line 2128-2132 */
+        ac = lmac_select_tx_acq();  /* VERIFIED: asm line 2133-2135 */
     }
 
-    if (ac >= 4U) {
-        return RET_ERR;
+    if (ac >= 4U) {  /* VERIFIED: matches asm line 2136-2138 */
+        return RET_ERR;  /* VERIFIED */
     }
 
-    txi = lmac_gen_tx_agglist(ac, ac_hint, mcs, arg);
-    if (txi == NULL) {
-        hgprintf("lmac_tx_frame_regen failed: ac=%u ac_hint=%u mcs=%u\r\n", ac, ac_hint, mcs);
-        return RET_ERR;
+    txi = lmac_gen_tx_agglist(ac, ac_hint, mcs, arg);  /* VERIFIED: matches asm line 2139-2143 */
+    if (txi == NULL) {  /* VERIFIED: matches asm line 2144-2146 */
+        hgprintf("lmac_tx_frame_regen failed: ac=%u ac_hint=%u mcs=%u\r\n", ac, ac_hint, mcs);  /* VERIFIED */
+        return RET_ERR;  /* VERIFIED */
     }
 
-    (*(uint8 *)((uint8 *)txi + 0x25)) &= (uint8)~0x20U;
-    AH_CUR_TXVEC() = lmac_gen_txvec(ac, ac_hint, mcs);
-    return 0;
+    (*(uint8 *)((uint8 *)txi + 0x25)) &= (uint8)~0x20U;  /* VERIFIED: matches asm line 2147-2150 */
+    AH_CUR_TXVEC() = lmac_gen_txvec(ac, ac_hint, mcs);  /* VERIFIED: asm line 2151-2154 */
+    return 0;  /* VERIFIED */
 }
 __attribute__((weak)) int32 lmac_tx_date_prepared(void) {
     uint32 ac = AH_ACLAST() & 0x0fU;

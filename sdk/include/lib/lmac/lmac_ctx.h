@@ -310,16 +310,29 @@ typedef struct lmac_ctx {
 
 typedef struct lmac_ah_tx_ctx {
     uint8_t             rsv_000[0x02C];
-    struct os_task      tx_task;            // [0x02C] TX task
-    struct os_task      tx_status_task;     // [0x040] TX status task
-    struct os_semaphore tx_sem;             // [0x054] TX semaphore
-    struct os_semaphore tx_status_sem;      // [0x05C] TX status semaphore
-    uint8_t             rsv_064[0x0B8 - 0x064];
+    struct os_task      tx_task;            // [0x02C] TX task (20 bytes)
+    struct os_task      tx_status_task;     // [0x040] TX status task (20 bytes)
+    struct os_semaphore tx_sem;             // [0x054] TX semaphore (8 bytes)
+    struct os_semaphore tx_status_sem;      // [0x05C] TX status semaphore (8 bytes)
+    uint8_t             rsv_064[4];       // [0x064] Padding to align with #defines
 
-    struct skb_list     ac_queue[4];        // [0x0B8] Access Category queues [0-3]
-    lmac_rc_state_t     ac_rate_ctrl[4];    // Rate control state per AC (0x120 each)
+    struct skb_list     txq;               // [0x068] TX queue (from AH_TXQ_OFS=0x64)
+    struct skb_list     txsq;              // [0x070] TX status queue (from AH_TXSQ_OFS=0x70)
+    uint8_t             rsv_078[0x088 - 0x078]; // Padding to ACQ offset
+    struct skb_list     ac_queue[4];       // [0x088] AC queues (from AH_ACQ_OFS=0x88, stride 0x120)
 
-    uint8_t             rsv_538[0x6AC - 0x538];
+    /* Per-AC data area (stride 0x120 each, 4 ACs total) */
+    uint8_t             ac_data[4][0x120]; // [0x0B8] agg_list + agg_bytes + agg_sym + agg_cnt per AC
+    /* Within each AC's 0x120 bytes:
+     * - agg_list[64] at offset 0x000 (64 words = 256 bytes = 0x100)
+     * - agg_bytes at offset 0x100 (from original: 0x1B8-0x0B8=0x100)
+     * - agg_sym at offset 0x104 (from 0x1BC-0x0B8=0x104)
+     * - agg_num at offset 0x108 (word)
+     * - agg_cnt at offset 0x10D (byte)
+     */
+
+    /* After ac_data: 0x0B8 + 4*0x120 = 0x0B8 + 0x480 = 0x538 */
+    uint8_t             rsv_538[0x6AC - 0x538]; // Reserved to cipher section
 
     uint8_t             cipher_rate_ac0;    // [0x6AC] Cipher engine MCS for AC0
     uint8_t             cipher_rate_ac1;    // [0x6AD] Cipher engine MCS for AC1
@@ -335,7 +348,7 @@ typedef struct lmac_ah_tx_ctx {
     uint8_t             cipher_bw;          // [0x6C8] CE bandwidth (MHz)
     uint8_t             rsv_6c9[3];
     uint32_t            seq_num_space;      // [0x6CC] Sequence number space
-    uint8_t             rsv_6d0[4];
+    uint8_t             rsv_6d0[4];       // [0x6D0] Padding to 0x6D4
 } lmac_ah_tx_ctx_t;
 
 /* ============================================================================
