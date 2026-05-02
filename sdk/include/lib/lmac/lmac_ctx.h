@@ -9,6 +9,7 @@
 #include "osal/semaphore.h"
 #include "osal/mutex.h"
 #include "osal/task.h"
+#include "osal/timer.h"
 #include "lib/skb/skb_list.h"
 
 /* SDK types */
@@ -528,9 +529,10 @@ typedef struct lmac_ctx {
     uint32_t frame_rx_state;                // [0x994] RX frame handler state (0-7 state machine)
     uint32_t rx_frame_counter;              // [0x998] RX frame counter (reset between frames)
     uint32_t state;                         // [0x99C]
-    uint8_t  main_task_obj[0x9B8 - 0x9A0]; // [0x9A0] OS task structure (20B + extra)
+    struct os_task main_task;               // [0x9A0] Main LMAC OS task structure (16B)
+    uint8_t  rsv_9b0[0x9B8 - 0x9B0];        // [0x9B0-0x9B7] Reserved (padding after task)
     uint32_t print_buf_ptr;                 // [0x9B8] Print task buffer pointer
-    struct os_semaphore print_sem;          // [0x9BC] Print task semaphore (8B)
+    struct os_semaphore print_sem;          // [0x9BC] Print task semaphore
     uint8_t  rsv_9c4[0x9CC - 0x9C4];        // [0x9C4-0x9CB] Reserved (8B)
 
     /* Deep-sleep timing configuration backup (from 0x388-0x3AB, 36 bytes total) */
@@ -552,8 +554,8 @@ typedef struct lmac_ctx {
     uint16_t sta_total;                     // [0xA0C] Total station count (shifted +4)
     uint16_t sta_psm1, sta_psm2;            // [0xA0E] STA power-save mode counters (shifted +4)
     uint8_t  rsv_a12[0xA14 - 0xA12];        // [0xA12-0xA13] Reserved
-    uint8_t  tick_timer[0xA30 - 0xA14];     // [0xA14] Ticker timer object (28B, shifted +4)
-    uint8_t  rsv_a30[0xA53 - 0xA30];        // [0xA30-0xA52] Reserved (shifted +4)
+    struct os_timer tick_timer;             // [0xA14] Ticker/periodic timer object
+    uint8_t  rsv_a2c[0xA53 - 0xA2C];        // [0xA2C-0xA52] Reserved
     uint8_t  phy_watchdog_flags;            // [0xA53] PHY watchdog state flags (shifted +4)
     uint32_t scan_duration_ms;              // [0xA54] Scan duration or timeout counter (shifted +4)
     uint8_t  rsv_a58[0xa63 - 0xA58];
