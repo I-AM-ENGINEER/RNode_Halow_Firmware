@@ -112,10 +112,99 @@ typedef struct lmac_dsleep_ctx {
    ========================================================================== */
 
 typedef struct lmac_ctx {
-    lmac_ops_t *ops;                        // [0x000]
-    uint8_t  rsv_004[0x2bc - 0x004];
+    lmac_ops_t *ops;                        // [0x000] Ops vtable pointer
+    uint32_t config_word;                   // [0x004] Configuration/init value
+    uint8_t  rsv_004a[0x018 - 0x004];
+    uint32_t init_marker_18;                // [0x018] Init marker/timer value
+    uint8_t  rsv_01c[0x040 - 0x01C];
+    uint32_t param_40;                      // [0x040] Parameter/state
+    uint32_t param_44;                      // [0x044] Parameter/state
+    uint32_t dma_init_param1;               // [0x048] DMA initialization parameter
+    uint32_t dma_init_param2;               // [0x04C] DMA initialization parameter
+    uint8_t  rsv_050[0x084 - 0x050];
+    uint8_t  phy_config_084;                // [0x084] PHY configuration
+    uint8_t  phy_config_085;                // [0x085] PHY configuration
+    uint8_t  phy_config_086;                // [0x086] PHY configuration
+    uint8_t  phy_config_087;                // [0x087] PHY configuration
+    uint8_t  rsv_088[0x090 - 0x088];
+    uint16_t phy_param_90;                  // [0x090] PHY parameter
+    uint16_t phy_param_92;                  // [0x092] PHY parameter
+    uint16_t phy_param_94;                  // [0x094] PHY parameter
+    uint16_t phy_param_96;                  // [0x096] PHY parameter
+    uint8_t  rsv_098[0x0A0 - 0x098];
+    uint16_t lo_freq_threshold_a0;          // [0x0A0] LO frequency threshold
+    uint16_t lo_freq_threshold_a2;          // [0x0A2] LO frequency threshold
+    uint16_t lo_freq_threshold_a4;          // [0x0A4] LO frequency threshold
+    uint16_t lo_freq_threshold_a6;          // [0x0A6] LO frequency threshold
+    uint8_t  rsv_0a8[0x0fc - 0x0A8];
+    uint32_t param_fc;                      // [0x0FC] Parameter/state
+    uint32_t rx_frame_tsf;                  // [0x100] RX frame timestamp (TSF)
+    uint16_t rx_frame_length;               // [0x104] RX frame length
+    uint16_t rx_frame_info;                 // [0x106] RX frame info (MCS, rate, bandwidth)
+    uint32_t rx_rssi_value;                 // [0x108] RX RSSI value
+    uint16_t rx_cfo;                        // [0x10A] RX carrier frequency offset
+    uint16_t rx_phase_offset;               // [0x10C] RX phase offset
+    uint32_t rx_evm;                        // [0x10E] RX EVM (Error Vector Magnitude)
+    uint32_t rx_snr;                        // [0x110] RX SNR value
+    uint8_t  rsv_114[0x116 - 0x114];
+    uint8_t  rx_status_flags;               // [0x116] RX status flags (bit field)
+    uint16_t rx_seq_ctrl;                   // [0x118] RX sequence control from frame
+    uint8_t  rsv_11a[0x11c - 0x11A];
+    uint32_t rx_cipher_param;               // [0x11C] RX cipher parameters
+    uint32_t rx_timestamp_adj;              // [0x120] RX timestamp adjustment/auxiliary
+    uint32_t rx_frame_duration;             // [0x124] RX frame duration calculation
+    uint32_t rx_subframe_info;              // [0x128] RX subframe/MPDU info
+    uint32_t rx_agg_param;                  // [0x12C] RX aggregation parameters
+    uint32_t rx_ampdu_len;                  // [0x130] RX A-MPDU length
+    uint8_t  rsv_134[0x138 - 0x134];
+    uint32_t rx_descriptor;                 // [0x138] RX frame descriptor
+    uint16_t rx_descriptor_ext;             // [0x13C] RX descriptor extension
+    uint8_t  rsv_13e[0x140 - 0x13E];
+    uint32_t rx_buffer_ptr;                 // [0x140] RX buffer/SKB pointer
+    uint32_t rx_processing_state;           // [0x144] RX frame processing state
+    uint8_t  rsv_148[0x160 - 0x148];
+    uint32_t rx_interrupt_status;           // [0x160] RX interrupt/event status
+    uint8_t  rsv_164[0x1B8 - 0x164];        // [0x164-0x1B7] Reserved (RX buffer/descriptor area)
+    uint32_t rx_frame_vector;               // [0x1B8] RX frame vector / descriptor
+    uint8_t  rsv_1bc[0x1C4 - 0x1BC];        // [0x1BC-0x1C3] Reserved (padding)
+    uint16_t rx_frame_count;                // [0x1C4] RX frame counter / valid count
+    uint16_t rx_max_frame_count;            // [0x1C6] RX max frame count threshold
+    uint8_t  rsv_1c8[0x1D0 - 0x1C8];        // [0x1C8-0x1CF] Reserved (padding)
+    uint32_t rx_dma_param;                  // [0x1D0] RX DMA parameter / descriptor address
+    uint16_t rx_frame_length_threshold;     // [0x1D4] RX frame length threshold
+    uint8_t  rsv_1d6[0x1D8 - 0x1D6];        // [0x1D6-0x1D7] Reserved (padding)
+    uint32_t rx_buffer_threshold;           // [0x1D8] RX buffer threshold / level
+    uint16_t rx_frame_timeout;              // [0x1DC] RX frame timeout value
+    uint8_t  rsv_1de[0x1E0 - 0x1DE];        // [0x1DE-0x1DF] Reserved (padding)
+    uint16_t rx_good_count;                 // [0x1E0] RX good frame count
+    uint16_t rx_bad_count;                  // [0x1E2] RX bad frame count
+    uint8_t  rsv_1e4[0x1E8 - 0x1E4];        // [0x1E4-0x1E7] Reserved (padding)
+    uint32_t rx_total_frames;               // [0x1E8] RX total frames processed
+    uint32_t rx_frame_body;                 // [0x1EC] RX frame body descriptor
+    uint32_t phy_tx_vector_h;               // [0x1F0] PHY TX vector header
+    uint32_t phy_tx_vector_l;               // [0x1F4] PHY TX vector lower
+    uint8_t  rsv_1f8[0x208 - 0x1F8];        // [0x1F8-0x207] Reserved (final padding)
+    uint32_t phy_tx_config;                 // [0x208] PHY TX configuration (packed register)
+    uint8_t  rsv_20c[0x210 - 0x20C];
+    uint32_t phy_rx_config;                 // [0x210] PHY RX configuration (packed register)
+    uint8_t  rsv_214[0x224 - 0x214];
+    uint32_t phy_control_flags;             // [0x224] PHY control/status flags
+    uint8_t  rsv_228[0x2bc - 0x228];
     uint32_t dsleep_wakeup_timer;           // [0x2bc] Deep-sleep wakeup timer
-    uint8_t  rsv_2c0[0x302 - 0x2C0];
+    uint8_t  dsleep_status_byte;            // [0x2c0] Deep-sleep status control
+    uint8_t  rsv_2c1[0x2c8 - 0x2C1];        // [0x2C1-0x2C7] Reserved (padding)
+    uint32_t dsleep_state_read_0;           // [0x2c8] Deep-sleep state read 0
+    uint32_t dsleep_state_read_1;           // [0x2cc] Deep-sleep state read 1
+    uint32_t dsleep_state_read_2;           // [0x2d0] Deep-sleep state read 2
+    uint32_t dsleep_state_read_3;           // [0x2d4] Deep-sleep state read 3
+    uint32_t dsleep_state_write_0;          // [0x2d8] Deep-sleep state write 0
+    uint32_t dsleep_state_write_1;          // [0x2dc] Deep-sleep state write 1
+    uint32_t dsleep_state_write_2;          // [0x2e0] Deep-sleep state write 2
+    uint32_t dsleep_state_write_3;          // [0x2e4] Deep-sleep state write 3 / OBSS field
+    uint8_t  obss_scan_count;               // [0x2e5] OBSS scan counter (part of state_write_3)
+    uint8_t  rsv_2e6[0x300 - 0x2E6];        // [0x2E6-0x2FF] Reserved (padding)
+    int8_t   obss_threshold;                // [0x300] OBSS detection threshold
+    uint8_t  obss_state;                    // [0x301] OBSS state / detection result
 
     uint8_t  self_mac[6];                   // [0x302]
     uint8_t  bss_bw;                        // [0x308]
@@ -145,34 +234,42 @@ typedef struct lmac_ctx {
     uint16_t rssi_lower_threshold;          // [0x32C]
     uint16_t rssi_upper_threshold;          // [0x32E]
     uint16_t aid;                           // [0x330] Association ID
-    uint8_t  rsv_332[0x336 - 0x332];        // [0x332-0x335] Reserved (RX buffer state flags)
+    uint8_t  rx_buff_addr_state;            // [0x332] RX buffer address update state/flag
+    uint8_t  rx_buff_addr_ctrl;             // [0x333] RX buffer address control flags (bit field)
+    uint16_t rx_buff_info;                  // [0x334] RX buffer info/size
     uint16_t partial_aid_pack;              // [0x336] Partial AID / AP BSSID Info
-    uint8_t  rsv_338[0x33C - 0x338];        // [0x338-0x33B] Reserved
+    uint32_t chan_cfg_param;                // [0x338] Channel configuration parameter (or frequency-related)
     uint8_t  meas_report_flags;             // [0x33C] Measurement report state/flags
-    uint8_t  rsv_33d[0x360 - 0x33D];        // [0x33D-0x35F] Reserved (AP/channel info)
+    uint8_t  rsv_33d[0x340 - 0x33D];
+    uint8_t  lo_cfg_byte_340;               // [0x340] LO configuration byte
+    uint8_t  rsv_341[3];
+    uint32_t lo_freq_value;                 // [0x344] LO frequency value
+    uint8_t  rsv_348;
+    uint8_t  lo_freq_flags;                 // [0x349] LO frequency flags/status
+    uint16_t lo_freq_table_idx;             // [0x34A] LO frequency table index (with flags in bit 0)
+    uint16_t rsv_34c;
+    uint32_t rsv_34e;
+    uint8_t  rsv_352[0x360 - 0x352];
     uint16_t tx_max_syms_config;            // [0x360] TX max symbols config (9-bit field at bits 9:1)
     uint16_t beacon_timestamp_high;         // [0x362] Beacon timestamp MSW
-    uint8_t  rsv_364[0x36C - 0x364];        // [0x364-0x36B] Reserved
+    uint8_t  chan_info_364;                 // [0x364] Channel information / AP config
+    uint8_t  chan_info_365;                 // [0x365] Channel information / AP config (part 2)
+    uint8_t  rsv_366[0x368 - 0x366];
+    uint32_t chan_setup_param;              // [0x368] Channel setup parameter
     uint32_t rf_cfg;                        // [0x36C] RF configuration register
     uint32_t event_payload;                 // [0x370] Event-specific payload
     uint32_t misc_ctrl_word;                // [0x374] Misc control (NAV_DIFF, rate modulation, BA ctrl)
-    uint8_t  rsv_378;                       // [0x378] Reserved
-    uint8_t  rsv_379;                       // [0x379] Reserved
+    uint8_t  nav_mgmt_state;                // [0x378] NAV management state/control
+    uint8_t  ap_state_flags;                // [0x379] AP state flags/status
     uint8_t  flags_37a;                     // [0x37A] State/control flags
     uint8_t  rsv_37b;                       // [0x37B] Reserved
     uint8_t  flags_37c;                     // [0x37C] LO table / Scan state / Dialog token
     uint8_t  flags_37d;                     // [0x37D] LO table / Rate control / ACS state
     uint8_t  flags_37e;                     // [0x37E] Beacon / RX / TX control state
     uint8_t  flags_37f;                     // [0x37F] PHY state / ACS / Status flags
-    uint8_t  rsv_380[0x3d4 - 0x380];
-    uint32_t hw_tsf_estimate;               // [0x3D4] Hardware TSF estimate / timing reference
-    uint8_t  rsv_3d8[0x3DC - 0x3D8];
-    uint16_t beacon_offset;                 // [0x3DC] Beacon timing offset
-    uint8_t  rx_state_flags;                // [0x3DE] RX state flags
-    uint8_t  rx_filter_flags;               // [0x3DF] RX filter flags
-    uint8_t  frame_filter_state;            // [0x3E0] Frame filtering state
-    uint8_t  ba_win_flags;                  // [0x3E1] Block Ack window flags
-    uint8_t  rsv_3e2[6];
+    uint8_t  beacon_fsm_state;              // [0x380] Beacon FSM state / control
+    uint8_t  rsv_381[3];
+    uint32_t fsm_timeout_counter;           // [0x384] FSM timeout / state machine counter
     uint32_t rx_active_time_ms;             // [0x388] RX channel active time (milliseconds)
     uint32_t tx_active_time_ms;             // [0x38C] TX channel active time (milliseconds)
     uint32_t beacon_timer_reload;           // [0x390] Beacon timer reload/countdown value
@@ -187,13 +284,82 @@ typedef struct lmac_ctx {
     uint32_t flags_3b8;                     // [0x3B8] Debug/control flags
     uint8_t  rsv_3bc[0x3C0 - 0x3BC];
     uint32_t ap_sleep_state;                // [0x3C0] AP sleep state
-    uint8_t  rsv_3c4[0x526 - 0x3C4];
+    uint32_t beacon_event_counter;          // [0x3C4] Beacon event counter / beacon processing state
+    uint16_t beacon_drift_adj;              // [0x3C8] Beacon drift adjustment (half-word field)
+    uint16_t beacon_timing_param;           // [0x3CA] Beacon timing parameter
+    uint32_t tsf_adjustment_factor;         // [0x3CC] TSF adjustment factor
+    uint32_t beacon_miss_counter;           // [0x3D0] Beacon miss/detection counter
+    uint32_t hw_tsf_estimate;               // [0x3D4] Hardware TSF estimate / timing estimate
+    uint16_t beacon_offset;                 // [0x3DC] Beacon offset / timing correction
+    uint8_t  rx_state_flags2;               // [0x3DE] RX state flags (part 2)
+    uint8_t  rx_filter_flags2;              // [0x3DF] RX filter flags (part 2)
+    int8_t   rssi_adjustment;               // [0x3E0] RSSI value adjustment/calibration
+    uint8_t  ba_window_param;               // [0x3E1] Block Ack window parameter
+    uint8_t  ampdu_density;                 // [0x3E2] A-MPDU density setting
+    uint8_t  tx_retry_count;                // [0x3E3] TX retry counter / limit
+    uint8_t  rate_control_flags;            // [0x3E4] Rate control flags
+    uint8_t  rsv_3e5[0x3E8 - 0x3E5];
+    uint32_t beacon_int_counter;            // [0x3E8] Beacon interval counter
+    uint32_t rx_buffer_usage;               // [0x3EC] RX buffer usage/threshold tracking
+    uint32_t tx_queue_state;                // [0x3F0] TX queue state / counter
+    uint8_t  rsv_3f4[0x405 - 0x3F4];
+    uint8_t  tx_frame_prep_state;           // [0x405] TX frame preparation state
+    uint8_t  rsv_406[0x516 - 0x406];
+    uint8_t  chan_cfg_516;                  // [0x516] Channel configuration
+    uint8_t  chan_cfg_517;                  // [0x517] Channel configuration
+    uint8_t  rsv_518[0x51a - 0x518];
+    uint8_t  chan_cfg_51a;                  // [0x51A] Channel configuration
+    uint8_t  chan_cfg_51b;                  // [0x51B] Channel configuration
+    uint8_t  rsv_51c[0x51e - 0x51C];
+    uint8_t  chan_cfg_51e;                  // [0x51E] Channel configuration
+    uint8_t  chan_cfg_51f;                  // [0x51F] Channel configuration
+    uint8_t  rsv_520[0x522 - 0x520];
+    uint8_t  chan_cfg_522;                  // [0x522] Channel configuration
+    uint8_t  chan_cfg_523;                  // [0x523] Channel configuration
+    uint8_t  rsv_524[0x526 - 0x524];
     uint8_t  bssid[6];                      // [0x526] BSSID
     uint8_t  rsv_52c[0x52E - 0x52C];        // [0x52C-0x52D] Reserved (IE element)
     uint16_t ie_length;                     // [0x52E] Information Elements length
-    uint8_t  rsv_530[0x55C - 0x530];        // [0x530-0x55B] Reserved (IE data)
+    uint8_t  rsv_530[0x550 - 0x530];        // [0x530-0x54F] Reserved (IE data)
+    uint32_t probe_req_elem;                // [0x550] Probe request element info
+    uint8_t  probe_resp_type;               // [0x554] Probe response type/subtype
+    uint8_t  probe_resp_flags;              // [0x555] Probe response flags
+    uint8_t  ie_element_index;              // [0x556] IE element index / position
+    uint8_t  ie_type_field;                 // [0x557] IE type identifier field
+    uint32_t ie_info_558;                   // [0x558] IE info field
+    uint8_t  rsv_55c;
     uint16_t s1g_compat_values;             // [0x55C] S1G compatibility field (bits 7-9)
-    uint8_t  rsv_55e[0x654 - 0x55E];        // [0x55E-0x653] Reserved
+    uint8_t  rsv_55e;
+    uint16_t field_55f;                     // [0x55F] TX queue base ptr 0 (via 0x560 accesses)
+    uint16_t field_561;                     // [0x561] TX queue base ptr 1 (via 0x562 accesses)
+    uint8_t  rsv_563[0x565 - 0x563];        // [0x563-0x564] Reserved (padding)
+    uint8_t  tx_state_ctrl_0;               // [0x565] TX state control byte 0
+    uint8_t  rsv_566[0x56c - 0x566];        // [0x566-0x56B] Reserved (padding)
+    uint32_t tx_state_data_0;               // [0x56C] TX state data 0
+    uint32_t tx_state_data_1;               // [0x570] TX state data 1
+    uint8_t  rsv_574[0x57c - 0x574];        // [0x574-0x57B] Reserved (padding)
+    uint32_t tx_state_data_2;               // [0x57C] TX state data 2
+    uint32_t tx_state_data_3;               // [0x580] TX state data 3
+    uint8_t  rsv_584[0x58c - 0x584];        // [0x584-0x58B] Reserved (padding)
+    uint32_t tx_state_data_4;               // [0x58C] TX state data 4
+    uint32_t tx_state_data_5;               // [0x590] TX state data 5
+    uint8_t  rsv_594[0x5b6 - 0x594];        // [0x594-0x5B5] Reserved (padding)
+    uint8_t  tx_frame_flags;                // [0x5B6] TX frame flags/state
+    uint8_t  rsv_5b7[0x5c6 - 0x5B7];        // [0x5B7-0x5C5] Reserved (padding)
+    uint16_t field_5c6;                     // [0x5C6] TX-related flag field
+    uint8_t  rsv_5c8[0x5f5 - 0x5C8];        // [0x5C8-0x5F4] Reserved (padding)
+    uint8_t  tx_retry_state;                // [0x5F5] TX retry state / retry counter (alternate)
+    uint8_t  rsv_5f6[0x5fc - 0x5F6];        // [0x5F6-0x5FB] Reserved (padding)
+    uint16_t tx_frame_status;               // [0x5FC] TX frame status/flags
+    uint8_t  rsv_5fe[0x630 - 0x5FE];        // [0x5FE-0x62F] Reserved (padding)
+    uint32_t cca_control_status;            // [0x630] CCA observation control/status
+    uint32_t cca_result_0;                  // [0x634] CCA observation result 0
+    uint32_t cca_result_1;                  // [0x638] CCA observation result 1
+    uint32_t cca_result_2;                  // [0x63C] CCA observation result 2
+    uint32_t cca_result_3;                  // [0x640] CCA observation result 3
+    uint32_t cca_result_4;                  // [0x644] CCA observation result 4
+    uint32_t tx_queue_wstate;               // [0x648] TX packet queue write state (alternate)
+    uint32_t tx_packet_state;               // [0x64C] TX packet descriptor state
     uint16_t s1g_beacon_elem1;              // [0x654] S1G beacon element 1
     uint16_t s1g_beacon_elem2;              // [0x656] S1G beacon element 2
     uint32_t probe_resp_timestamp;          // [0x658] Probe response timestamp
@@ -213,19 +379,79 @@ typedef struct lmac_ctx {
     uint8_t  sec_key_index2;                // [0x6B4] Security key index 2 (Pairwise key)
     uint8_t  sec_key_len2;                  // [0x6B5] Security key length 2
     uint8_t  sec_key2[32];                  // [0x6B6] Security key material 2 (Pairwise key)
-    uint8_t  rsv_6d6[0x6F4 - 0x6D6];        // [0x6D6-0x6F3] Reserved
+    uint8_t  rsv_6d6[2];                    // [0x6D6-0x6D7] Reserved (padding)
+    uint32_t decode_error_count;            // [0x6D8] Decode/FCS error counter
+    uint32_t crc_error_count;               // [0x6DC] CRC error counter
+    uint32_t fcs_fail_count;                // [0x6E0] FCS failure counter
+    uint32_t rx_underrun_count;             // [0x6E4] RX buffer underrun counter
+    uint32_t rx_overflow_count;             // [0x6E8] RX buffer overflow counter
+    uint8_t  rsv_6ec[4];                    // [0x6EC-0x6EF] Reserved (padding)
+    uint32_t corruption_error_count;        // [0x6F0] Corruption/integrity error counter
     uint32_t channel_err_count;             // [0x6F4] Channel/decode error counter
-    uint8_t  rsv_6f8[0x754 - 0x6F8];        // [0x6F8-0x753] Reserved
+    uint32_t frame_sync_error_count;        // [0x6F8] Frame sync error counter
+    uint32_t plcp_error_count;              // [0x6FC] PLCP error counter
+    uint32_t rx_fifo_error_count;           // [0x700] RX FIFO error counter
+    uint32_t tx_fifo_error_count;           // [0x704] TX FIFO error counter
+    uint8_t  phy_error_flags;               // [0x708] PHY error/status flags (bit field)
+    uint8_t  rsv_709[3];                    // [0x709-0x70B] Reserved (padding)
+    uint8_t  rx_state_error_count;          // [0x70C] RX state machine error count
+    uint8_t  tx_state_error_count;          // [0x70D] TX state machine error count
+    uint8_t  mac_timeout_count;             // [0x70E] MAC timeout counter
+    uint8_t  rsv_70f;                       // [0x70F] Reserved
+    uint8_t  collision_detect_count;        // [0x710] Collision detection counter
+    uint8_t  rsv_711;                       // [0x711] Reserved (padding)
+    int16_t  last_rssi_raw;                 // [0x712] Last raw RSSI measurement
+    int16_t  last_cfo_raw;                  // [0x714] Last raw CFO measurement
+    uint8_t  rsv_716[2];                    // [0x716-0x717] Reserved (padding)
+    uint32_t rx_ampdu_count;                // [0x718] RX A-MPDU counter
+    uint32_t rx_mpdu_success_count;         // [0x71C] RX MPDU success counter
+    uint32_t rx_mpdu_error_count;           // [0x720] RX MPDU error counter
+    uint32_t tx_ampdu_success_count;        // [0x724] TX A-MPDU success counter
+    uint32_t tx_ampdu_error_count;          // [0x728] TX A-MPDU error counter
+    uint32_t block_ack_timeout_count;       // [0x72C] Block Ack timeout counter
+    uint32_t block_ack_error_count;         // [0x730] Block Ack error counter
+    uint32_t ack_timeout_count;             // [0x734] ACK timeout counter
+    uint32_t ack_error_count;               // [0x738] ACK error counter
+    uint32_t cts_timeout_count;             // [0x73C] CTS timeout counter
+    uint32_t rts_failure_count;             // [0x740] RTS failure counter
+    uint32_t retry_exceeded_count;          // [0x744] Retry limit exceeded counter
+    uint32_t qos_null_tx_count;             // [0x748] QoS Null frame TX counter
+    uint32_t pspoll_tx_count;               // [0x74C] PS-Poll TX counter
+    uint32_t probe_request_count;           // [0x750] Probe request frame counter
     uint32_t failed_frame_count;            // [0x754] TX failed frame counter
     uint32_t error_frame_count;             // [0x758] RX error frame counter
-    uint8_t  rsv_75c[0x788 - 0x75C];        // [0x75C-0x787] Reserved (44 bytes)
+    uint32_t rsv_758_stat1;                 // [0x75C] RX statistics counter 1
+    uint32_t rsv_760_stat2;                 // [0x760] RX statistics counter 2
+    uint32_t rsv_764_stat3;                 // [0x764] RX statistics counter 3
+    uint32_t rsv_768_stat4;                 // [0x768] RX statistics counter 4 (stored from RX path)
+    uint32_t rsv_76c_stat5;                 // [0x76C] RX statistics counter 5
+    uint32_t rsv_770_stat6;                 // [0x770] RX statistics counter 6
+    uint32_t rsv_774_stat7;                 // [0x774] RX statistics counter 7
+    uint32_t rsv_778_stat8;                 // [0x778] RX statistics counter 8
+    uint32_t rsv_77c_stat9;                 // [0x77C] RX comparison result / threshold crossing
+    uint32_t rsv_780_stat10;                // [0x780] RX statistics counter 10
+    uint32_t rsv_784_adc;                   // [0x784] ADC/sensor value from RX processing
     uint32_t phy_error_count;               // [0x788] PHY error counter
     uint32_t phy_error_code;                // [0x78C] Last PHY error code
     uint8_t  rsv_790[0x798 - 0x790];        // [0x790-0x797] Reserved (8 bytes)
     uint32_t rx_error_counter;              // [0x798] RX error/event counter (incremented on frame error)
     uint8_t  rsv_79c[0x7A0 - 0x79C];        // [0x79C-0x79F] Reserved (4 bytes)
     uint32_t rssi_peak_calib;               // [0x7A0] RSSI peak value for calibration
-    uint8_t  rsv_7a4[0x7E0 - 0x7A4];        // [0x7A4-0x7DF] Reserved (60 bytes)
+    uint32_t phy_stat_count1;               // [0x7A4] PHY statistics counter 1
+    uint32_t phy_stat_count2;               // [0x7A8] PHY statistics counter 2
+    uint32_t phy_stat_count3;               // [0x7AC] PHY statistics counter 3
+    uint32_t phy_stat_count4;               // [0x7B0] PHY statistics counter 4
+    uint32_t phy_stat_count5;               // [0x7B4] PHY statistics counter 5
+    uint32_t phy_stat_count6;               // [0x7B8] PHY statistics counter 6
+    uint32_t phy_stat_count7;               // [0x7BC] PHY statistics counter 7
+    uint32_t phy_stat_count8;               // [0x7C0] PHY statistics counter 8
+    uint32_t phy_stat_count9;               // [0x7C4] PHY statistics counter 9 (for averaging)
+    uint32_t phy_stat_count10;              // [0x7C8] PHY statistics counter 10
+    uint32_t phy_stat_count11;              // [0x7CC] PHY statistics counter 11
+    uint32_t phy_stat_count12;              // [0x7D0] PHY statistics counter 12
+    uint32_t phy_stat_count13;              // [0x7D4] PHY statistics counter 13 (TX total)
+    uint32_t phy_stat_count14;              // [0x7D8] PHY statistics counter 14 (RX total)
+    uint32_t phy_stat_count15;              // [0x7DC] PHY statistics counter 15 (RX good)
     uint32_t rssi_sum;                      // [0x7E0] RSSI accumulator
     uint16_t rssi_peak;                     // [0x7E4] Peak RSSI
     uint16_t rssi_sample_count;             // [0x7E6] RSSI sample count
@@ -233,14 +459,35 @@ typedef struct lmac_ctx {
     uint8_t  rsv_7ea[0x804 - 0x7EA];        // [0x7EA-0x803] Reserved (26 bytes)
     uint16_t avg_power_zero_count;          // [0x804] Avg power = 0 counter
     uint16_t avg_power_neg128_count;        // [0x806] Avg power = -128 counter
-    uint8_t  rsv_808[0x840 - 0x808];
+    uint32_t tx_success_count_low;          // [0x808] TX success counter (64-bit low)
+    uint32_t tx_success_count_high;         // [0x80C] TX success counter (64-bit high)
+    uint32_t rx_success_count_low;          // [0x810] RX success counter (64-bit low)
+    uint32_t rx_success_count_high;         // [0x814] RX success counter (64-bit high)
+    uint8_t  rsv_818[0x81C - 0x818];        // [0x818-0x81B] Reserved (padding)
+    uint32_t last_jiffies_low;              // [0x81C] Last jiffies timestamp (64-bit low)
+    uint32_t last_jiffies_high;             // [0x820] Last jiffies timestamp (64-bit high)
+    uint8_t  rsv_824[0x82C - 0x824];        // [0x824-0x82B] Reserved (padding)
+    uint32_t frame_error_count;             // [0x82C] Frame error counter
+    uint32_t retry_count;                   // [0x830] Retry counter
+    uint32_t timeout_count;                 // [0x834] Timeout counter
+    uint16_t cca_busy_time;                 // [0x838] CCA busy time counter
+    uint8_t  rsv_83a[0x83D - 0x83A];        // [0x83A-0x83C] Reserved (padding)
+    uint8_t  thermal_sensor_value;          // [0x83D] Thermal sensor reading
+    uint8_t  power_monitor_value;           // [0x83E] Power monitor reading
+    uint8_t  rsv_83f;                       // [0x83F] Reserved (padding)
     uint32_t phy_reset_metric_storage;      // [0x840] PHY reset metric storage
     uint8_t  phy_reset_metric;              // [0x841] PHY reset metric / PCF period (CS_NUM)
     uint8_t  rsv_842[3];
     uint32_t hw_tx_power;                   // [0x844] Hardware TX power setting
     uint32_t rsv_848;
     uint32_t tx_status_counter;             // [0x84C] TX completion counter
-    uint8_t  rsv_850[0x875 - 0x850];
+    uint16_t cca_observ[7];                 // [0x850-0x85E] CCA observation values (7x 16-bit)
+    uint8_t  rsv_860[0x864 - 0x860];
+    uint32_t reg_864_config;                // [0x864] RF register configuration (width 2)
+    uint16_t state_866;                     // [0x866] RF register state
+    uint8_t  rsv_868[0x870 - 0x868];
+    uint16_t state_870;                     // [0x870] State
+    uint8_t  rsv_872[0x875 - 0x872];
     uint8_t  rf_control_flags;              // [0x875] RF control flags
     uint8_t  sleep_gpio_state;              // [0x876] Sleep GPIO pin state
     uint8_t  rf_reset_flags;                // [0x877] RF reset flags
@@ -254,13 +501,32 @@ typedef struct lmac_ctx {
     int8_t   rssi_threshold_cal;            // [0x89E] RSSI threshold calibration offset
     uint8_t  rsv_89f[0x8AE - 0x89F];        // [0x89F-0x8AD] Reserved
     int8_t   rf_cal_offset;                 // [0x8AE] RF calibration offset
-    uint8_t  rsv_8af[0x8C2 - 0x8AF];        // [0x8AF-0x8C1] Reserved
+    uint8_t  rsv_8af[0x8C2 - 0x8AF];        // [0x8AF-0x8C1] Reserved (includes fields at 0x8e1)
     uint8_t  rf_temp_calib[6];              // [0x8C2-0x8C7] RF temperature calibration
     uint8_t  rsv_8c8[0x8CC - 0x8C8];        // [0x8C8-0x8CB] Reserved
     void    *dsleep_cfg;                    // [0x8CC]
-    uint8_t  rsv_8d0[0x8f6 - 0x8D0];
+    uint8_t  rsv_8d0[0x8d8 - 0x8D0];
+    uint32_t beacon_interval_snapshot;      // [0x8D8] Beacon interval snapshot (saved before TDMA ops)
+    uint32_t tdma_aux_timing;               // [0x8DC] TDMA auxiliary timing value
+    uint8_t  rsv_8e0[0x8e6 - 0x8E0];
+    uint16_t ba_resp_timeout;               // [0x8E6] Block Ack response timeout (calculated from frame durations)
+    uint8_t  rsv_8e7[0x8f6 - 0x8E7];
     uint16_t ba_timeout_counter;            // [0x8F6] BA/ACK timeout counter
-    uint8_t  rsv_8f8[0x99C - 0x8F8];
+    uint8_t  rsv_8f8[0x906 - 0x8F8];
+    uint16_t tx_vec_hdr_dur;                // [0x906] TX vector - header duration (lmac_hdr_dur_calc result)
+    uint16_t tx_vec_buff[2];                // [0x908-0x90B] TX vector buffer area
+    uint16_t tx_vec_info;                   // [0x90E] TX vector info field
+    uint32_t tx_vec_flags;                  // [0x910] TX vector flags/control (bit flags)
+    uint32_t tx_vec_config[2];              // [0x914-0x91B] TX vector config registers
+    uint32_t tx_power_idx;                  // [0x91C] TX power index configuration
+    uint32_t mcs_rate_info[4];              // [0x920-0x92F] MCS/rate info registers (4x 32-bit)
+    uint8_t  rsv_938[0x969 - 0x938];
+    uint8_t  tx_control_flags;              // [0x969] TX control flags (bit field)
+    uint8_t  rsv_96a[0x979 - 0x96A];
+    uint8_t  tx_mode_flags;                 // [0x979] TX mode flags (bit field)
+    uint8_t  rsv_97a[0x994 - 0x97A];
+    uint32_t frame_rx_state;                // [0x994] RX frame handler state (0-7 state machine)
+    uint32_t rx_frame_counter;              // [0x998] RX frame counter (reset between frames)
     uint32_t state;                         // [0x99C]
     uint8_t  main_task_obj[0x9B8 - 0x9A0]; // [0x9A0] OS task structure (20B + extra)
     uint32_t print_buf_ptr;                 // [0x9B8] Print task buffer pointer
@@ -290,7 +556,9 @@ typedef struct lmac_ctx {
     uint8_t  rsv_a30[0xA53 - 0xA30];        // [0xA30-0xA52] Reserved (shifted +4)
     uint8_t  phy_watchdog_flags;            // [0xA53] PHY watchdog state flags (shifted +4)
     uint32_t scan_duration_ms;              // [0xA54] Scan duration or timeout counter (shifted +4)
-    uint8_t  rsv_a58[0xA67 - 0xA58];        // [0xA58-0xA66] Reserved (shifted +4)
+    uint8_t  rsv_a58[0xa63 - 0xA58];
+    uint8_t  scan_ie_cfg;                   // [0xa63] Scan IE configuration
+    uint8_t  rsv_a64[0xA67 - 0xA64];        // [0xa64-0xA66] Reserved (shifted +4)
     uint8_t  scan_channel_index;            // [0xA67] Current scan channel index (shifted +4)
     uint8_t  rsv_a68[0xA6C - 0xA68];        // [0xA68-0xA6B] Reserved (shifted +4)
     uint8_t  scan_ie_buffer[0xA84 - 0xA6C]; // [0xA6C-0xA83] Scan IE buffer (24 bytes, shifted +4)
@@ -344,7 +612,6 @@ typedef struct lmac_ah_tx_ctx {
     uint8_t             cipher_bw_config;   // [0x6BC] CE bandwidth config
     uint8_t             rsv_6bd;
     uint16_t            cipher_frame_len;   // [0x6BE] CE frame length
-    uint8_t             rsv_6c0[8];
     uint8_t             cipher_bw;          // [0x6C8] CE bandwidth (MHz)
     uint8_t             rsv_6c9[3];
     uint32_t            seq_num_space;      // [0x6CC] Sequence number space
