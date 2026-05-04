@@ -44,6 +44,10 @@ struct lmac_ops {
     struct sk_buff *(*test_cmd)(struct lmac_ops *ops, struct sk_buff *skb);
 };
 
+typedef struct lmac_ops lmac_ops_t;
+
+_Static_assert(sizeof(lmac_ops_t) == 0x50, "lmac_ops_t size");
+
 //////////////////////////////////////////////////////////////////////////////////
 
 static inline int32 lmac_open(struct lmac_ops *ops)

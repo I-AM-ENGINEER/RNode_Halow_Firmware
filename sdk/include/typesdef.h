@@ -1,6 +1,37 @@
 #ifndef _HUGEIC_TYPES_H_
 #define _HUGEIC_TYPES_H_
 
+#ifndef GHIDRA_TYPES_FIX_H
+#define GHIDRA_TYPES_FIX_H
+
+typedef signed char        int8;
+typedef unsigned char      uint8;
+typedef signed short       int16;
+typedef unsigned short     uint16;
+typedef signed int         int32;
+typedef unsigned int       uint32;
+typedef signed long long   int64;
+typedef unsigned long long uint64;
+
+typedef signed char        s8;
+typedef unsigned char      u8;
+typedef signed short       s16;
+typedef unsigned short     u16;
+typedef signed int         s32;
+typedef unsigned int       u32;
+typedef signed long long   s64;
+typedef unsigned long long u64;
+
+#define __packed
+#define __weak
+#define __inline inline
+#define __forceinline inline
+#define __attribute__(x)
+#define __STATIC_INLINE static inline
+#define __IO volatile
+
+#endif
+
 #include "sys_config.h"
 #include "errno.h"
 
