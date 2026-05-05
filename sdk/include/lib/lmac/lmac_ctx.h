@@ -267,546 +267,436 @@ struct rx_vendor_bss_cache_entry {
 
     uint8_t  unknown[3];          // +0x09 .. +0x0b
 };                                // size = 0x0c
+/* LMAC_CTX_GENERATED_BEGIN */
+/* --- Opaque stubs for compound types not defined elsewhere --- */
+struct ah_ce_ctx { uint8_t _opaque[184]; };
+struct lmac_chan_candidate { uint8_t _opaque[24]; };
+struct pv0_cfend_frame { uint8_t _opaque[16]; };
+struct pv0_pspoll_frame { uint8_t _opaque[16]; };
 
 typedef struct lmac_ctx {
-    //lmac_ops_t *ops;                        // [0x000] Ops vtable pointer
-    uint8_t rsv[0xbc4];
-    // uint32_t config_word;                   // [0x004] Configuration/init value
-    // uint32_t init_state_flags;              // [0x008] Initialization state and flags
-    // uint32_t init_control;                  // [0x00C] Init control register
-    // uint32_t init_marker_10;                // [0x010] Init marker/timer
-    // uint32_t init_marker_14;                // [0x014] Init marker/timer
-    // uint32_t init_marker_18;                // [0x018] Init marker/timer value
-    // uint32_t init_base_param_1c;            // [0x01C] Base parameter 1
-    // uint32_t init_base_param_20;            // [0x020] Base parameter 2
-    // uint32_t init_base_param_24;            // [0x024] Base parameter 3
-    // uint32_t init_base_param_28;            // [0x028] Base parameter 4
-    // uint32_t init_base_param_2c;            // [0x02C] Base parameter 5
-    // uint32_t init_base_param_30;            // [0x030] Base parameter 6
-    // uint32_t init_base_param_34;            // [0x034] Base parameter 7
-    // uint32_t init_base_param_38;            // [0x038] Base parameter 8
-    // uint32_t init_base_param_3c;            // [0x03C] Base parameter 9
-    // uint32_t param_40;                      // [0x040] Parameter/state
-    // uint32_t param_44;                      // [0x044] Parameter/state
-    // uint32_t dma_init_param1;               // [0x048] DMA initialization parameter
-    // uint32_t dma_init_param2;               // [0x04C] DMA initialization parameter
-    // uint32_t dma_config_50;                 // [0x050] DMA configuration
-    // uint32_t dma_config_54;                 // [0x054] DMA configuration
-    // uint32_t dma_config_58;                 // [0x058] DMA configuration
-    // uint32_t dma_config_5c;                 // [0x05C] DMA configuration
-    // uint32_t dma_status_60;                 // [0x060] DMA status/control
-    // uint32_t dma_status_64;                 // [0x064] DMA status/control
-    // uint32_t dma_status_68;                 // [0x068] DMA status/control
-    // uint32_t dma_status_6c;                 // [0x06C] DMA status/control
-    // uint32_t hw_state_70;                   // [0x070] Hardware state
-    // uint32_t hw_state_74;                   // [0x074] Hardware state
-    // uint32_t hw_state_78;                   // [0x078] Hardware state
-    // uint32_t hw_state_7c;                   // [0x07C] Hardware state
-    // uint32_t hw_state_80;                   // [0x080] Hardware state
-    // uint8_t  phy_config_084;                // [0x084] PHY configuration
-    // uint8_t  phy_config_085;                // [0x085] PHY configuration
-    // uint8_t  phy_config_086;                // [0x086] PHY configuration
-    // uint8_t  phy_config_087;                // [0x087] PHY configuration
-    // uint8_t  phy_ctrl_flags;                // [0x088] PHY control flags
-    // uint8_t  rsv_089[0x090 - 0x089];        // [0x089-0x08F] Reserved (padding)
-    // uint16_t phy_param_90;                  // [0x090] PHY parameter
-    // uint16_t phy_param_92;                  // [0x092] PHY parameter
-    // uint16_t phy_param_94;                  // [0x094] PHY parameter
-    // uint16_t phy_param_96;                  // [0x096] PHY parameter
-    // uint16_t phy_state_98;                  // [0x098] PHY state
-    // uint16_t rsv_09a;                       // [0x09A] Reserved (padding)
-    // uint16_t lo_freq_threshold_a0;          // [0x0A0] LO frequency threshold
-    // uint16_t lo_freq_threshold_a2;          // [0x0A2] LO frequency threshold
-    // uint16_t lo_freq_threshold_a4;          // [0x0A4] LO frequency threshold
-    // uint16_t lo_freq_threshold_a6;          // [0x0A6] LO frequency threshold
-    // uint16_t rsv_0a8;                       // [0x0A8] Alignment/reserved
-    // uint32_t phy_config_ac;                 // [0x0AC] PHY config
-    // uint32_t phy_config_b0;                 // [0x0B0] PHY config
-    // uint32_t phy_config_b4;                 // [0x0B4] PHY config
-    // uint32_t phy_config_b8;                 // [0x0B8] PHY config
-    // uint32_t phy_config_bc;                 // [0x0BC] PHY config
-    // uint32_t phy_config_c0;                 // [0x0C0] PHY config
-    // uint32_t phy_config_c4;                 // [0x0C4] PHY config
-    // uint32_t phy_config_c8;                 // [0x0C8] PHY config
-    // uint32_t phy_config_cc;                 // [0x0CC] PHY config
-    // uint32_t phy_config_d0;                 // [0x0D0] PHY config
-    // uint32_t phy_config_d4;                 // [0x0D4] PHY config
-    // uint32_t phy_config_d8;                 // [0x0D8] PHY config
-    // uint32_t phy_config_dc;                 // [0x0DC] PHY config
-    // uint32_t phy_config_e0;                 // [0x0E0] PHY config
-    // uint32_t phy_config_e4;                 // [0x0E4] PHY config
-    // uint32_t phy_config_e8;                 // [0x0E8] PHY config
-    // uint32_t phy_config_ec;                 // [0x0EC] PHY config
-    // uint32_t phy_config_f0;                 // [0x0F0] PHY config
-    // uint32_t phy_config_f4;                 // [0x0F4] PHY config
-    // uint32_t phy_config_f8;                 // [0x0F8] PHY config
-    // uint32_t param_fc;                      // [0x0FC] Parameter/state
-    // uint32_t rx_frame_tsf;                  // [0x100] RX frame timestamp (TSF)
-    // uint16_t rx_frame_length;               // [0x104] RX frame length
-    // uint16_t rx_frame_info;                 // [0x106] RX frame info (MCS, rate, bandwidth)
-    // uint32_t rx_rssi_value;                 // [0x108] RX RSSI value
-    // uint16_t rx_cfo;                        // [0x10A] RX carrier frequency offset
-    // uint16_t rx_phase_offset;               // [0x10C] RX phase offset
-    // uint32_t rx_evm;                        // [0x10E] RX EVM (Error Vector Magnitude)
-    // uint32_t rx_snr;                        // [0x110] RX SNR value
-    // uint8_t  rsv_114[0x116 - 0x114];
-    // uint8_t  rx_status_flags;               // [0x116] RX status flags (bit field)
-    // uint16_t rx_seq_ctrl;                   // [0x118] RX sequence control from frame
-    // uint8_t  rsv_11a[0x11c - 0x11A];
-    // uint32_t rx_cipher_param;               // [0x11C] RX cipher parameters
-    // uint32_t rx_timestamp_adj;              // [0x120] RX timestamp adjustment/auxiliary
-    // uint32_t rx_frame_duration;             // [0x124] RX frame duration calculation
-    // uint32_t rx_subframe_info;              // [0x128] RX subframe/MPDU info
-    // uint32_t rx_agg_param;                  // [0x12C] RX aggregation parameters
-    // uint32_t rx_ampdu_len;                  // [0x130] RX A-MPDU length
-    // uint8_t  rsv_134[0x138 - 0x134];
-    // uint32_t rx_descriptor;                 // [0x138] RX frame descriptor
-    // uint16_t rx_descriptor_ext;             // [0x13C] RX descriptor extension
-    // uint8_t  rsv_13e[0x140 - 0x13E];
-    // uint32_t rx_buffer_ptr;                 // [0x140] RX buffer/SKB pointer
-    // uint32_t rx_processing_state;           // [0x144] RX frame processing state
-    // uint32_t rx_hw_state_148;               // [0x148] RX hardware state register
-    // uint32_t rx_hw_state_14c;               // [0x14C] RX hardware state register
-    // uint32_t rx_hw_state_150;               // [0x150] RX hardware state register
-    // uint32_t rx_hw_state_154;               // [0x154] RX hardware state register
-    // uint32_t rx_hw_state_158;               // [0x158] RX hardware state register
-    // uint32_t rx_hw_state_15c;               // [0x15C] RX hardware state register
-    // uint32_t rx_interrupt_status;           // [0x160] RX interrupt/event status
-    // uint8_t  rsv_164[0x1B8 - 0x164];        // [0x164-0x1B7] Reserved (RX buffer/descriptor area)
-    // uint32_t rx_frame_vector;               // [0x1B8] RX frame vector / descriptor
-    // uint8_t  rsv_1bc[0x1C4 - 0x1BC];        // [0x1BC-0x1C3] Reserved (padding)
-    // uint16_t rx_frame_count;                // [0x1C4] RX frame counter / valid count
-    // uint16_t rx_max_frame_count;            // [0x1C6] RX max frame count threshold
-    // uint8_t  rsv_1c8[0x1D0 - 0x1C8];        // [0x1C8-0x1CF] Reserved (padding)
-    // uint32_t rx_dma_param;                  // [0x1D0] RX DMA parameter / descriptor address
-    // uint16_t rx_frame_length_threshold;     // [0x1D4] RX frame length threshold
-    // uint8_t  rsv_1d6[0x1D8 - 0x1D6];        // [0x1D6-0x1D7] Reserved (padding)
-    // uint32_t rx_buffer_threshold;           // [0x1D8] RX buffer threshold / level
-    // uint16_t rx_frame_timeout;              // [0x1DC] RX frame timeout value
-    // uint8_t  rsv_1de[0x1E0 - 0x1DE];        // [0x1DE-0x1DF] Reserved (padding)
-    // uint16_t rx_good_count;                 // [0x1E0] RX good frame count
-    // uint16_t rx_bad_count;                  // [0x1E2] RX bad frame count
-    // uint8_t  rsv_1e4[0x1E8 - 0x1E4];        // [0x1E4-0x1E7] Reserved (padding)
-    // uint32_t rx_total_frames;               // [0x1E8] RX total frames processed
-    // uint32_t rx_frame_body;                 // [0x1EC] RX frame body descriptor
-    // uint32_t phy_tx_vector_h;               // [0x1F0] PHY TX vector header
-    // uint32_t phy_tx_vector_l;               // [0x1F4] PHY TX vector lower
-    // uint8_t  rsv_1f8[0x208 - 0x1F8];        // [0x1F8-0x207] Reserved (final padding)
-    // uint32_t phy_tx_config;                 // [0x208] PHY TX configuration (packed register)
-    // uint32_t phy_tx_ctrl;                   // [0x20C] PHY TX control
-    // uint32_t phy_rx_config;                 // [0x210] PHY RX configuration (packed register)
-    // uint32_t phy_rx_ctrl_214;               // [0x214] PHY RX control
-    // uint32_t phy_rx_ctrl_218;               // [0x218] PHY RX control
-    // uint32_t phy_rx_ctrl_21c;               // [0x21C] PHY RX control
-    // uint32_t phy_rx_ctrl_220;               // [0x220] PHY RX control
-    // uint32_t phy_control_flags;             // [0x224] PHY control/status flags
-    // uint8_t  rsv_228[0x257 - 0x228];        // [0x228-0x256] Reserved
-    // uint8_t  dsleep_control;                // [0x257] Deep-sleep control byte (written value 4)
-    // uint8_t  dsleep_pmu_flags;              // [0x258] Deep-sleep PMU flags (bits 6:0 used for PMU control)
-    // uint8_t  rsv_259[0x25C - 0x259];        // [0x259-0x25B] Reserved (3B)
-    // uint32_t hw_register_20_backup;         // [0x25C-0x25F] Backup of hardware register 0x20 (masked 0x0bf807f7)
-    // uint8_t  rsv_260[0x2C0 - 0x260];        // [0x260-0x2BF] Reserved (96B, includes padding)
-    // uint32_t dsleep_wakeup_timer;           // [0x2C0-0x2C3] Deep-sleep wakeup timer
-    // uint8_t  dsleep_status_byte;            // [0x2C4] Deep-sleep status control
-    // uint8_t  rsv_2c5[0x2CC - 0x2C5];        // [0x2C5-0x2CB] Reserved (7B)
-    // uint32_t dsleep_state_read_0;           // [0x2CC] Deep-sleep state read 0
-    // uint32_t dsleep_state_read_1;           // [0x2D0] Deep-sleep state read 1
-    // uint32_t dsleep_state_read_2;           // [0x2D4] Deep-sleep state read 2
-    // uint32_t dsleep_state_read_3;           // [0x2D8] Deep-sleep state read 3
-    // uint32_t dsleep_state_write_0;          // [0x2DC] Deep-sleep state write 0
-    // uint32_t dsleep_state_write_1;          // [0x2E0] Deep-sleep state write 1
-    // uint32_t dsleep_state_write_2;          // [0x2E4] Deep-sleep state write 2
-    // uint32_t dsleep_state_write_3;          // [0x2E8] Deep-sleep state write 3 / OBSS field
-    // uint8_t  obss_scan_count;               // [0x2EC] OBSS scan counter (part of state_write_3)
-    // uint8_t  rsv_2ed[0x307 - 0x2ED];        // [0x2ED-0x306] Reserved (padding, 26B)
-    // int8_t   obss_threshold;                // [0x307] OBSS detection threshold
-    // uint8_t  obss_state;                    // [0x308] OBSS state byte
-    // uint8_t  self_mac[6];                   // [0x309-0x30E]
-    // uint8_t  bss_bw;                        // [0x30F] BSS bandwidth
-    // uint8_t  pri_chan_cfg;                  // [0x310]
-    // uint8_t  rsv_311[2];                    // [0x311-0x312]
-    // uint8_t  txq_thresh0;                   // [0x313]
-    // uint8_t  txq_thresh1;                   // [0x314]
-    // uint8_t  txq_thresh2;                   // [0x315]
-    // uint8_t  txq_thresh3;                   // [0x316]
-    // uint8_t  rsv_317;                       // [0x317]
-    // uint8_t  rate_mode;                     // [0x318]
-    // uint8_t  tx_power_levels;               // [0x319]
-    // uint8_t  rate_fallback_limit;           // [0x31A]
-    // uint8_t  rsv_31b;                       // [0x31B]
-    // uint8_t  max_agg_frames;                // [0x31C]
-    // uint8_t  phy_mode;                      // [0x31D]
-    // uint8_t  sta_priv_len;                  // [0x31E]
-    // uint8_t  psm_state;                     // [0x31F]
-    // uint8_t  sleep_flags;                   // [0x320]
-    // uint8_t  sleep_gpio_shift;              // [0x321]
-    // uint8_t  sleep_gpio_mask;               // [0x322]
-    // int8_t   rssi_threshold_low;            // [0x323]
-    // int8_t   rssi_threshold_high;           // [0x324]
-    // int8_t   cal_temp_offset;               // [0x325]
-    // int8_t   cal_voltage_offset;            // [0x326]
-    // int8_t   cal_rssi_offset;               // [0x327]
-    // int8_t   bknoise_agc_offsets[6];        // [0x328-0x32D]
-    // int8_t   bknoise_base_offset;           // [0x32E]
-    // int8_t   cca_threshold_base;            // [0x32F]
-    // int8_t   cca_threshold_min;             // [0x330]
-    // int8_t   sta_event_state;               // [0x331]
-    // uint8_t  rsv_32b;                       // [0x332]
-    // uint16_t rssi_lower_threshold;          // [0x334]
-    // uint16_t rssi_upper_threshold;          // [0x336]
-    // uint16_t aid;                           // [0x338]
-    // uint8_t  rx_buff_addr_state;            // [0x33A]
-    // uint8_t  rx_buff_addr_ctrl;             // [0x33B]
-    // uint16_t rx_buff_info;                  // [0x33C]
-    // uint16_t partial_aid_pack;              // [0x33E]
-    // uint32_t chan_cfg_param;                // [0x340]
-    // uint8_t  meas_report_flags;             // [0x344]
-    // uint8_t  meas_state;                    // [0x345]
-    // uint16_t rsv_33e;                       // [0x346-0x347]
-    // uint8_t  lo_cfg_byte_340;               // [0x348]
-    // uint8_t  lo_cfg_byte_341;               // [0x349]
-    // uint8_t  lo_cfg_byte_342;               // [0x34A]
-    // uint8_t  lo_cfg_byte_343;               // [0x34B]
-    // uint32_t lo_freq_value;                 // [0x34C]
-    // uint8_t  lo_status_348;                 // [0x350]
-    // uint8_t  lo_freq_flags;                 // [0x351]
-    // uint16_t lo_freq_table_idx;             // [0x352]
-    // uint16_t lo_control_34c;                // [0x354]
-    // uint16_t rsv_34e;                       // [0x356]
-    // uint32_t tx_config_350;                 // [0x358]
-    // uint32_t tx_config_354;                 // [0x35C]
-    // uint32_t tx_config_358;                 // [0x360]
-    // uint32_t tx_config_35c;                 // [0x364]
-    // uint16_t tx_max_syms_config;            // [0x368]
-    // uint16_t beacon_timestamp_high;         // [0x36A]
-    // uint8_t  chan_info_364;                 // [0x36C]
-    // uint8_t  chan_info_365;                 // [0x36D]
-    // uint8_t  rsv_36e;                       // [0x36E]
-    // uint8_t  rsv_36f;                       // [0x36F]
-    // uint32_t chan_setup_param;              // [0x370]
-    // uint32_t rf_cfg;                        // [0x374]
-    // uint32_t event_payload;                 // [0x378]
-    // uint32_t misc_ctrl_word;                // [0x37C]
-    // uint8_t  nav_mgmt_state;                // [0x380]
-    // uint8_t  ap_state_flags;                // [0x381]
-    // uint8_t  flags_37a;                     // [0x382]
-    // uint8_t  rsv_37b;                       // [0x383]
-    // uint8_t  flags_37c;                     // [0x384]
-    // uint8_t  flags_37d;                     // [0x385]
-    // uint8_t  flags_37e;                     // [0x386]
-    // uint8_t  flags_37f;                     // [0x387]
-    // uint8_t  beacon_fsm_state;              // [0x388]
-    // uint8_t  rsv_381[3];                    // [0x389-0x38B]
-    // uint32_t fsm_timeout_counter;           // [0x38C]
-    // uint32_t rx_active_time_ms;             // [0x390] RX channel active time (milliseconds)
-    // uint32_t tx_active_time_ms;             // [0x394] TX channel active time (milliseconds)
-    // uint32_t beacon_timer_reload;           // [0x398] Beacon timer reload/countdown value
-    // uint32_t beacon_interval_scaled;        // [0x39C] Beacon interval * 1024
-    // uint32_t beacon_interval_next;          // [0x3A0] Next beacon interval
-    // uint32_t rsv_3a4;                       // [0x3A4] Reserved
-    // uint32_t beacon_interval_current;       // [0x3A8] Current beacon interval (TU)
-    // uint8_t  rsv_3ac[0x3B4 - 0x3AC];        // [0x3AC-0x3B3] Reserved (8 bytes)
-    // uint32_t beacon_timer_control;          // [0x3B4] Beacon timer control register
-    // uint32_t antenna_probe_flag;            // [0x3B8] Rate control / antenna probe flag
-    // uint32_t dsleep_countdown;              // [0x3BC] Deep-sleep duration countdown
-    // uint32_t flags_3c0;                     // [0x3C0] Debug/control flags
-    // uint8_t  rsv_3c4[0x3C8 - 0x3C4];        // [0x3C4-0x3C7] Reserved (4 bytes)
-    // uint32_t ap_sleep_state;                // [0x3C8] AP sleep state
-    // uint32_t beacon_event_counter;          // [0x3CC] Beacon event counter / beacon processing state
-    // uint16_t beacon_drift_adj;              // [0x3D0] Beacon drift adjustment (half-word field)
-    // uint16_t beacon_timing_param;           // [0x3D2] Beacon timing parameter
-    // uint32_t tsf_adjustment_factor;         // [0x3D4] TSF adjustment factor
-    // uint32_t beacon_miss_counter;           // [0x3D8] Beacon miss/detection counter
-    // uint32_t hw_tsf_estimate;               // [0x3DC] Hardware TSF estimate / timing estimate
-    // uint16_t beacon_offset;                 // [0x3E0] Beacon offset / timing correction
-    // uint8_t  rx_state_flags2;               // [0x3E2] RX state flags (part 2)
-    // uint8_t  rx_filter_flags2;              // [0x3E3] RX filter flags (part 2)
-    // int8_t   rssi_adjustment;               // [0x3E4] RSSI value adjustment/calibration
-    // uint8_t  ba_window_param;               // [0x3E5] Block Ack window parameter
-    // uint8_t  ampdu_density;                 // [0x3E6] A-MPDU density setting
-    // uint8_t  tx_retry_count;                // [0x3E7] TX retry counter / limit
-    // uint8_t  rate_control_flags;            // [0x3E8] Rate control flags
-    // uint8_t  rsv_3e9[0x3EC - 0x3E9];        // [0x3E9-0x3EB] Reserved (3 bytes)
-    // uint32_t beacon_int_counter;            // [0x3EC] Beacon interval counter
-    // uint32_t rx_buffer_usage;               // [0x3F0] RX buffer usage/threshold tracking
-    // uint32_t tx_queue_state;                // [0x3F4] TX queue state / counter
-    // uint8_t  rsv_3f8[0x409 - 0x3F8];        // [0x3F8-0x408] Reserved (0x11 bytes)
-    // uint8_t  tx_frame_prep_state;           // [0x409] TX frame preparation state
-    // uint8_t  rsv_40a[0x51A - 0x40A];        // [0x40A-0x519] Reserved (0x110 bytes)
-    // uint8_t  chan_cfg_51a;                  // [0x51A] Channel configuration
-    // uint8_t  chan_cfg_51b;                  // [0x51B] Channel configuration
-    // uint8_t  rsv_51c[0x51E - 0x51C];        // [0x51C-0x51D] Reserved
-    // uint8_t  chan_cfg_51e;                  // [0x51E] Channel configuration
-    // uint8_t  chan_cfg_51f;                  // [0x51F] Channel configuration
-    // uint8_t  rsv_520[0x522 - 0x520];        // [0x520-0x521] Reserved
-    // uint8_t  chan_cfg_522;                  // [0x522] Channel configuration
-    // uint8_t  chan_cfg_523;                  // [0x523] Channel configuration
-    // uint8_t  rsv_524[0x528 - 0x524];        // [0x524-0x527] Reserved
-    // uint8_t  bssid[6];                      // [0x528] BSSID
-    // uint8_t  rsv_52e[0x550 - 0x52E];        // [0x52E-0x54F] Reserved
-    // uint32_t probe_req_elem;                // [0x550] Probe request element info
-    // uint8_t  probe_resp_type;               // [0x554] Probe response type/subtype
-    // uint8_t  probe_resp_flags;              // [0x555] Probe response flags
-    // uint8_t  ie_element_index;              // [0x556] IE element index / position
-    // uint8_t  ie_type_field;                 // [0x557] IE type identifier field
-    // uint32_t ie_info_558;                   // [0x558] IE info field
-    // uint8_t  rsv_55c;                       // [0x55C] Reserved
-    // uint16_t s1g_compat_values;             // [0x55E] S1G compatibility field
-    // uint16_t tx_aifs_slots;                 // [0x560] Per-attempt AIFS slot count
-    // uint16_t tx_backoff_slots;              // [0x562] Per-attempt random/backoff slot count
-    // uint8_t  rsv_564[0x568 - 0x564];        // [0x564-0x567] Reserved
-    // lmac_txvec_slot_t ndp_txvec_slots[5];   // [0x568-0x5B7] NDP TX vector slots
-    // lmac_txvec_slot_t pv0_ctrl_txvec_slots[8]; // [0x5B8-0x637] PV0 control TX vector slots
-    // lmac_txvec_slot_t beacon_txvec;         // [0x638-0x647] Beacon/AC-PD TX vector slot
-    // uint8_t  rsv_64c[0x64C - 0x648];        // [0x648-0x64B] Reserved
-    // uint32_t tx_queue_wstate;               // [0x64C] TX packet queue write state
-    // uint32_t tx_packet_state;               // [0x650] TX packet descriptor state
-    // lmac_s1g_beacon_state_t s1g_beacon_state; // [0x654-0x667] S1G beacon state
-    // lmac_txvec_word_t s1g_short_beacon_cfg; // [0x668-0x66B] Short beacon config
-    // lmac_pv0_ctrl_airtime_cache_t pv0_ctrl_airtime; // [0x66C-0x677] PV0 control airtime cache
-    // int32_t  calibrated_temp_code;          // [0x678] Calibrated temperature sensor code
-    // uint32_t vcc_measurement;               // [0x67C] VCC measurement sample
-    // lmac_chip_monitor_gain_cache_t chip_monitor_gain_cache; // [0x680-0x68D] Chip monitor gain cache
-    // int8_t   chip_monitor_cfg;              // [0x68E] Chip-monitor configuration
-    // int8_t   chip_monitor_offset;           // [0x68F] Chip-monitor signed offset
-    // uint8_t  channel_busy_percent;          // [0x690] Channel busy percentage
-    // uint8_t  channel_idle_percent;          // [0x691] Channel idle percentage
-    // uint8_t  sec_key_index;                 // [0x692] Security key index
-    // uint8_t  sec_key_len;                   // [0x693] Security key length
-    // uint8_t  sec_key[32];                   // [0x694-0x6B3] Security key material
-    // uint8_t  sec_key_index2;                // [0x6B4] Security key index 2
-    // uint8_t  sec_key_len2;                  // [0x6B5] Security key length 2
-    // uint8_t  sec_key2[32];                  // [0x6B6-0x6D5] Security key material 2
-    // uint8_t  rsv_6da[0x6D8 - 0x6D6];        // [0x6D6-0x6D7] Reserved
-    // uint32_t vdd13b_measurement;            // [0x6D8] VDD13B measurement sample
-    // uint32_t vdd13c_measurement;            // [0x6DC] VDD13C measurement sample
-    // uint32_t fcs_fail_count;                // [0x6E0] FCS failure counter
-    // uint32_t rx_underrun_count;             // [0x6E4] RX buffer underrun counter
-    // uint32_t rx_overflow_count;             // [0x6E8] RX buffer overflow counter
-    // uint8_t  rsv_6f0[0x6F0 - 0x6EC];        // [0x6EC-0x6EF] Reserved
-    // uint32_t corruption_error_count;        // [0x6F0] Corruption/integrity error counter
-    // uint32_t channel_err_count;             // [0x6F4] Channel/decode error counter
-    // uint32_t frame_sync_error_count;        // [0x6F8] Frame sync error counter
-    // uint32_t plcp_error_count;              // [0x6FC] PLCP error counter
-    // uint32_t rx_fifo_error_count;           // [0x700] RX FIFO error counter
-    // uint32_t tx_fifo_error_count;           // [0x704] TX FIFO error counter
-    // uint8_t  phy_error_flags;               // [0x708] PHY error/status flags
-    // uint8_t  rsv_70d[0x70C - 0x709];        // [0x709-0x70B] Reserved
-    // uint8_t  rx_state_error_count;          // [0x70C] RX state machine error count
-    // uint8_t  tx_state_error_count;          // [0x70D] TX state machine error count
-    // uint8_t  mac_timeout_count;             // [0x70E] MAC timeout counter
-    // uint8_t  rsv_713;                       // [0x70F] Reserved
-    // uint8_t  collision_detect_count;        // [0x710] Collision detection counter
-    // uint8_t  rsv_715;                       // [0x711] Reserved
-    // int16_t  last_rssi_raw;                 // [0x712] Last raw RSSI measurement
-    // int16_t  last_cfo_raw;                  // [0x714] Last raw CFO measurement
-    // uint8_t  rsv_71a[0x718 - 0x716];        // [0x716-0x717] Reserved
-    // uint32_t rx_ampdu_count;                // [0x718] RX A-MPDU counter
-    // uint32_t rx_mpdu_success_count;         // [0x71C] RX MPDU success counter
-    // uint32_t rx_mpdu_error_count;           // [0x720] RX MPDU error counter
-    // uint32_t tx_ampdu_success_count;        // [0x724] TX A-MPDU success counter
-    // uint32_t tx_ampdu_error_count;          // [0x728] TX A-MPDU error counter
-    // uint32_t block_ack_timeout_count;       // [0x72C] Block Ack timeout counter
-    // uint32_t block_ack_error_count;         // [0x730] Block Ack error counter
-    // uint32_t ack_timeout_count;             // [0x734] ACK timeout counter
-    // uint32_t ack_error_count;               // [0x738] ACK error counter
-    // uint32_t cts_timeout_count;             // [0x73C] CTS timeout counter
-    // uint32_t rts_failure_count;             // [0x740] RTS failure counter
-    // uint32_t retry_exceeded_count;          // [0x744] Retry limit exceeded counter
-    // uint32_t qos_null_tx_count;             // [0x748] QoS Null frame TX counter
-    // uint32_t pspoll_tx_count;               // [0x74C] PS-Poll TX counter
-    // uint32_t probe_request_count;           // [0x750] Probe request frame counter
-    // uint32_t failed_frame_count;            // [0x754] TX failed frame counter
-    // uint32_t error_frame_count;             // [0x758] RX error frame counter
-    // uint32_t rsv_760_stat1;                 // [0x75C] RX statistics counter 1
-    // uint32_t rsv_764_stat2;                 // [0x760] RX statistics counter 2
-    // uint32_t rsv_768_stat3;                 // [0x764] RX statistics counter 3
-    // uint32_t rsv_76c_stat4;                 // [0x768] RX statistics counter 4
-    // uint32_t rsv_770_stat5;                 // [0x76C] RX statistics counter 5
-    // uint32_t rsv_774_stat6;                 // [0x770] RX statistics counter 6
-    // uint32_t rsv_778_stat7;                 // [0x774] RX statistics counter 7
-    // uint32_t rsv_77c_stat8;                 // [0x778] RX statistics counter 8
-    // uint32_t rsv_780_stat9;                 // [0x77C] RX statistics counter 9
-    // uint32_t rsv_784_adc;                   // [0x780] ADC/sensor value
-    // uint32_t phy_error_count;               // [0x784] PHY error counter
-    // uint32_t phy_error_code;                // [0x788] Last PHY error code
-    // uint8_t  rsv_790[0x798 - 0x78C];        // [0x78C-0x797] Reserved (12 bytes)
-    // uint32_t rx_error_counter;              // [0x798] RX error/event counter
-    // uint8_t  rsv_7a0[0x7A0 - 0x79C];        // [0x79C-0x79F] Reserved
-    // uint32_t rssi_peak_calib;               // [0x7A0] RSSI peak value for calibration
-    // uint32_t phy_stat_count1;               // [0x7A4] PHY statistics counter 1
-    // uint32_t phy_stat_count2;               // [0x7A8] PHY statistics counter 2
-    // uint32_t phy_stat_count3;               // [0x7AC] PHY statistics counter 3
-    // uint32_t phy_stat_count4;               // [0x7B0] PHY statistics counter 4
-    // uint32_t phy_stat_count5;               // [0x7B4] PHY statistics counter 5
-    // uint32_t phy_stat_count6;               // [0x7B8] PHY statistics counter 6
-    // uint32_t phy_stat_count7;               // [0x7BC] PHY statistics counter 7
-    // uint32_t phy_stat_count8;               // [0x7C0] PHY statistics counter 8
-    // uint32_t phy_stat_count9;               // [0x7C4] PHY statistics counter 9
-    // uint32_t phy_stat_count10;              // [0x7C8] PHY statistics counter 10
-    // uint32_t phy_stat_count11;              // [0x7CC] PHY statistics counter 11
-    // uint32_t phy_stat_count12;              // [0x7D0] PHY statistics counter 12
-    // uint32_t phy_stat_count13;              // [0x7D4] PHY statistics counter 13
-    // uint32_t phy_stat_count14;              // [0x7D8] PHY statistics counter 14
-    // uint32_t phy_stat_count15;              // [0x7DC] PHY statistics counter 15
-    // uint32_t rssi_sum;                      // [0x7E0] RSSI accumulator
-    // uint16_t rssi_peak;                     // [0x7E4] Peak RSSI
-    // uint16_t rssi_sample_count;             // [0x7E6] RSSI sample count
-    // uint16_t rssi_avg_count;                // [0x7E8] RSSI average count
-    // uint8_t  rsv_7ee[0x804 - 0x7EA];        // [0x7EA-0x803] Reserved (0x1A bytes)
-    // uint16_t avg_power_zero_count;          // [0x804] Avg power = 0 counter
-    // uint16_t avg_power_neg128_count;        // [0x806] Avg power = -128 counter
-    // uint32_t tx_success_count_low;          // [0x808] TX success counter (low)
-    // uint32_t tx_success_count_high;         // [0x80C] TX success counter (high)
-    // uint32_t rx_success_count_low;          // [0x810] RX success counter (low)
-    // uint32_t rx_success_count_high;         // [0x814] RX success counter (high)
-    // uint8_t  rsv_81c[0x81C - 0x818];        // [0x818-0x81B] Reserved
-    // uint32_t last_jiffies_low;              // [0x81C] Last jiffies timestamp (low)
-    // uint32_t last_jiffies_high;             // [0x820] Last jiffies timestamp (high)
-    // uint8_t  rsv_828[0x82C - 0x824];        // [0x824-0x82B] Reserved
-    // uint32_t frame_error_count;             // [0x82C] Frame error counter
-    // uint32_t retry_count;                   // [0x830] Retry counter
-    // uint32_t timeout_count;                 // [0x834] Timeout counter
-    // uint16_t cca_busy_time;                 // [0x838] CCA busy time
-    // uint8_t  rsv_83e[0x83D - 0x83A];        // [0x83A-0x83C] Reserved (3B)
-    // uint8_t  thermal_sensor_value;          // [0x83D] Thermal sensor value
-    // uint8_t  power_monitor_value;           // [0x83E] Power monitor value
-    // uint8_t  rsv_843;                       // [0x83F] Reserved
-    // uint8_t  last_tx_power_sel;             // [0x840] Last TX power selection
-    // uint8_t  tx_power_track_snapshot;       // [0x841] TX power track snapshot
-    // uint8_t  rsv_846[0x844 - 0x842];        // [0x842-0x843] Reserved (2B)
-    // uint32_t tx_power_sel_count;            // [0x844] TX power selection count
-    // uint32_t tx_power_sel_assoc_id;         // [0x848] TX power selection association ID
-    // uint32_t tx_status_counter;             // [0x84C] TX status counter
-    // uint16_t cca_observ[7];                 // [0x850-0x85D] CCA observation values
-    // uint8_t  cca_observ_mode;               // [0x85E] CCA observation mode
-    // uint8_t  rsv_863[0x864 - 0x85F];        // [0x85F-0x863] Reserved (5B)
-    // uint32_t reg_864_config;                // [0x864] Register 0x864 config
-    // uint8_t  qa_tx_mcs;                     // [0x868] QA TX MCS
-    // uint8_t  rsv_86d;                       // [0x869] Reserved
-    // uint8_t  mcast_mcs;                     // [0x86A] Multicast MCS
-    // uint8_t  mcast_bw_mhz;                  // [0x86B] Multicast bandwidth MHz
-    // uint8_t  rsv_870[0x871 - 0x86C];        // [0x86C-0x870] Reserved (5B)
-    // uint8_t  rf_control_flags;              // [0x871] RF control flags
-    // uint16_t state_876;                     // [0x872-0x873] State at 0x872
-    // uint8_t  rsv_878[0x876 - 0x874];        // [0x874-0x875] Reserved (2B)
-    // uint8_t  sleep_gpio_state;              // [0x876] Sleep GPIO state
-    // uint8_t  rf_reset_flags;                // [0x877] RF reset flags
-    // uint8_t  rf_powerdown_flags;            // [0x878] RF powerdown flags
-    // uint8_t  rsv_87d[0x87C - 0x879];        // [0x879-0x87B] Reserved (3B)
-    // uint8_t  qa_ctrl_flags;                 // [0x87C] QA control flags
-    // uint8_t  rsv_881;                       // [0x87D] Reserved
-    // uint16_t rsv_882;                       // [0x87E-0x87F] Reserved
-    // uint32_t qa_lo_freq;                    // [0x880] QA LO frequency
-    // int8_t   qa_bw_mhz;                     // [0x884] QA bandwidth MHz
-    // int8_t   qa_mcs;                        // [0x885] QA MCS
-    // int8_t   qa_timeout_delta_threshold;    // [0x886] QA timeout delta threshold
-    // int8_t   qa_att;                        // [0x887] QA attenuation
-    // int8_t   qa_rx_thresholds[8];           // [0x888-0x88F] QA RX thresholds
-    // int8_t   qa_tx_thresholds[8];           // [0x890-0x897] QA TX thresholds
-    // int8_t   qa_rx_metric_0;                // [0x898] QA RX metric 0
-    // int8_t   qa_rx_metric_1;                // [0x899] QA RX metric 1
-    // int8_t   qa_rx_metric_2;                // [0x89A] QA RX metric 2
-    // int8_t   qa_rx_metric_3;                // [0x89B] QA RX metric 3
-    // int8_t   qa_rx_metric_4;                // [0x89C] QA RX metric 4
-    // uint8_t  rsv_8a1;                       // [0x89D] Reserved
-    // int16_t  qa_rx_metric_5;                // [0x89E-0x89F] QA RX metric 5
-    // uint8_t  rsv_8a4[0x8A2 - 0x8A0];        // [0x8A0-0x8A1] Reserved (2B)
-    // int8_t   qa_rx_avg_power;               // [0x8A2] QA RX average power
-    // int8_t   qa_rx_avg_evm;                 // [0x8A3] QA RX average EVM
-    // int8_t   qa_rx_freq_offset;             // [0x8A4] QA RX frequency offset
-    // uint8_t  qa_rx_agc_index;               // [0x8A5] QA RX AGC index
-    // uint8_t  rsv_8aa[0x8AC - 0x8A6];        // [0x8A6-0x8AB] Reserved (6B)
-    // uint8_t  qa_rx_threshold_flags;         // [0x8AC] QA RX threshold flags
-    // uint8_t  qa_tx_threshold_flags;         // [0x8AD] QA TX threshold flags
-    // uint8_t  rf_temp_calib[6];              // [0x8AE-0x8B3] RF temperature calibration
-    // struct lmac_init_param init_param;      // [0x8B4-0x8C7] Init parameters (0x14 bytes)
-    // uint32_t tdma_aux_timing;               // [0x8C8] TDMA auxiliary timing
-    // uint8_t  rsv_8d0[0x8D2 - 0x8D0];        // [0x8D0-0x8D1] Reserved (2 bytes)
-    // uint16_t ba_resp_timeout;               // [0x8D2] Block Ack response timeout
-    // uint8_t  rsv_8d8[0x8E4 - 0x8D4];        // [0x8D4-0x8E3] Reserved (0x10 bytes)
-    // uint16_t ba_timeout_counter;            // [0x8E4] Block Ack timeout counter
-    // uint8_t  rsv_8ea[0x8F4 - 0x8E6];        // [0x8E6-0x8F3] Reserved (0xe bytes)
-    // uint16_t tx_vec_hdr_dur;                // [0x8F4] TX vector header duration
-    // uint16_t tx_vec_buff[2];                // [0x8F6-0x8F9] TX vector buffer
-    // uint16_t tx_vec_info;                   // [0x8FA] TX vector info
-    // uint8_t  rsv_8fc[0x900 - 0x8FC];        // [0x8FC-0x8FF] Reserved
-    // uint32_t tx_vec_flags;                  // [0x900] TX vector flags
-    // uint32_t tx_vec_config[2];              // [0x904-0x90B] TX vector config
-    // uint32_t tx_power_idx;                  // [0x908] TX power index
-    // uint32_t mcs_rate_info[4];              // [0x90C-0x91B] MCS rate info
-    // uint8_t  rsv_920[0x94D - 0x91C];        // [0x91C-0x94C] Reserved (0x31 bytes)
-    // uint8_t  tx_control_flags;              // [0x94D] TX control flags
-    // uint8_t  rsv_952[0x95D - 0x94E];        // [0x94E-0x95C] Reserved (0xf bytes)
-    // uint8_t  tx_mode_flags;                 // [0x95D] TX mode flags
-    // uint8_t  rsv_962[0x978 - 0x95E];        // [0x95E-0x977] Reserved (0x1a bytes)
-    // uint32_t frame_rx_state;                // [0x978] Frame RX state
-    // uint32_t rx_frame_counter;              // [0x97C] RX frame counter
-    // uint32_t state;                         // [0x980] MAC state
-    // struct os_task      main_task;          // [0x984-0x997] Main task storage
-    // uint8_t  rsv_99c[0x99C - 0x998];        // [0x998-0x99B] Reserved
-    // uint32_t print_buf_ptr;                 // [0x99C] Print buffer pointer
-    // struct os_semaphore print_sem;          // [0x9A0-0x9A7] Print semaphore
-    // struct os_task      print_task;         // [0x9A8-0x9BB] Print task storage
-    // uint32_t beacon_interval_scaled_backup; // [0x9BC] Beacon interval scaled backup
-    // uint32_t beacon_interval_next_backup;   // [0x9C0] Beacon interval next backup
-    // uint32_t rsv_9c8;                       // [0x9C4] Reserved
-    // uint32_t beacon_interval_current_backup;// [0x9C8] Beacon interval current backup
-    // uint8_t  rsv_9d0[0x9D4 - 0x9CC];        // [0x9CC-0x9D3] Reserved (8 bytes)
-    // uint32_t beacon_ctrl_backup;            // [0x9D4] Beacon control backup
-    // uint32_t flags_backup;                  // [0x9D8] Flags backup
-    // void    *sta_list_head;                 // [0x9DC] Station list head pointer
-    // void    *sta_list_tail;                 // [0x9E0] Station list tail pointer
-    // struct os_mutex     sta_list_mutex;     // [0x9E4-0x9EB] Station list mutex
-    // uint16_t sta_total;                     // [0x9EC] Total stations
-    // uint16_t sta_psm1;                      // [0x9EE] Station PSM mode 1
-    // uint16_t sta_psm2;                      // [0x9F0] Station PSM mode 2
-    // uint16_t tick_timer_mode_hint;          // [0x9F2] Tick timer mode hint
-    // struct os_timer     tick_timer;         // [0x9F4-0xA0F] Tick timer storage
-    // struct os_timer     scan_probe_timer;   // [0xA10-0xA2B] Scan probe timer storage
-    // uint32_t evt_wr;                        // [0xA2C] Event write index
-    // uint32_t evt_cap;                       // [0xA30] Event capture/count
-    // uint32_t evt_ring[64];                  // [0xA34-0xB33] Event ring buffer
-    // uint8_t  rsv_b38[0xB74 - 0xB34];        // [0xB34-0xB73] Reserved (0x40 bytes)
-    // struct os_semaphore main_sem;           // [0xB74-0xB7B] Main semaphore
-    // uint8_t  main_runtime_info[0x18];       // [0xB7C-0xB93] Main runtime info
-    // uint32_t free_kb;                       // [0xB94] Free kernel buffers
-    // uint8_t  rsv_b9c[0xBC0 - 0xB98];        // [0xB98-0xBBF] Reserved (0x24 bytes)
+    lmac_ops_t *ops;  /* 0x0, 4B */
+    struct ah_ce_ctx              ce_ctx;  /* 0x4, 184B */
+    uint32_t sta0_added_or_assoc_flag;  /* 0xbc, 4B */
+    struct lmac_chan_candidate    chan_list[16];  /* 0xc0, 384B */
+    struct rx_vendor_bss_cache_entry rx_vendor_bss_cache[16];  /* 0x240, 192B */
+    uint8_t  obss_threshold;  /* 0x300, 1B */
+    uint8_t  obss_edca_select_flag;  /* 0x301, 1B */
+    uint8_t  mac_addr[6];  /* 0x302, 6B */
+    uint8_t  bss_bw;  /* 0x308, 1B */
+    uint8_t  pri_channel;  /* 0x309, 1B */
+    uint8_t _rsv_30a[2];  /* 0x30a, 2B */
+    uint8_t  chan_busy_threshold_0;  /* 0x30c, 1B */
+    uint8_t  chan_busy_threshold_1;  /* 0x30d, 1B */
+    uint8_t  chan_busy_threshold_2;  /* 0x30e, 1B */
+    uint8_t  chan_busy_threshold_3;  /* 0x30f, 1B */
+    uint8_t  link_mode_flags;  /* 0x310, 1B */
+    uint8_t  mcs_encoding_format;  /* 0x311, 1B */
+    uint8_t  tx_cnt_max_0;  /* 0x312, 1B */
+    uint8_t  tx_cnt_max_1;  /* 0x313, 1B */
+    uint8_t  mcast_dup_filter_cfg;  /* 0x314, 1B */
+    uint8_t  aggcnt;  /* 0x315, 1B */
+    uint8_t  hw_init_param;  /* 0x316, 1B */
+    uint8_t  sta_priv_alloc_size;  /* 0x317, 1B */
+    uint8_t  ps_timeout_retry_count;  /* 0x318, 1B */
+    uint8_t  sleep_ctrl_flags;  /* 0x319, 1B */
+    uint8_t  uplink_ctrl_flags0;  /* 0x31a, 1B */
+    uint8_t  uplink_ctrl_flags1;  /* 0x31b, 1B */
+    int8_t   tx_power_high_threshold;  /* 0x31c, 1B */
+    int8_t   tx_power_low_threshold;  /* 0x31d, 1B */
+    int8_t   cca_threshold_base;  /* 0x31e, 1B */
+    int8_t   agc_threshold_high;  /* 0x31f, 1B */
+    int8_t   agc_threshold_low;  /* 0x320, 1B */
+    int8_t   bknoise_gain_ref[6];  /* 0x321, 6B */
+    int8_t   bknoise_base_offset;  /* 0x327, 1B */
+    int8_t   cca_threshold_offset;  /* 0x328, 1B */
+    int8_t   cca_threshold_max;  /* 0x329, 1B */
+    int8_t   s1g_short_beacon_optional_ie_flag;  /* 0x32a, 1B */
+    uint8_t _rsv_32b[1];  /* 0x32b, 1B */
+    int16_t  bgrssi_spur_threshold;  /* 0x32c, 2B */
+    uint16_t rts_threshold;  /* 0x32e, 2B */
+    uint16_t ps_heartbeat_period;  /* 0x330, 2B */
+    uint8_t  adc_dump_id;  /* 0x332, 1B */
+    uint8_t  tdma_rx_buff_flags;  /* 0x333, 1B */
+    uint16_t tx_bw_len_threshold;  /* 0x334, 2B */
+    uint16_t sta_partial_aid_bits;  /* 0x336, 2B */
+    uint32_t lo_freq_or_channel_bits;  /* 0x338, 4B */
+    uint8_t  lo_table_index;  /* 0x33c, 1B */
+    uint8_t  lo_active_freq_b0;  /* 0x33d, 1B */
+    uint16_t lo_active_freq_b1b2;  /* 0x33e, 2B */
+    uint8_t  lo_active_index;  /* 0x340, 1B */
+    uint8_t _rsv_341[3];  /* 0x341, 3B */
+    uint32_t s1g_optional_ie_time_value;  /* 0x344, 4B */
+    uint8_t  s1g_optional_ie_param;  /* 0x348, 1B */
+    uint8_t _rsv_349[1];  /* 0x349, 1B */
+    uint8_t  beacon_s1g_format_flags;  /* 0x34a, 1B */
+    uint8_t _rsv_34b[1];  /* 0x34b, 1B */
+    uint32_t beacon_init_zero_a;  /* 0x34c, 4B */
+    uint32_t beacon_init_zero_b;  /* 0x350, 4B */
+    uint8_t _rsv_354[8];  /* 0x354, 8B */
+    uint32_t acs_sample_count;  /* 0x35c, 4B */
+    uint8_t  cca_ctrl_low_byte;  /* 0x360, 1B */
+    uint8_t  cca_agc_ctrl_flags;  /* 0x361, 1B */
+    uint16_t rx_gain_cfg_bits;  /* 0x362, 2B */
+    uint8_t  pcf_period;  /* 0x364, 1B */
+    uint8_t  pcf_percent;  /* 0x365, 1B */
+    uint8_t _rsv_366[2];  /* 0x366, 2B */
+    uint32_t rx_iface_queue_head;  /* 0x368, 4B */
+    uint16_t rx_iface_queue_tail;  /* 0x36c, 2B */
+    uint8_t  tx_rate_ctrl_flags;  /* 0x36e, 1B */
+    uint8_t _rsv_36f[1];  /* 0x36f, 1B */
+    uint32_t tx_rx_ratio_statics;  /* 0x370, 4B */
+    uint32_t tx_freq_or_init_param;  /* 0x374, 4B */
+    uint8_t  chan_list_count;  /* 0x378, 1B */
+    uint8_t  bgrssi_chan_index;  /* 0x379, 1B */
+    uint16_t bgrssi_scan_param;  /* 0x37a, 2B */
+    uint16_t auto_chan_switch_flags;  /* 0x37c, 2B */
+    uint16_t obss_cca_param_bits;  /* 0x37e, 2B */
+    uint8_t  txvec_phy_opt;  /* 0x380, 1B */
+    uint8_t _rsv_381[3];  /* 0x381, 3B */
+    uint32_t pv0_ctrl_duration;  /* 0x384, 4B */
+    uint32_t phy_watchdog_period;  /* 0x388, 4B */
+    uint32_t event6_period;  /* 0x38c, 4B */
+    uint32_t mode_event_period;  /* 0x390, 4B */
+    uint32_t tick_unit;  /* 0x394, 4B */
+    uint32_t event3_7_period;  /* 0x398, 4B */
+    uint32_t obss_scan_period;  /* 0x39c, 4B */
+    uint32_t obss_ap_period;  /* 0x3a0, 4B */
+    uint32_t hw_scan_interval_us;  /* 0x3a4, 4B */
+    uint32_t hw_scan_param_3a8;  /* 0x3a8, 4B */
+    uint32_t periodic_event13_period;  /* 0x3ac, 4B */
+    uint32_t reset_countdown_period;  /* 0x3b0, 4B */
+    uint32_t ant_auto_period;  /* 0x3b4, 4B */
+    uint32_t debug_flags;  /* 0x3b8, 4B */
+    uint16_t bw_restore_count_threshold;  /* 0x3bc, 2B */
+    uint16_t bgr_sample_threshold;  /* 0x3be, 2B */
+    uint32_t ap_sleep_timer_base;  /* 0x3c0, 4B */
+    uint32_t ap_sleep_timer_hi_or_mark;  /* 0x3c4, 4B */
+    uint16_t ap_sleep_timeout_active;  /* 0x3c8, 2B */
+    uint16_t ap_sleep_timeout_reload;  /* 0x3ca, 2B */
+    uint32_t bss_rx_activity_jiffies;  /* 0x3cc, 4B */
+    uint32_t bss_rx_activity_ref;  /* 0x3d0, 4B */
+    uint32_t beacon_timeout_low;  /* 0x3d4, 4B */
+    uint32_t beacon_timeout_high;  /* 0x3d8, 4B */
+    uint16_t ack_timeout_extra;  /* 0x3dc, 2B */
+    uint8_t  psconnect_period;  /* 0x3de, 1B */
+    uint8_t  pwr_cca_flags;  /* 0x3df, 1B */
+    uint8_t  rxg_offset;  /* 0x3e0, 1B */
+    uint8_t  obss_per;  /* 0x3e1, 1B */
+    uint8_t _rsv_3e2[1];  /* 0x3e2, 1B */
+    uint8_t _rsv_3e3[1];  /* 0x3e3, 1B */
+    uint8_t  allways;  /* 0x3e4, 1B */
+    uint8_t _rsv_3e5[3];  /* 0x3e5, 3B */
+    uint8_t _rsv_3e8[4];  /* 0x3e8, 4B */
+    uint8_t _rsv_3ec[4];  /* 0x3ec, 4B */
+    struct lmac_ctx_extra_ies     extra_ies;  /* 0x3f0, 259B */
+    struct lmac_ctx_s1g_capabilities payload;  /* 0x4f3, 15B */
+    struct lmac_ctx_edca_params   edca_params;  /* 0x502, 18B */
+    struct lmac_ctx_edca_params   obss_edca_params;  /* 0x514, 18B */
+    uint8_t  bssid_or_peer_mac[6];  /* 0x526, 6B */
+    struct lmac_ctx_ssid          _lmac_ctx_ssid_52c;  /* 0x52c, 34B */
+    uint8_t _rsv_54e[2];  /* 0x54e, 2B */
+    uint8_t _rsv_550[4];  /* 0x550, 4B */
+    uint8_t  tim;  /* 0x554, 1B */
+    uint8_t  DTIM;  /* 0x555, 1B */
+    uint8_t  dtim_period;  /* 0x556, 1B */
+    uint8_t  bitmap_control_bit0;  /* 0x557, 1B */
+    uint8_t  bitmap_control;  /* 0x558, 1B */
+    uint8_t _rsv_559[251];  /* 0x559, 251B */
+    uint16_t s1g_compat_info;  /* 0x654, 2B */
+    uint16_t beacon_interval;  /* 0x656, 2B */
+    uint32_t TSF;  /* 0x658, 4B */
+    uint32_t beacon;  /* 0x65c, 4B */
+    uint32_t last_beacon_tsf_low;  /* 0x660, 4B */
+    uint32_t last_beacon_tsf_high;  /* 0x664, 4B */
+    uint16_t s1g_operation_bits;  /* 0x668, 2B */
+    uint8_t _rsv_66a[2];  /* 0x66a, 2B */
+    uint16_t tx_time_part0;  /* 0x66c, 2B */
+    uint16_t tx_symbol_duration;  /* 0x66e, 2B */
+    uint16_t tx_time_part2;  /* 0x670, 2B */
+    uint8_t _rsv_672[2];  /* 0x672, 2B */
+    uint16_t beacon_airtime;  /* 0x674, 2B */
+    uint16_t bss_max_idle;  /* 0x676, 2B */
+    int32_t  chip_temp_adj;  /* 0x678, 4B */
+    uint32_t vcc_meas_value;  /* 0x67c, 4B */
+    uint8_t  thermal_pmu_flags;  /* 0x680, 1B */
+    uint8_t _rsv_681[1];  /* 0x681, 1B */
+    uint16_t tx_digi_gain[6];  /* 0x682, 12B */
+    uint8_t  tx_power;  /* 0x68e, 1B */
+    uint8_t  xo_cs_trim_offset;  /* 0x68f, 1B */
+    uint8_t  chan_score_weight_a;  /* 0x690, 1B */
+    uint8_t  chan_score_weight_b;  /* 0x691, 1B */
+    struct lmac_ctx_key           key0;  /* 0x692, 34B */
+    struct lmac_ctx_key           key1;  /* 0x6b4, 34B */
+    uint8_t _rsv_6d6[2];  /* 0x6d6, 2B */
+    uint32_t vdd13b_meas_value;  /* 0x6d8, 4B */
+    uint32_t vdd13c_meas_value;  /* 0x6dc, 4B */
+    uint32_t tx_success_pkt_count;  /* 0x6e0, 4B */
+    uint32_t tx_fail_err_count;  /* 0x6e4, 4B */
+    uint32_t last_tx_mcs;  /* 0x6e8, 4B */
+    uint32_t last_tx_bw_sig;  /* 0x6ec, 4B */
+    uint32_t tx_some_counter_6f0;  /* 0x6f0, 4B */
+    uint32_t tx_some_counter_6f4;  /* 0x6f4, 4B */
+    uint32_t padding_6f8_6fb[2];  /* 0x6f8, 8B */
+    uint32_t tx_state_700;  /* 0x700, 4B */
+    uint32_t tx_state_704;  /* 0x704, 4B */
+    uint8_t  tx_flags_708;  /* 0x708, 1B */
+    uint8_t _rsv_709[3];  /* 0x709, 3B */
+    uint8_t  tx_write_flags_70c;  /* 0x70c, 1B */
+    uint8_t  tx_write_flags_70d;  /* 0x70d, 1B */
+    uint8_t  tx_write_flags_70e;  /* 0x70e, 1B */
+    uint8_t  tx_flags_70f;  /* 0x70f, 1B */
+    uint8_t  tx_write_only_710;  /* 0x710, 1B */
+    uint8_t _rsv_711[1];  /* 0x711, 1B */
+    int16_t  rx_dcoc_i_offset;  /* 0x712, 2B */
+    int16_t  rx_dcoc_q_offset;  /* 0x714, 2B */
+    uint8_t _rsv_716[2];  /* 0x716, 2B */
+    uint32_t ac_pd_irq_tx_attempt_count;  /* 0x718, 4B */
+    uint32_t ac_pd_read_only_71c;  /* 0x71c, 4B */
+    uint32_t ac_pd_read_only_720;  /* 0x720, 4B */
+    uint32_t ac_pd_read_only_724;  /* 0x724, 4B */
+    uint32_t ac_pd_read_only_728;  /* 0x728, 4B */
+    uint32_t tx_queue_state_72c;  /* 0x72c, 4B */
+    uint32_t tx_queue_state_730;  /* 0x730, 4B */
+    uint32_t tx_queue_state_734;  /* 0x734, 4B */
+    uint32_t tx_queue_state_738;  /* 0x738, 4B */
+    uint32_t tx_queue_state_73c;  /* 0x73c, 4B */
+    uint32_t tx_duration_low;  /* 0x740, 4B */
+    uint32_t tx_duration_high;  /* 0x744, 4B */
+    uint32_t tx_state_748;  /* 0x748, 4B */
+    uint32_t tx_queue_state_74c;  /* 0x74c, 4B */
+    uint32_t rx_duration_low;  /* 0x750, 4B */
+    uint32_t rx_queue_state_754;  /* 0x754, 4B */
+    uint32_t rx_duration_high;  /* 0x758, 4B */
+    uint32_t tx_state_75c;  /* 0x75c, 4B */
+    uint32_t tx_state_760;  /* 0x760, 4B */
+    uint32_t tx_state_764;  /* 0x764, 4B */
+    uint32_t tx_queue_entry_768;  /* 0x768, 4B */
+    uint32_t tx_queue_state_76c;  /* 0x76c, 4B */
+    uint32_t tx_queue_state_770;  /* 0x770, 4B */
+    uint32_t tx_queue_state_774;  /* 0x774, 4B */
+    uint32_t tx_queue_state_778;  /* 0x778, 4B */
+    uint32_t tx_write_only_77c;  /* 0x77c, 4B */
+    uint32_t tx_write_only_780;  /* 0x780, 4B */
+    uint32_t tx_state_784;  /* 0x784, 4B */
+    uint32_t tx_state_788;  /* 0x788, 4B */
+    uint32_t tx_state_78c;  /* 0x78c, 4B */
+    uint32_t tx_state_790;  /* 0x790, 4B */
+    uint32_t tx_state_794;  /* 0x794, 4B */
+    uint32_t tx_state_798;  /* 0x798, 4B */
+    uint32_t tx_state_79c;  /* 0x79c, 4B */
+    uint32_t tx_state_7a0;  /* 0x7a0, 4B */
+    uint32_t tx_state_7a4;  /* 0x7a4, 4B */
+    uint32_t tx_state_7a8;  /* 0x7a8, 4B */
+    uint32_t tx_state_7ac;  /* 0x7ac, 4B */
+    uint32_t tx_retry_count_7b0;  /* 0x7b0, 4B */
+    uint32_t tx_retry_limit_7b4;  /* 0x7b4, 4B */
+    uint32_t tx_state_7b8;  /* 0x7b8, 4B */
+    uint32_t tx_state_7bc;  /* 0x7bc, 4B */
+    uint32_t tx_state_7c0;  /* 0x7c0, 4B */
+    uint32_t tx_state_7c4;  /* 0x7c4, 4B */
+    uint32_t tx_state_7c8;  /* 0x7c8, 4B */
+    uint32_t tx_state_7cc;  /* 0x7cc, 4B */
+    uint32_t tx_state_7d0;  /* 0x7d0, 4B */
+    uint32_t tx_state_7d4;  /* 0x7d4, 4B */
+    uint32_t tx_state_7d8;  /* 0x7d8, 4B */
+    uint32_t tx_state_7dc;  /* 0x7dc, 4B */
+    uint32_t tx_state_7e0;  /* 0x7e0, 4B */
+    uint16_t tx_state_7e4;  /* 0x7e4, 2B */
+    uint16_t tx_state_7e6;  /* 0x7e6, 2B */
+    uint16_t tx_state_7e8;  /* 0x7e8, 2B */
+    uint8_t _rsv_7ea[2];  /* 0x7ea, 2B */
+    uint32_t tx_state_7ec;  /* 0x7ec, 4B */
+    uint32_t tx_state_7f0;  /* 0x7f0, 4B */
+    uint32_t tx_state_7f4;  /* 0x7f4, 4B */
+    uint32_t tx_state_7f8;  /* 0x7f8, 4B */
+    uint8_t _rsv_7fc[4];  /* 0x7fc, 4B */
+    uint32_t tx_channel_state_800;  /* 0x800, 4B */
+    uint16_t tx_state_804;  /* 0x804, 2B */
+    uint16_t tx_state_806;  /* 0x806, 2B */
+    uint32_t tx_state_808;  /* 0x808, 4B */
+    uint32_t tx_state_80c;  /* 0x80c, 4B */
+    uint32_t tx_state_810;  /* 0x810, 4B */
+    uint32_t tx_state_814;  /* 0x814, 4B */
+    uint8_t _rsv_818[4];  /* 0x818, 4B */
+    uint32_t tx_state_81c;  /* 0x81c, 4B */
+    uint32_t tx_write_only_820;  /* 0x820, 4B */
+    uint32_t tx_channel_set_824;  /* 0x824, 4B */
+    uint32_t tx_channel_state_828;  /* 0x828, 4B */
+    uint32_t tx_result_82c;  /* 0x82c, 4B */
+    uint32_t tx_result_830;  /* 0x830, 4B */
+    uint32_t tx_result_834;  /* 0x834, 4B */
+    uint16_t rx_dcoc_i_last;  /* 0x838, 2B */
+    int16_t  rx_dcoc_q_last;  /* 0x83a, 2B */
+    uint8_t _rsv_83c[1];  /* 0x83c, 1B */
+    uint8_t  tx_byte_83d;  /* 0x83d, 1B */
+    uint8_t  tx_write_byte_83e;  /* 0x83e, 1B */
+    uint8_t _rsv_83f[1];  /* 0x83f, 1B */
+    uint8_t  tx_byte_840;  /* 0x840, 1B */
+    uint8_t  tx_write_byte_841;  /* 0x841, 1B */
+    uint8_t _rsv_842[2];  /* 0x842, 2B */
+    uint32_t tx_state_844;  /* 0x844, 4B */
+    uint32_t tx_write_word_848;  /* 0x848, 4B */
+    int16_t  chan_scan_rssi_0;  /* 0x84c, 2B */
+    int16_t  chan_scan_rssi[1];  /* 0x84e, 2B */
+    int16_t  chan_scan_rssi_2;  /* 0x850, 2B */
+    int16_t  chan_scan_rssi_3;  /* 0x852, 2B */
+    int16_t  chan_scan_rssi_4;  /* 0x854, 2B */
+    int16_t  chan_scan_rssi_5;  /* 0x856, 2B */
+    int16_t  chan_scan_rssi_6;  /* 0x858, 2B */
+    int16_t  chan_scan_rssi_7;  /* 0x85a, 2B */
+    int16_t  chan_scan_rssi_8;  /* 0x85c, 2B */
+    int16_t  chan_scan_rssi_9;  /* 0x85e, 2B */
+    uint8_t  tx_byte_860;  /* 0x860, 1B */
+    uint8_t _rsv_861[3];  /* 0x861, 3B */
+    uint8_t  tx_mcs_max_limit;  /* 0x864, 1B */
+    uint8_t  tx_mcs_min_limit;  /* 0x865, 1B */
+    uint8_t  tx_mcs;  /* 0x866, 1B */
+    uint8_t  tx_bw_sig;  /* 0x867, 1B */
+    uint8_t  mcast_tx_rate;  /* 0x868, 1B */
+    uint8_t  mcast_txbw;  /* 0x869, 1B */
+    uint8_t _rsv_86a[11];  /* 0x86a, 11B */
+    uint8_t  tx_bw_ctrl_flags;  /* 0x875, 1B */
+    uint8_t  gpio0_pin_flags;  /* 0x876, 1B */
+    uint8_t  gpio1_pin_flags;  /* 0x877, 1B */
+    uint8_t  cfend_or_cfp_active_flags;  /* 0x878, 1B */
+    uint8_t _rsv_879[3];  /* 0x879, 3B */
+    uint16_t cfpoll_duration_calc;  /* 0x87c, 2B */
+    uint16_t tx_timestamp_disable_or_reset_flag;  /* 0x87e, 2B */
+    uint8_t _rsv_880[16];  /* 0x880, 16B */
+    uint8_t  qa_tx_thresholds_0;  /* 0x890, 1B */
+    uint8_t  qa_tx_thresholds[1];  /* 0x891, 1B */
+    uint8_t  qa_freq_hop_flags;  /* 0x892, 1B */
+    uint8_t _rsv_893[1];  /* 0x893, 1B */
+    uint32_t qa_tx_params_word0;  /* 0x894, 4B */
+    uint8_t  qa_tx_thresholds_6;  /* 0x898, 1B */
+    uint8_t  qa_tx_thresholds_7;  /* 0x899, 1B */
+    int8_t   qa_rx_metric_2;  /* 0x89a, 1B */
+    int8_t   qa_rx_metric_3;  /* 0x89b, 1B */
+    int8_t   qa_rx_metric_4;  /* 0x89c, 1B */
+    uint8_t  qa_rx_metric_reserved;  /* 0x89d, 1B */
+    int16_t  qa_rx_metric_5;  /* 0x89e, 2B */
+    uint8_t _rsv_8a0[2];  /* 0x8a0, 2B */
+    int8_t   qa_rx_avg_power;  /* 0x8a2, 1B */
+    int8_t   qa_rx_avg_evm;  /* 0x8a3, 1B */
+    int8_t   qa_rx_freq_offset;  /* 0x8a4, 1B */
+    uint8_t  qa_rx_agc_index;  /* 0x8a5, 1B */
+    uint8_t _rsv_8a6[2];  /* 0x8a6, 2B */
+    int8_t   qa_rx_metric_6;  /* 0x8a8, 1B */
+    int8_t   qa_rx_metric_7;  /* 0x8a9, 1B */
+    int8_t   qa_rx_metric_8;  /* 0x8aa, 1B */
+    int8_t   qa_rx_metric_9;  /* 0x8ab, 1B */
+    uint8_t  qa_rx_threshold_flags;  /* 0x8ac, 1B */
+    uint8_t  qa_tx_threshold_flags;  /* 0x8ad, 1B */
+    uint8_t  rf_temp_calib_0;  /* 0x8ae, 1B */
+    uint8_t  rf_temp_calib[1];  /* 0x8af, 1B */
+    uint8_t  rf_temp_calib_2;  /* 0x8b0, 1B */
+    uint8_t  rf_temp_calib_3;  /* 0x8b1, 1B */
+    uint16_t rf_temp_calib_4;  /* 0x8b2, 2B */
+    uint16_t init_param_rxbuf_size;  /* 0x8b4, 2B */
+    void *init_param_rxbuf;  /* 0x8b6, 4B */
+    void *init_param_tdma_buff;  /* 0x8ba, 4B */
+    uint32_t init_param_rxbuf_size2;  /* 0x8be, 4B */
+    uint8_t  init_param_uart_tx_io;  /* 0x8c2, 1B */
+    uint8_t  init_param_dual_ant;  /* 0x8c3, 1B */
+    uint8_t  init_param_field_8c4;  /* 0x8c4, 1B */
+    uint8_t  init_param_field_8c5;  /* 0x8c5, 1B */
+    uint8_t  init_param_field_8c6;  /* 0x8c6, 1B */
+    uint8_t  init_param_field_8c7;  /* 0x8c7, 1B */
+    uint8_t  tdma_aux_timing_b0;  /* 0x8c8, 1B */
+    uint8_t  tdma_aux_timing_b1;  /* 0x8c9, 1B */
+    uint8_t _rsv_8ca[2];  /* 0x8ca, 2B */
+    uint32_t qa_rx_channel_map;  /* 0x8cc, 4B */
+    uint8_t _rsv_8d0[8];  /* 0x8d0, 8B */
+    uint32_t ba_resp_timeout_or_tdma;  /* 0x8d8, 4B */
+    uint8_t _rsv_8dc[80];  /* 0x8dc, 80B */
+    uint32_t tx_vec_hdr_config;  /* 0x92c, 4B */
+    uint8_t _rsv_930[40];  /* 0x930, 40B */
+    struct pv0_cfend_frame        pv0_cfend;  /* 0x958, 16B */
+    struct pv0_pspoll_frame       pv0_pspoll;  /* 0x968, 16B */
+    uint8_t  mac_state_978;  /* 0x978, 1B */
+    uint8_t _rsv_979[3];  /* 0x979, 3B */
+    uint8_t _rsv_97c[20];  /* 0x97c, 20B */
+    uint32_t frame_rx_state;  /* 0x990, 4B */
+    uint32_t rx_frame_counter;  /* 0x994, 4B */
+    uint32_t rx_frame_byte_count;  /* 0x998, 4B */
+    uint32_t rx_frame_info;  /* 0x99c, 4B */
+    uint8_t _rsv_9a0[20];  /* 0x9a0, 20B */
+    uint32_t tx_active_flags;  /* 0x9b4, 4B */
+    uint8_t _rsv_9b8[12];  /* 0x9b8, 12B */
+    uint8_t  tx_write_only_9c4;  /* 0x9c4, 1B */
+    uint8_t _rsv_9c5[3];  /* 0x9c5, 3B */
+    uint16_t tx_state_9c8;  /* 0x9c8, 2B */
+    uint8_t _rsv_9ca[2];  /* 0x9ca, 2B */
+    uint8_t _rsv_9cc[4];  /* 0x9cc, 4B */
+    struct os_task                main_task;  /* 0x9d0, 20B */
+    uint8_t _rsv_9e4[4];  /* 0x9e4, 4B */
+    uint8_t _rsv_9e8[4];  /* 0x9e8, 4B */
+    struct os_semaphore           _os_semaphore_9ec;  /* 0x9ec, 8B */
+    struct os_task                print_task;  /* 0x9f4, 20B */
+    uint8_t  tx_ac_state_flags;  /* 0xa08, 1B */
+    uint8_t  beacon_pending_state_flags;  /* 0xa09, 1B */
+    uint8_t _rsv_a0a[1];  /* 0xa0a, 1B */
+    uint8_t  beacon_obss_slot_flags;  /* 0xa0b, 1B */
+    uint8_t  irq_ac_control_flags;  /* 0xa0c, 1B */
+    uint8_t _rsv_a0d[1];  /* 0xa0d, 1B */
+    uint8_t  tx_global_flags;  /* 0xa0e, 1B */
+    uint8_t _rsv_a0f[1];  /* 0xa0f, 1B */
+    void *tdma_buff;  /* 0xa10, 4B */
+    uint32_t tdma_buff_size;  /* 0xa14, 4B */
+    uint8_t _rsv_a18[8];  /* 0xa18, 8B */
+    struct os_mutex               sta_list_mutex;  /* 0xa20, 8B */
+    struct os_timer               tick_timer;  /* 0xa28, 28B */
+    struct os_timer               scan_timer;  /* 0xa44, 28B */
+    uint32_t last_rx_pv0_ctrl_info;  /* 0xa60, 4B */
+    uint8_t _rsv_a64[28];  /* 0xa64, 28B */
+    uint32_t evt_queue_head;  /* 0xa80, 4B */
+    uint32_t evt_queue_tail;  /* 0xa84, 4B */
+    uint32_t evt_queue_capacity;  /* 0xa88, 4B */
+    uint32_t evt_write_index;  /* 0xa8c, 4B */
+    uint32_t evt_slot_count;  /* 0xa90, 4B */
+    uint32_t evt_ring[29];  /* 0xa94, 116B */
+    uint8_t _rsv_b08[28];  /* 0xb08, 28B */
+    struct os_semaphore           main_sem;  /* 0xb24, 8B */
+    uint8_t  main_runtime_info[24];  /* 0xb2c, 24B */
+    uint8_t _rsv_b44[16];  /* 0xb44, 16B */
+    uint32_t free_kb;  /* 0xb54, 4B */
+    uint8_t _rsv_b58[68];  /* 0xb58, 68B */
+    uint32_t tsf_low_at_sleep;  /* 0xb9c, 4B */
+    uint32_t tsf_high_at_sleep;  /* 0xba0, 4B */
+    uint32_t tsf_last_beacon_low;  /* 0xba4, 4B */
+    uint32_t tsf_last_beacon_high;  /* 0xba8, 4B */
+    uint32_t tsf_target_low;  /* 0xbac, 4B */
+    uint32_t skbpool_free_units;  /* 0xbb0, 4B */
+    uint8_t  rx_frame_flag;  /* 0xbb4, 1B */
+    uint8_t _rsv_bb5[11];  /* 0xbb5, 11B */
+    uint8_t _rsv_bc0[4];  /* 0xbc0, 4B */
 } lmac_ctx_t;
 
-// _Static_assert(sizeof(lmac_chip_monitor_gain_cache_t) == 0x0E, "lmac_chip_monitor_gain_cache_t size");
-// _Static_assert(offsetof(lmac_ctx_t, obss_threshold) == 0x307, "lmac_ctx obss_threshold offset");
-// _Static_assert(offsetof(lmac_ctx_t, obss_state) == 0x308, "lmac_ctx obss_state offset");
-// _Static_assert(offsetof(lmac_ctx_t, self_mac) == 0x309, "lmac_ctx self_mac offset");
-// _Static_assert(offsetof(lmac_ctx_t, bss_bw) == 0x30F, "lmac_ctx bss_bw offset");
-// _Static_assert(offsetof(lmac_ctx_t, pri_chan_cfg) == 0x310, "lmac_ctx pri_chan_cfg offset");
-// _Static_assert(offsetof(lmac_ctx_t, txq_thresh0) == 0x313, "lmac_ctx txq_thresh0 offset");
-// _Static_assert(offsetof(lmac_ctx_t, txq_thresh1) == 0x314, "lmac_ctx txq_thresh1 offset");
-// _Static_assert(offsetof(lmac_ctx_t, txq_thresh2) == 0x315, "lmac_ctx txq_thresh2 offset");
-// _Static_assert(offsetof(lmac_ctx_t, txq_thresh3) == 0x316, "lmac_ctx txq_thresh3 offset");
-// _Static_assert(offsetof(lmac_ctx_t, cca_busy_time) == 0x838, "lmac_ctx cca_busy_time offset");
-// _Static_assert(offsetof(lmac_ctx_t, qa_rx_threshold_flags) == 0x8AC, "lmac_ctx qa_rx_threshold_flags offset");
-// _Static_assert(offsetof(lmac_ctx_t, qa_tx_threshold_flags) == 0x8AD, "lmac_ctx qa_tx_threshold_flags offset");
-// _Static_assert(offsetof(lmac_ctx_t, rf_temp_calib) == 0x8AE, "lmac_ctx rf_temp_calib offset");
-// _Static_assert(offsetof(lmac_ctx_t, init_param) == 0x8B4, "lmac_ctx init_param offset");
-// _Static_assert(sizeof(((lmac_ctx_t *)0)->init_param) == 0x14, "lmac_ctx init_param size");
-// _Static_assert(offsetof(lmac_ctx_t, tdma_aux_timing) == 0x8C8, "lmac_ctx tdma_aux_timing offset");
-// _Static_assert(offsetof(lmac_ctx_t, frame_rx_state) == 0x978, "lmac_ctx frame_rx_state offset");
-// _Static_assert(offsetof(lmac_ctx_t, rx_frame_counter) == 0x97C, "lmac_ctx rx_frame_counter offset");
-// _Static_assert(offsetof(lmac_ctx_t, state) == 0x980, "lmac_ctx state offset");
-// _Static_assert(offsetof(lmac_ctx_t, main_task) == 0x984, "lmac_ctx main_task offset");
-// _Static_assert(offsetof(lmac_ctx_t, print_sem) == 0x9A0, "lmac_ctx print_sem offset");
-// _Static_assert(offsetof(lmac_ctx_t, print_task) == 0x9A8, "lmac_ctx print_task offset");
-// _Static_assert(offsetof(lmac_ctx_t, tick_timer) == 0x9F4, "lmac_ctx tick_timer offset");
-// _Static_assert(offsetof(lmac_ctx_t, scan_probe_timer) == 0xA10, "lmac_ctx scan_probe_timer offset");
-// _Static_assert(offsetof(lmac_ctx_t, evt_wr) == 0xA2C, "lmac_ctx evt_wr offset");
-// _Static_assert(offsetof(lmac_ctx_t, evt_cap) == 0xA30, "lmac_ctx evt_cap offset");
-// _Static_assert(offsetof(lmac_ctx_t, evt_ring) == 0xA34, "lmac_ctx evt_ring offset");
-// _Static_assert(offsetof(lmac_ctx_t, main_sem) == 0xB74, "lmac_ctx main_sem offset");
-// _Static_assert(offsetof(lmac_ctx_t, main_runtime_info) == 0xB7C, "lmac_ctx main_runtime_info offset");
-// _Static_assert(offsetof(lmac_ctx_t, free_kb) == 0xB94, "lmac_ctx free_kb offset");
-// _Static_assert(offsetof(lmac_ctx_t, chip_monitor_gain_cache) == 0x680, "lmac_ctx chip_monitor_gain_cache offset");
-_Static_assert(sizeof(lmac_ctx_t) == 0xBC4, "lmac_ctx size");
+_Static_assert(sizeof(lmac_ctx_t) == 0xBC4U, "lmac_ctx_t total size");
+
+/* OSAL type size anchors */
+_Static_assert(sizeof(struct os_task) == 20U, "os_task size");
+_Static_assert(sizeof(struct os_semaphore) == 8U, "os_semaphore size");
+_Static_assert(sizeof(struct os_mutex) == 8U, "os_mutex size");
+_Static_assert(sizeof(struct os_timer) == 28U, "os_timer size");
+
+/* Field offset anchors -- tasks and semaphores */
+_Static_assert(offsetof(lmac_ctx_t, main_task) == 0x9D0U, "lmac_ctx_t::main_task offset");
+_Static_assert(sizeof(((lmac_ctx_t *)0)->main_task) == 20U, "lmac_ctx_t::main_task size");
+_Static_assert(offsetof(lmac_ctx_t, _os_semaphore_9ec) == 0x9ECU, "lmac_ctx_t::_os_semaphore_9ec offset");
+_Static_assert(sizeof(((lmac_ctx_t *)0)->_os_semaphore_9ec) == 8U, "lmac_ctx_t::_os_semaphore_9ec size");
+_Static_assert(offsetof(lmac_ctx_t, print_task) == 0x9F4U, "lmac_ctx_t::print_task offset");
+_Static_assert(sizeof(((lmac_ctx_t *)0)->print_task) == 20U, "lmac_ctx_t::print_task size");
+_Static_assert(offsetof(lmac_ctx_t, sta_list_mutex) == 0xA20U, "lmac_ctx_t::sta_list_mutex offset");
+_Static_assert(sizeof(((lmac_ctx_t *)0)->sta_list_mutex) == 8U, "lmac_ctx_t::sta_list_mutex size");
+_Static_assert(offsetof(lmac_ctx_t, tick_timer) == 0xA28U, "lmac_ctx_t::tick_timer offset");
+_Static_assert(sizeof(((lmac_ctx_t *)0)->tick_timer) == 28U, "lmac_ctx_t::tick_timer size");
+_Static_assert(offsetof(lmac_ctx_t, scan_timer) == 0xA44U, "lmac_ctx_t::scan_timer offset");
+_Static_assert(sizeof(((lmac_ctx_t *)0)->scan_timer) == 28U, "lmac_ctx_t::scan_timer size");
+_Static_assert(offsetof(lmac_ctx_t, main_sem) == 0xB24U, "lmac_ctx_t::main_sem offset");
+_Static_assert(sizeof(((lmac_ctx_t *)0)->main_sem) == 8U, "lmac_ctx_t::main_sem size");
+/* LMAC_CTX_GENERATED_END */
 
 /* ============================================================================
    TX Subsystem Context
@@ -921,22 +811,3 @@ extern uint8_t  max_byte_table[176];         // @ 0x20050d78
 
 /* Hardware base pointer */
 extern uint32_t LMAC;                        // @ 0x20006d1c (hardware register base)
-
-/* ============================================================================
-   Inline Helpers
-   ========================================================================== */
-
-static inline lmac_sta_info_t *lmac_get_sta_head(void) {
-    return (lmac_sta_info_t *)ah_lmac.sta_list_head;
-}
-
-static inline bool lmac_is_sta_end(lmac_sta_info_t *sta) {
-    return (void *)sta == ah_lmac.sta_list_tail;
-}
-
-static inline lmac_sta_info_t *lmac_get_next_sta(lmac_sta_info_t *sta) {
-    return list_entry(sta->node.next, lmac_sta_info_t, node);
-}
-
-/* Rate table lookup macro */
-#define LMAC_GET_RATE(mcs) (rate_tbl[(mcs) & 0x07])
