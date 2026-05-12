@@ -30,7 +30,7 @@ uint32 srampool_end   = 0;
 
 k_task_handle_t main_task_hdl;
 
-__weak void dsleep_wakeup(void){}
+//__weak void dsleep_wakeup(void){}
 
 void cpu_clk_sel_hosc(void)
 {

@@ -13,7 +13,7 @@
 #include "halow_lbt.h"
 #include "configdb.h"
 #include "sys_config.h"
-#include "lmac_ctx.h"
+//#include "lmac_ctx.h"
 #include "utils.h"
 
 #define HALOW_CONFIG_PREFIX             CONFIGDB_ADD_MODULE("halow")
@@ -313,7 +313,7 @@ static void halow_modem_set_default(void){
 }
 
 static int32_t lmac_watchdog_feed_work( struct os_work *work ){
-    ah_lmac.phy_watchdog_flags &= ~0x01;
+    //ah_lmac.phy_watchdog_flags &= ~0x01;
     os_run_work_delay(&lmac_wdt_wk, 100);
     return 0;
 }
