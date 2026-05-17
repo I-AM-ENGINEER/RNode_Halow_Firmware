@@ -1,6 +1,6 @@
 // Auto-reconstructed: mars_lmac_tx.c
 #include "sys_config.h"
-#define LOG_LOCAL_LEVEL LOG_LEVEL_MARS_LMAC_TX
+//#define LOG_LOCAL_LEVEL LOG_LEVEL_MARS_LMAC_TX
 #include "lib/logc/log.h"
 
 #include "typesdef.h"
@@ -105,7 +105,6 @@ __attribute__((weak)) uint32 lmac_select_tx_acq(void);
 __attribute__((weak)) int32 lmac_tx_frame_regen(uint32 ac, uint32 ac_hint, uint32 mcs, void *arg);
 __attribute__((weak)) int32 lmac_tx_date_prepared(void);
 __attribute__((weak)) void *lmac_gen_txvec(uint32 ac, uint32 ac_hint, uint32 mcs);
-static void *lmac_gen_tx_agglist(uint32 ac, uint32 ac_hint, uint32 mcs, void *arg);
 static int32 lmac_attempt_tx_obss(int32 lo_id);
 static int32 lmac_attempt_tx(uint32 ac);
 __attribute__((weak)) void ndp_tx_vec_init(void);
@@ -129,7 +128,7 @@ __attribute__((weak)) int32 lmac_tx_frm(struct sk_buff *skb);
 __attribute__((weak)) int32 lmac_tx_beacon(struct sk_buff *skb);
 __attribute__((weak)) int32 ndp_pspoll_ack_rx_hdl(void);
 
-
+extern void *lmac_gen_tx_agglist_orig(uint32 ac, uint32 ac_hint, uint32 mcs, void *arg);
 /* ---- Ghidra decompilation porting aids ---- */
 
 typedef unsigned short ushort;
@@ -204,24 +203,22 @@ static uint32_t pn_num_13617;
 static uint32_t pn_num_hi;      /* was DAT_20052e28 (high 32 bits of PN) */
 static uint16_t sn_dup_13763;
 
-/* helpers from binary (wrappers in mars_lmac_tx.c call the  versions) */
+/* helpers from binary */
 extern void lmac_tx_vec_init(void);
-extern void lmac_tx_data_reload(void);
+void lmac_tx_data_reload(void);  /* defined later in this file */
 
-/* TX context global – binary symbol (GLOBAL BSS in mars_lmac_tx_origfuncs.o) */
-extern lmac_tx_ctx ah_lmac_tx_orig;
-#define ah_lmac_tx ah_lmac_tx_orig
+/* TX context global — use the _orig symbol from mars_lmac_tx_origfuncs.o */
+extern lmac_tx_ctx_t ah_lmac_tx_orig;
 
-/* PV0 subtype handlers from binary */
-extern int32 lmac_tx_pv0_mgmt(struct sk_buff *);
-extern int32 lmac_tx_pv0_ctrl(struct sk_buff *);
-extern int32 lmac_tx_pv0_data(struct sk_buff *);
-extern int32 lmac_tx_pv0_ext(struct sk_buff *);
-/* PV1 subtype handlers from binary */
-extern int32 lmac_tx_pv1_data1(struct sk_buff *);
-extern int32 lmac_tx_pv1_mgmt(struct sk_buff *);
-extern int32 lmac_tx_pv1_ctrl(struct sk_buff *);
-extern int32 lmac_tx_pv1_data2(struct sk_buff *);
+/* PV0/PV1 subtype handlers — defined later in this file */
+int32 lmac_tx_pv0_mgmt(struct sk_buff *);
+int32 lmac_tx_pv0_ctrl(struct sk_buff *);
+int32 lmac_tx_pv0_data(struct sk_buff *);
+int32 lmac_tx_pv0_ext(struct sk_buff *);
+int32 lmac_tx_pv1_data1(struct sk_buff *);
+int32 lmac_tx_pv1_mgmt(struct sk_buff *);
+int32 lmac_tx_pv1_ctrl(struct sk_buff *);
+int32 lmac_tx_pv1_data2(struct sk_buff *);
 
 /* Subtype dispatch tables: index = (frame_type_flags & 0xf) >> 2 */
 static lmac_tx_handler_t *lmac_tx_pv0_hdl[4] = {
@@ -238,11 +235,11 @@ static lmac_tx_handler_t *lmac_tx_pv1_hdl[4] = {
 };
 
 /* Cipher engine TX parameters: decompiled from lmac_cfg_tx_ce_para.isra.5.constprop.21.
- * Configures ah_lmac_tx cipher fields from the TX descriptor (head = tx_skb->head).
+ * Configures ah_lmac_tx_orig cipher fields from the TX descriptor (head = tx_skb->head).
  * Offsets verified against Ghidra @ 20036d24. */
 static void lmac_cfg_tx_ce_para_isra5(uint8_t *head)
 {
-    uint8_t *tx      = (uint8_t *)&ah_lmac_tx;
+    uint8_t *tx      = (uint8_t *)&ah_lmac_tx_orig;
     uint8_t *lmac_b  = (uint8_t *)&ah_lmac;
     uint8_t  bw_val;
     void    *key_ptr;
@@ -260,7 +257,7 @@ static void lmac_cfg_tx_ce_para_isra5(uint8_t *head)
 
     if      (bw_val == 0x10) tx[0x6ac] = 0;  /* 1 MHz → cipher_bw = 0 */
     else if (bw_val == 0x20) tx[0x6ac] = 2;  /* 2 MHz → cipher_bw = 2 */
-    else    hgprintf("\x02lmac error!!!ce bw= 0x%x\r\n", (uint32_t)bw_val);
+    else    log_debug("\x02lmac error!!!ce bw= 0x%x\r\n", (uint32_t)bw_val);
 
     tx[0x6ad] = tx[0x69a] & 7;
     tx[0x6ae] = (tx[0x69a] >> 4) & 1;
@@ -297,667 +294,464 @@ extern int   ieee80211_is_data_qos(uint16_t fc);
 void lmac_tx_task(void *_arg);
 void lmac_tx_status_task(void *_arg);
 
-void lmac_tx_init(void)
+#define LMAC_TX_AC_COUNT        4
+
+#ifndef LMAC_HW_BASE
+#define LMAC_HW_BASE 0x40008000u
+#endif
+
+#ifndef LMAC_REG32
+#define LMAC_REG32(off) (*(volatile uint32_t *)(LMAC_HW_BASE + (off)))
+#endif
+
+#ifndef LMAC_AC_PD
+#define LMAC_AC_PD LMAC_REG32(0x4c)
+#endif
+
+void lmac_irq_ac_pd(void)
+{
+    static uint32_t n;
+
+    n++;
+
+    if ((n & 0x3f) == 0) {
+        log_debug("irq_ac_pd: enter n=%u ac0=%u ag0_q=%u ag0_sel=%u pend=%u pd=0x%08x",
+                  n,
+                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[0]),
+                  ah_lmac_tx_orig.pTx_ac_aggr_data[0].queued_count,
+                  ah_lmac_tx_orig.pTx_ac_aggr_data[0].selected_count,
+                  skb_list_count(&ah_lmac_tx_orig.tx_frames_pending_queue),
+                  LMAC_AC_PD);
+    }
+
+    lmac_irq_ac_pd_orig();
+
+    if ((n & 0x3f) == 0) {
+        log_debug("irq_ac_pd: exit  n=%u ac0=%u ag0_q=%u ag0_sel=%u first=%p pend=%u pd=0x%08x",
+                  n,
+                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[0]),
+                  ah_lmac_tx_orig.pTx_ac_aggr_data[0].queued_count,
+                  ah_lmac_tx_orig.pTx_ac_aggr_data[0].selected_count,
+                  ah_lmac_tx_orig.pTx_ac_aggr_data[0].skb_list[0],
+                  skb_list_count(&ah_lmac_tx_orig.tx_frames_pending_queue),
+                  LMAC_AC_PD);
+    }
+}
+
+__attribute__((weak)) void lmac_tx_init(void)
 {
   int iVar1;
   int iVar2;
   int ac_index;
   lmac_tx_ctx *pplVar4;
 
-  memset(&ah_lmac_tx,0,0x6d4);
+  log_info("lmac_tx_init: start ctx=%p", &ah_lmac_tx_orig);
+  memset(&ah_lmac_tx_orig,0,0x6d4);
   lmac_tx_queue_init();
-  pplVar4 = (lmac_tx_ctx *)&ah_lmac_tx;
-  ac_index = 0;
-  do {
-    pplVar4->pTx_ac_aggr_data[0].field1_0x100 = 0;
-    *(undefined4 *)&pplVar4->pTx_ac_aggr_data[0].field2_0x104 = 0;
-    ah_lmac_tx.pTx_ac_aggr_data[ac_index].field9_0x10d = 0;
-    iVar1 = 0;
-    do {
-      iVar2 = iVar1 + 1;
-      pplVar4->pTx_ac_aggr_data[0].field0_0x0[iVar1] = (struct sk_buff *)0x0;
-      iVar1 = iVar2;
-    } while (iVar2 != 0x40);
-    ac_index = ac_index + 1;
-    pplVar4 = (lmac_tx_ctx *)(pplVar4->pTx_ac_aggr_data[0].field0_0x0 + 0x1a);
-  } while (ac_index != 4);
-  lmac_tx_vec_init();
-  os_sema_init(&ah_lmac_tx.tx_sem,0);
-  os_sema_init(&ah_lmac_tx.tx_status_sem,0);
-  os_task_init((const uint8 *)"lmac tx",(struct os_task *)&ah_lmac_tx.tx_task,
-               (void (*)(void *))lmac_tx_task,(uint32)&ah_lmac_tx);
-  os_task_set_stacksize(&ah_lmac_tx.tx_task,512);
-  _os_task_set_priority(&ah_lmac_tx.tx_task,81);
-  os_task_run(&ah_lmac_tx.tx_task);
-  os_task_init((const uint8 *)"lmac tx status",(struct os_task *)&ah_lmac_tx.tx_status_task,
-               (void (*)(void *))lmac_tx_status_task,(uint32)&ah_lmac_tx);
-  os_task_set_stacksize(&ah_lmac_tx.tx_status_task,0x200);
-  _os_task_set_priority(&ah_lmac_tx.tx_status_task,0x50);
-  os_task_run(&ah_lmac_tx.tx_status_task);
-  ah_lmac_tx.pBeacon_skb = (struct sk_buff *)alloc_tx_skb(0x400);
-  if (ah_lmac_tx.pBeacon_skb == (struct sk_buff *)0x0) {
-    hgprintf("\x02lmac error!!!alloc beacon failed\r\n");
+  log_debug("lmac_tx_init: queue_init done");
+
+  for (uint32_t ac = 0; ac < LMAC_TX_AC_COUNT; ac++) {
+    struct lmac_tx_ctx_buff *aggr = &ah_lmac_tx_orig.pTx_ac_aggr_data[ac];
+
+    memset(aggr->skb_list, 0, sizeof(aggr->skb_list));
+
+    aggr->total_len_bytes = 0;
+    aggr->symbol_len = 0;
+    aggr->first_seq = -1;
+    aggr->last_seq = -1;
+    aggr->selected_count = 0;
+    aggr->queued_count = 0;
+    aggr->rate_cfg = 0;
+}
+
+  log_debug("lmac_tx_init: aggr_data zero done");
+  //lmac_tx_vec_init();
+  ndp_tx_vec_init_orig(&ah_lmac_tx_orig.pTx_vector_cache[0].fmt_byte);
+  ndp_tx_vec_init_orig(&ah_lmac_tx_orig.pTx_vector_cache[1].fmt_byte);
+  ndp_tx_vec_init_orig(&ah_lmac_tx_orig.pTx_vector_cache[2].fmt_byte);
+  ndp_tx_vec_init_orig(&ah_lmac_tx_orig.pTx_vector_cache[3].fmt_byte);
+  ndp_tx_vec_init_orig(&ah_lmac_tx_orig.pTx_vector_cache[4].fmt_byte);
+
+  log_debug("lmac_tx_init: vec_init done");
+  os_sema_init(&ah_lmac_tx_orig.tx_sem,0);
+  os_sema_init(&ah_lmac_tx_orig.tx_status_sem,0);
+  log_debug("lmac_tx_init: semas init done, starting lmac tx task");
+  os_task_init((const uint8 *)"lmac tx",(struct os_task *)&ah_lmac_tx_orig.tx_task,
+               (void (*)(void *))lmac_tx_task,(uint32)&ah_lmac_tx_orig);
+  os_task_set_stacksize(&ah_lmac_tx_orig.tx_task,2048);
+  _os_task_set_priority(&ah_lmac_tx_orig.tx_task,81);
+  os_task_run(&ah_lmac_tx_orig.tx_task);
+  log_debug("lmac_tx_init: lmac tx task running, starting status task");
+  os_task_init((const uint8 *)"lmac tx status",(struct os_task *)&ah_lmac_tx_orig.tx_status_task,
+               (void (*)(void *))lmac_tx_status_task,(uint32)&ah_lmac_tx_orig);
+  os_task_set_stacksize(&ah_lmac_tx_orig.tx_status_task,2048);
+  _os_task_set_priority(&ah_lmac_tx_orig.tx_status_task,0x50);
+  os_task_run(&ah_lmac_tx_orig.tx_status_task);
+  log_debug("lmac_tx_init: status task running, alloc beacon skb");
+  ah_lmac_tx_orig.pBeacon_skb = (struct sk_buff *)alloc_tx_skb(0x400);
+  if (ah_lmac_tx_orig.pBeacon_skb == (struct sk_buff *)0x0) {
+    log_error("lmac_tx_init: alloc beacon failed!");
+    log_debug("\x02lmac error!!!alloc beacon failed\r\n");
   }
   else {
-    skb_reserve(ah_lmac_tx.pBeacon_skb,0x100);
-    ah_lmac_tx.pBeacon_skb->lmaced = 1;
+    skb_reserve(ah_lmac_tx_orig.pBeacon_skb,0x100);
+    ah_lmac_tx_orig.pBeacon_skb->lmaced = 1;
+    log_debug("lmac_tx_init: beacon skb=%p", ah_lmac_tx_orig.pBeacon_skb);
   }
+  log_info("lmac_tx_init: done");
   return;
 }
 
+static inline uint16_t lmac_tx_align_len_min(uint16_t len)
+{
+    uint16_t v = len + 8;
+
+    if ((len & 3) != 0) {
+        v = (v & 0xfffc) + 4;
+    }
+
+    return v;
+}
+
+static void lmac_tx_drop_min(struct sk_buff *skb)
+{
+    skb->acked = 0;
+    skb_list_queue(&ah_lmac_tx_orig.tx_frames_pending_queue, skb);
+    os_sema_up(&ah_lmac_tx_orig.tx_status_sem);
+}
 
 void lmac_tx_task(void *_arg)
 {
-  byte bVar1;
-  byte bVar2;
-  byte is_data_frame;
-  byte temp_byte;
-  uint8_t hdr_len;
-  int sema_result;
-  sk_buff *tx_skb;
-  bool bVar6;
-  astruct aVar7;
-  uint32_t ret_val_ptr;
-  int nAggCheckResult;
-  skb_list *psVar3;
-  void *pvVar4;
-  uint8_t *__dest;
-  ushort frame_ctrl_short;
-  int iVar5;
-  uint param1;
-  byte bandwidth_bits;
-  ushort aligned_frame_len;
-  uint8_t *pJumpOrCtx;
-  uint temp_uint;
-  astruct *frame_start_ptr;
-  lmac_txd *txd;
-  astruct *frame_data_ptr;
-  uint8_t *tx_desc_ptr;
-  astruct_1 *tx_info_ptr;
-  ushort *frame_ptr_short;
-  ushort *tx_stat_ptr;
-  uint8_t *pBufOrHead;
-  uint8_t mcs;
-  bool global_mcs_correct_b;
-  byte txd_mcs;
-  byte bandwidth_mhz;
-  ushort frame_control_short;
-  ushort frame_control_word;
-  uint16 frame_len;
+    struct sk_buff *skb;
+    uint32_t loop_iter = 0;
 
-main_loop:
-  if (((byte)ah_lmac_tx.exit_flag & 1) != 0) {
-    hgprintf("\x02lmac error!!!task exit!!!\r\n");
-    return;
-  }
-  sema_result = os_sema_down(&ah_lmac_tx.tx_sem,1);
-process_frame:
-  do {
-    while( true ) {
-      if ((sema_result == 0) ||
-         (tx_skb = skb_list_dequeue(&ah_lmac_tx.tx_pending_queue), tx_skb == (sk_buff *)0x0))
-      goto reload_and_retry;
-      frame_data_ptr = (astruct *)tx_skb->data;
-                    /* beacon send */
-      if (frame_data_ptr->frame_control != '\x1c') break;
-      lmac_tx_pv0_s1g_beacon(tx_skb);
-    }
-    txd = (lmac_txd *)tx_skb->head;
-    tx_info_ptr = (astruct_1 *)tx_skb->txinfo;
-    if (((uint)frame_data_ptr & 1) == 0) {
-      memset(txd,0,0x44);
-      if (tx_info_ptr == (astruct_1 *)0x0) {
-        txd->beacon_ch_type = 0xff;
-        txd->mcs_index = 0xff;
-        txd->bw_tx_level = '\x0f';
-        temp_byte = txd->rate_flags & 0x9f | 0x60;
-      }
-      else {
-        temp_uint = tx_info_ptr->field4_0x4;
-        txd->dwHw_ctrl_word = temp_uint;
-        frame_ctrl_short = tx_info_ptr->field5_0x8;
-        txd->ack_mf_md_flags = txd->ack_mf_md_flags & 0xdf | (byte)((temp_uint >> 0x1f) << 5);
-        txd->data_beacon_flag = txd->data_beacon_flag & 0xf7 | (byte)((frame_ctrl_short & 1) << 3);
-        txd->dwFrame_ctrl_from_txinfo = (uint)frame_ctrl_short;
-        txd->beacon_ch_type = tx_info_ptr->field1_0x1;
-        txd->mcs_index = 0xff;
-        txd->rate_flags = txd->rate_flags & 0x9f | tx_info_ptr->field3_0x3 & 0x60;
-        txd->bw_tx_level = tx_info_ptr->field6_0xa;
-        temp_byte = txd->rate_flags & 0xe0 | tx_info_ptr->field3_0x3 & 0x1f;
-      }
-      txd->rate_flags = temp_byte;
-      if ((txd->data_beacon_flag & 8) != 0) {
-        txd->bw_tx_level = '\a';
-        txd->mcs_index = 1;
-        hdr_len = '\x03';
-        if ((ah_lmac.beacon_s1g_format_flags & 1) == 0) {
-          hdr_len = '\0';
+    log_debug("tx_task: start arg=%p ctx=%p pending_q=%p status_q=%p",
+              _arg,
+              &ah_lmac_tx_orig,
+              &ah_lmac_tx_orig.tx_pending_queue,
+              &ah_lmac_tx_orig.tx_status_queue);
+
+    while (((uint8_t)ah_lmac_tx_orig.exit_flag & 1) == 0) {
+        int sema_result;
+        uint32_t processed = 0;
+        uint32_t queued = 0;
+        uint32_t dropped = 0;
+
+        loop_iter++;
+
+        sema_result = os_sema_down(&ah_lmac_tx_orig.tx_sem, 1);
+
+        // log_debug("tx_task: wake iter=%u sema=%d pending=%u status=%u ac0=%u ac1=%u ac2=%u ac3=%u pend_frames=%u",
+        //           loop_iter,
+        //           sema_result,
+        //           skb_list_count(&ah_lmac_tx_orig.tx_pending_queue),
+        //           skb_list_count(&ah_lmac_tx_orig.tx_status_queue),
+        //           skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[0]),
+        //           skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[1]),
+        //           skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[2]),
+        //           skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[3]),
+        //           skb_list_count(&ah_lmac_tx_orig.tx_frames_pending_queue));
+
+        if (sema_result == 0) {
+            //log_debug("tx_task: sema timeout -> reload");
+            lmac_tx_data_reload();
+            // log_debug("tx_task: after timeout reload status=%u ac0=%u ac1=%u ac2=%u ac3=%u pend_frames=%u",
+            //           skb_list_count(&ah_lmac_tx_orig.tx_status_queue),
+            //           skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[0]),
+            //           skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[1]),
+            //           skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[2]),
+            //           skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[3]),
+            //           skb_list_count(&ah_lmac_tx_orig.tx_frames_pending_queue));
+            continue;
         }
-        txd->beacon_ch_type = hdr_len;
-      }
-      txd_mcs = txd->mcs_index;
-      temp_byte = ah_lmac.beacon_s1g_format_flags & 1;
-      bVar1 = ah_lmac.beacon_s1g_format_flags & 1;
-      bVar2 = ah_lmac.beacon_s1g_format_flags & 1;
-      bandwidth_bits = ah_lmac.beacon_s1g_format_flags & 1;
-      mcs = ah_lmac.tx_mcs;
-      if ((ah_lmac.beacon_s1g_format_flags & 1) == 0) {
-        if (7 < txd_mcs) {
-          global_mcs_correct_b = 7 < ah_lmac.tx_mcs;
-mcs_clamp_check:
-          if (global_mcs_correct_b) {
-            mcs = 0xff;
-          }
-          goto mcs_apply;
-        }
-      }
-      else if ((7 < txd_mcs) && (txd_mcs != 10)) {
-        if (7 < ah_lmac.tx_mcs) {
-          global_mcs_correct_b = ah_lmac.tx_mcs != 10;
-          goto mcs_clamp_check;
-        }
-mcs_apply:
-        txd->mcs_index = mcs;
-      }
-      bandwidth_mhz = txd->beacon_ch_type;
-      if (bandwidth_mhz == 2) {
-        if (bVar1 == 0) goto bw_apply;
-        goto bw_s1g_2mhz;
-      }
-      if (bandwidth_mhz < 3) {
-        if (bandwidth_mhz == 1) goto bw_s1g_2mhz;
-bw_default:
-        bandwidth_bits = 0xff;
-bw_apply:
-        txd->beacon_ch_type = bandwidth_bits;
-      }
-      else {
-        if (bandwidth_mhz != 4) {
-          if (bandwidth_mhz != 8) goto bw_default;
-          txd->beacon_ch_type = 2;
-          if (temp_byte == 0) {
-            if (ah_lmac.bss_bw != 1) {
-              if (ah_lmac.bss_bw != '\x02') goto chan_list_check;
-              bandwidth_bits = 1;
+
+        while ((skb = skb_list_dequeue(&ah_lmac_tx_orig.tx_pending_queue)) != NULL) {
+            lmac_txd *txd;
+            uint16_t fc;
+            uint8_t subtype;
+            uint8_t *txd_raw;
+            int hdl_ret;
+
+            processed++;
+
+            log_debug("tx_task: skb=%p head=%p data=%p len=%u txinfo=%p users=%u lmaced=%u pending_left=%u",
+                      skb,
+                      skb->head,
+                      skb->data,
+                      skb->len,
+                      skb->txinfo,
+                      skb->users.counter,
+                      skb->lmaced,
+                      skb_list_count(&ah_lmac_tx_orig.tx_pending_queue));
+
+            if (((uintptr_t)skb->data & 1) != 0) {
+                log_debug("tx_task: drop skb=%p reason=unaligned_data data=%p",
+                          skb, skb->data);
+                dropped++;
+                lmac_tx_drop_min(skb);
+                continue;
             }
-            goto bw_apply;
-          }
-bw_s1g_2mhz:
-          bandwidth_bits = 3;
-          goto bw_apply;
-        }
-        txd->beacon_ch_type = '\x01';
-        if (bVar2 != 0) goto bw_s1g_2mhz;
-        if (ah_lmac.bss_bw == '\x01') goto bw_apply;
-      }
-chan_list_check:
-      if (ah_lmac.chan_list_count < (txd->rate_flags & 0x1f)) {
-        txd->rate_flags = txd->rate_flags & 0xe0;
-      }
-      frame_start_ptr = (astruct *)tx_skb->data;
-      frame_len = tx_skb->len;
-      txd->frame_data_ptr = frame_start_ptr;
-      txd->frame_len = frame_len;
-      temp_byte = frame_start_ptr->frame_control;
-      temp_uint = temp_byte & 3;
-      txd->frame_type_flags = txd->frame_type_flags & 0xfc | (byte)temp_uint;
-      if ((temp_byte & 3) != 0) {
-        hgprintf("\x02lmac error!!!pv= %d\r\n", temp_uint);
-        goto err_set_and_drop;
-      }
-      is_data_frame = ieee80211_is_data((uint)frame_data_ptr->word);
-      txd->data_beacon_flag = txd->data_beacon_flag & 0xfd | (is_data_frame & 1) << 1;
-      lmac_get_rx_addr(txd->receiver_mac,tx_skb->data);
-      ret_val_ptr = (uint32_t)lmac_sta_get(0xffff,txd->receiver_mac);
-                    /* Is MAC unicast? */
-      txd->sta_idx_ptr = ret_val_ptr;
-      if ((txd->receiver_mac[0] & 1) == 0) {
-        if (ret_val_ptr != 0) {
-          if ((*(byte *)(ret_val_ptr + 0x6b) & 0x10) != 0) {
-            temp_uint = txd->data_beacon_flag >> 1 & 1;
-            hgprintf("\x02sta roaming out, drop(%d)\r\n", temp_uint);
-            goto err_set_and_drop;
-          }
-          if (((*(byte *)(ret_val_ptr + 0x6b) & 0x20) != 0) && ((txd->data_beacon_flag & 2) != 0)) {
-            hgprintf("\x02sta deleted, drop data\r\n");
-            goto err_set_and_drop;
-          }
-        }
-      }
-      else {
-        txd->tid_ac_partial_aid = txd->tid_ac_partial_aid & 0x7f | 0x80;
-      }
-      temp_byte = lmac_get_ack_policy(txd);
-      txd->ack_mf_md_flags = txd->ack_mf_md_flags & 0xfd | (temp_byte & 1) << 1;
-      if ((byte)(txd->bw_tx_level - 1) < 7) {
-        temp_byte = txd->tid_ac_partial_aid & 0xf0 | txd->bw_tx_level & 0xf;
-      }
-      else {
-        tx_desc_ptr = tx_skb->data;
-        lmac_get_tid(tx_desc_ptr);
-        temp_byte = txd->tid_ac_partial_aid & 0xf0 | (byte)tx_desc_ptr & 0xf;
-      }
-      txd->tid_ac_partial_aid = temp_byte;
-      if (7 < (txd->tid_ac_partial_aid & 0xf)) {
-        txd->tid_ac_partial_aid = txd->tid_ac_partial_aid & 0xf0 | 7;
-      }
-      frame_ctrl_short = (uint16_t)txd->tid_ac_partial_aid |
-                         ((uint16_t)txd->data_beacon_flag << 8);
-      if (((frame_ctrl_short & 0x280) == 0x280) &&
-         (temp_byte = ah_lmac.mcast_dup_filter_cfg & 0xf,
-         txd->mcast_dup_filter = ah_lmac.mcast_dup_filter_cfg & 0xf, temp_byte != 0)) {
-        txd->tid_ac_partial_aid = txd->tid_ac_partial_aid & 0xf0 | 1;
-        if ((ah_lmac.link_mode_flags & 0x20) == 0) {
-          txd->dwSeq_dup_flags = txd->dwSeq_dup_flags | 1;
-          iVar5 = (sn_dup_13763 & 0xfff) << 4;
-          frame_data_ptr[0xb].frame_control = (uint8_t)iVar5;
-          sn_dup_13763 = sn_dup_13763 + 1 & 0xfff;
-          frame_data_ptr[0xb].field_0x1 = (char)((uint)iVar5 >> 8);
-          goto seq_num_legacy;
-        }
-seq_num_s1g:
-        frame_ptr_short = (ushort *)txd->frame_data_ptr;
-        temp_uint = (uint)*frame_ptr_short;
-        ret_val_ptr = txd->sta_idx_ptr;
-        temp_byte = txd->tid_ac_partial_aid & 0xf;
-        if ((*frame_ptr_short & 3) == 0) {
-          temp_uint = (temp_uint & 7) >> 2;
-          if ((temp_uint == 0) || (temp_uint == 2)) {
-            temp_uint = seq_num_space_update(ret_val_ptr,temp_byte);
-            pvVar4 = (void *)(temp_uint & 0xffff);
-            iVar5 = (temp_uint & 0xfff) << 4;
-            *(char *)(frame_ptr_short + 0xb) = (char)iVar5;
-            *(char *)((int)frame_ptr_short + 0x17) = (char)((uint)iVar5 >> 8);
-            goto seq_num_done;
-          }
-        }
-        else if ((temp_uint & 3) == 1) {
-          param1 = (temp_uint & 0xf) >> 2;
-          if (param1 == 1) {
-            if ((temp_uint & 0x7f) >> 5 < 2) goto seq_num_pv1_data;
-          }
-          else {
-            if (param1 == 0) {
-seq_num_pv1_data:
-              temp_uint = seq_num_space_update(ret_val_ptr,temp_byte);
-              pvVar4 = (void *)(temp_uint & 0xffff);
-              frame_ptr_short[5] = (ushort)(temp_uint << 4);
-              goto seq_num_done;
+
+            fc = *(uint16_t *)skb->data;
+
+            log_debug("tx_task: skb=%p fc=0x%04x type=%u subtype_raw=%u protected=%u",
+                      skb,
+                      fc,
+                      (fc >> 2) & 3,
+                      (fc >> 4) & 0x0f,
+                      (fc >> 14) & 1);
+
+            if ((fc & 0x0003) != 0) {
+                log_debug("tx_task: drop skb=%p reason=not_pv0 fc=0x%04x",
+                          skb, fc);
+                dropped++;
+                lmac_tx_drop_min(skb);
+                continue;
             }
-            if (param1 != 2) {
-              if (param1 == 3) {
-                temp_uint = seq_num_space_update(ret_val_ptr,temp_byte);
-                pvVar4 = (void *)(temp_uint & 0xffff);
-                frame_ptr_short[7] = (ushort)(temp_uint << 4);
-                goto seq_num_done;
-              }
-              hgprintf("\x02lmac error!!!invalid pv1 type= %d unknow!\r\n",param1);
+
+            if ((fc & 0x4000) != 0) {
+                log_debug("tx_task: drop skb=%p reason=protected_frame fc=0x%04x",
+                          skb, fc);
+                dropped++;
+                lmac_tx_drop_min(skb);
+                continue;
             }
-          }
-        }
-        pvVar4 = (void *)0xffff;
-      }
-      else {
-seq_num_legacy:
-        if ((ah_lmac.link_mode_flags & 0x20) != 0) goto seq_num_s1g;
-        pvVar4 = txd->frame_data_ptr;
-        lmac_get_seq_num(pvVar4);
-      }
-seq_num_done:
-      temp_byte = txd->frame_type_flags;
-      txd->seq_num_frag = (int16_t)(uint32_t)pvVar4;
-      if ((temp_byte & 3) == 0) {
-        aVar7 = *frame_data_ptr;
-        txd->frame_type_flags = temp_byte & 0xe3 | aVar7.frame_control & 4;
-        aligned_frame_len = (uint16_t)txd->frame_type_flags |
-                            ((uint16_t)txd->ack_mf_md_flags << 8);
-        frame_ctrl_short =
-             aligned_frame_len & 0xfe1f | (ushort)(((int)(uint)aVar7.word >> 4 & 0xfU) << 5);
-        txd->frame_type_flags = (char)frame_ctrl_short;
-        txd->ack_mf_md_flags = (char)(frame_ctrl_short >> 8);
-        txd->ack_mf_md_flags =
-             txd->ack_mf_md_flags & 0xbf | ((byte)frame_data_ptr->field_0x1 >> 1 & 1) << 6;
-        txd->ack_mf_md_flags = txd->ack_mf_md_flags & 0x7f | frame_data_ptr->field_0x1 << 7;
-        temp_uint = lmac_get_hdr_len_pv0((ushort *)tx_skb->data);
-        txd->hdr_len = (uint8_t)temp_uint;
-        txd->bandwidth_field = txd->bandwidth_field & 0xe7 | (ah_lmac.bss_bw & 3) << 3;
-        if ((frame_data_ptr->field_0x1 & 0x10) != 0) {
-          hgprintf("\x02TX_PM DET\r\n");
-        }
-        if (((txd->frame_type_flags & 0x1c) == 8) &&
-           (frame_control_word = (uint16_t)txd->frame_type_flags |
-                                 ((uint16_t)txd->ack_mf_md_flags << 8),
-           (frame_control_word & 0xe0) == 0x80)) {
-          txd->data_beacon_flag = txd->data_beacon_flag & 0xf7 | 8;
-          hgprintf("\x02tx_null:\r\n");
-          hgics_print_hex(tx_skb->data,tx_skb->len);
-        }
-        ret_val_ptr = ah_lmac.qa_rx_channel_map;
-        if ((txd->frame_type_flags & 0xf) >> 2 < 4) {
-          if (((*(byte *)(ah_lmac.qa_rx_channel_map + 0x15) & 7) == 1) &&
-             (*(uint *)(ah_lmac.qa_rx_channel_map + 4) != 0)) {
-            tx_desc_ptr = tx_skb->data;
-            temp_byte = tx_skb->head[0x2a];
-            if ((CONCAT11(tx_desc_ptr[temp_byte + 6],tx_desc_ptr[temp_byte + 7]) == 0x800) &&
-               ((((tx_desc_ptr[temp_byte + 0x11] == '\x11' ||
-                  (tx_desc_ptr[temp_byte + 0x11] == '\x06')) &&
-                 (*(uint *)(ah_lmac.qa_rx_channel_map + 4) ==
-                  ((uint)tx_desc_ptr[temp_byte + 0x18] << 0x18 |
-                   (uint)tx_desc_ptr[temp_byte + 0x19] << 0x10 | (uint)tx_desc_ptr[temp_byte + 0x1b]
-                  | (uint)tx_desc_ptr[temp_byte + 0x1a] << 8))) &&
-                (*(short *)(ah_lmac.qa_rx_channel_map + 8) ==
-                 CONCAT11(tx_desc_ptr[temp_byte + 0x1e],tx_desc_ptr[temp_byte + 0x1f]))))) {
-              frame_ctrl_short = tx_skb->len;
-              *(char *)(ah_lmac.qa_rx_channel_map + 0x12) = (char)frame_ctrl_short;
-              memcpy((void *)(ret_val_ptr + 0x17),tx_desc_ptr,(uint)frame_ctrl_short);
-              hgprintf("\x02HEARTBEAT tx det: len= %d\r\n",(uint)*(byte *)(ah_lmac.qa_rx_channel_map + 0x12));
+
+            txd = (lmac_txd *)skb->head;
+            txd_raw = (uint8_t *)txd;
+
+            log_debug("tx_task: txd init skb=%p txd=%p", skb, txd);
+
+            memset(txd, 0, 0x44);
+
+            txd->beacon_ch_type = 0xff;
+            txd->mcs_index = 0xff;
+            txd->bw_tx_level = 0x0f;
+            txd->rate_flags = (txd->rate_flags & 0x9f) | 0x60;
+
+            txd->frame_data_ptr = (void *)skb->data;
+            txd->frame_len = skb->len;
+
+            txd->frame_type_flags =
+                (txd->frame_type_flags & 0xfc) | (skb->data[0] & 3);
+
+            if (ieee80211_is_data(fc)) {
+                txd->data_beacon_flag =
+                    (txd->data_beacon_flag & 0xfd) | 0x02;
+            } else {
+                txd->data_beacon_flag =
+                    (txd->data_beacon_flag & 0xfd);
             }
-          }
-          temp_uint = (txd->frame_type_flags & 0xf) >> 2;
-          pJumpOrCtx = (uint8_t *)lmac_tx_pv0_hdl;
-          goto call_subtype_handler;
+
+            lmac_get_rx_addr(txd->receiver_mac, skb->data);
+            txd->sta_idx_ptr = lmac_sta_get(0xffff, txd->receiver_mac);
+
+            log_debug("tx_task: rx_addr=%02x:%02x:%02x:%02x:%02x:%02x sta=%p data_flag=0x%02x",
+                      txd->receiver_mac[0],
+                      txd->receiver_mac[1],
+                      txd->receiver_mac[2],
+                      txd->receiver_mac[3],
+                      txd->receiver_mac[4],
+                      txd->receiver_mac[5],
+                      (void *)txd->sta_idx_ptr,
+                      txd->data_beacon_flag);
+
+            if ((txd->receiver_mac[0] & 1) != 0) {
+                txd->tid_ac_partial_aid |= 0x80;
+                log_debug("tx_task: multicast/broadcast skb=%p tid_aid=0x%02x",
+                          skb, txd->tid_ac_partial_aid);
+            }
+
+            {
+                uint8_t ack = lmac_get_ack_policy_orig(txd);
+                txd->ack_mf_md_flags =
+                    (txd->ack_mf_md_flags & 0xfd) | ((ack & 1) << 1);
+
+                log_debug("tx_task: ack_policy=%u ack_mf_md=0x%02x",
+                          ack, txd->ack_mf_md_flags);
+            }
+
+            txd->tid_ac_partial_aid &= 0xf0;
+
+            txd->seq_num_frag =
+                (int16_t)lmac_get_seq_num(txd->frame_data_ptr);
+
+            log_debug("tx_task: seq=%d tid_aid=0x%02x",
+                      txd->seq_num_frag,
+                      txd->tid_ac_partial_aid);
+
+            {
+                uint16_t combined;
+
+                txd->frame_type_flags =
+                    (txd->frame_type_flags & 0xe3) |
+                    (((fc >> 2) & 7) << 2);
+
+                combined =
+                    ((uint16_t)txd->ack_mf_md_flags << 8) |
+                    txd->frame_type_flags;
+
+                combined =
+                    (combined & 0xfe1f) |
+                    (((fc >> 4) & 0x0f) << 5);
+
+                txd->frame_type_flags = (uint8_t)combined;
+                txd->ack_mf_md_flags = (uint8_t)(combined >> 8);
+
+                txd->ack_mf_md_flags =
+                    (txd->ack_mf_md_flags & 0xbf) |
+                    (((skb->data[1] >> 1) & 1) << 6);
+
+                txd->ack_mf_md_flags =
+                    (txd->ack_mf_md_flags & 0x7f) |
+                    (skb->data[1] << 7);
+
+                txd->hdr_len = lmac_get_hdr_len_pv0((uint16_t *)skb->data);
+
+                txd->bandwidth_field =
+                    (txd->bandwidth_field & 0xe7) |
+                    ((ah_lmac.bss_bw & 3) << 3);
+            }
+
+            subtype = (txd->frame_type_flags & 0x0f) >> 2;
+
+            log_debug("tx_task: decoded skb=%p subtype=%u hdr_len=%u frame_type=0x%02x ack_mf=0x%02x bw_field=0x%02x",
+                      skb,
+                      subtype,
+                      txd->hdr_len,
+                      txd->frame_type_flags,
+                      txd->ack_mf_md_flags,
+                      txd->bandwidth_field);
+
+            if (subtype >= 4) {
+                log_debug("tx_task: drop skb=%p reason=bad_subtype subtype=%u",
+                          skb, subtype);
+                dropped++;
+                lmac_tx_drop_min(skb);
+                continue;
+            }
+
+            log_debug("tx_task: call pv0_hdl subtype=%u fn=%p skb=%p",
+                      subtype,
+                      lmac_tx_pv0_hdl[subtype],
+                      skb);
+
+            hdl_ret =
+                ((int (*)(struct sk_buff *))
+                    ((uintptr_t)lmac_tx_pv0_hdl[subtype] & ~1U))(skb);
+
+            log_debug("tx_task: pv0_hdl ret=%d skb=%p txd26=0x%02x txd27=0x%02x txd2a=0x%02x",
+                      hdl_ret,
+                      skb,
+                      txd_raw[0x26],
+                      txd_raw[0x27],
+                      txd_raw[0x2a]);
+
+            if (hdl_ret != 0) {
+                log_debug("tx_task: drop skb=%p reason=pv0_handler_failed ret=%d",
+                          skb, hdl_ret);
+                dropped++;
+                lmac_tx_drop_min(skb);
+                continue;
+            }
+
+            txd->frame_ctrl = lmac_tx_align_len_min(skb->len);
+
+            log_debug("tx_task: frame_ctrl=%u len=%u s1g=%u",
+                      txd->frame_ctrl,
+                      skb->len,
+                      ah_lmac.beacon_s1g_format_flags & 1);
+
+            if (((ah_lmac.beacon_s1g_format_flags & 1) == 0) &&
+                ((uint16_t)txd->frame_ctrl > 0x067b)) {
+                log_debug("tx_task: drop skb=%p reason=frame_too_large frame_ctrl=%u",
+                          skb, txd->frame_ctrl);
+                dropped++;
+                lmac_tx_drop_min(skb);
+                continue;
+            }
+
+            lmac_partial_aid_update_orig(txd);
+
+            log_debug("tx_task: after partial_aid skb=%p tid_aid=0x%02x txd24=0x%02x txd25=0x%02x txd26=0x%02x txd27=0x%02x",
+                      skb,
+                      txd->tid_ac_partial_aid,
+                      txd_raw[0x24],
+                      txd_raw[0x25],
+                      txd_raw[0x26],
+                      txd_raw[0x27]);
+
+            if ((ah_lmac.sleep_ctrl_flags & 2) == 0) {
+                *(uint16_t *)skb->data &= ~0x1000;
+                log_debug("tx_task: pm_bit cleared skb=%p fc=0x%04x",
+                          skb, *(uint16_t *)skb->data);
+            } else {
+                *(uint16_t *)skb->data |= 0x1000;
+                log_debug("tx_task: pm_bit set skb=%p fc=0x%04x",
+                          skb, *(uint16_t *)skb->data);
+            }
+
+            txd_raw[0x26] &= ~0x10;
+
+            if ((txd_raw[0x26] & 0x0f) > 7) {
+                log_debug("tx_task: clamp tid/ac old_txd26=0x%02x", txd_raw[0x26]);
+                txd_raw[0x26] = (txd_raw[0x26] & 0xf0) | 7;
+            }
+
+            log_debug("tx_task: queue status skb=%p txd26=0x%02x tid=%u status_before=%u",
+                      skb,
+                      txd_raw[0x26],
+                      txd_raw[0x26] & 7,
+                      skb_list_count(&ah_lmac_tx_orig.tx_status_queue));
+
+            skb_list_queue(&ah_lmac_tx_orig.tx_status_queue, skb);
+            queued++;
+
+            log_debug("tx_task: status queued skb=%p status_after=%u -> reload",
+                      skb,
+                      skb_list_count(&ah_lmac_tx_orig.tx_status_queue));
+
+            lmac_tx_data_reload();
+
+            log_debug("tx_task: after per-skb reload skb=%p status=%u ac0=%u ac1=%u ac2=%u ac3=%u pend_frames=%u",
+                      skb,
+                      skb_list_count(&ah_lmac_tx_orig.tx_status_queue),
+                      skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[0]),
+                      skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[1]),
+                      skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[2]),
+                      skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[3]),
+                      skb_list_count(&ah_lmac_tx_orig.tx_frames_pending_queue));
         }
-err_unknown_frame_type:
-        temp_uint = (uint)frame_data_ptr->word;
-        hgprintf("\x02lmac error!!!fc= %d\r\n", temp_uint);
-        goto err_set_and_drop;
-      }
-      if ((temp_byte & 3) == 1) {
-        aVar7 = *frame_data_ptr;
-        txd->frame_type_flags = temp_byte & 0xe3 | (byte)(((int)(uint)aVar7.word >> 2 & 7U) << 2);
-        frame_control_short = (uint16_t)txd->frame_type_flags |
-                              ((uint16_t)txd->ack_mf_md_flags << 8);
-        frame_ctrl_short = frame_control_short & 0xfe1f | (ushort)aVar7.word & 0x60;
-        txd->frame_type_flags = (char)frame_ctrl_short;
-        txd->ack_mf_md_flags = (char)(frame_ctrl_short >> 8);
-        frame_data_ptr->field_0x1 = frame_data_ptr->field_0x1 & 0xef;
-        txd->tid_ac_partial_aid = txd->tid_ac_partial_aid & 0xef;
-        txd->ack_mf_md_flags = txd->ack_mf_md_flags & 0xbf | (frame_data_ptr->field_0x1 & 1) << 6;
-        hdr_len = lmac_get_hdr_len_pv1((ushort *)tx_skb->data);
-        temp_uint = (txd->frame_type_flags & 0xf) >> 2;
-        txd->hdr_len = hdr_len;
-        if (3 < temp_uint) goto err_unknown_frame_type;
-        pJumpOrCtx = (uint8_t *)lmac_tx_pv1_hdl;
-call_subtype_handler:
-        iVar5 = ((lmac_tx_handler_t *)(*(uint *)(pJumpOrCtx + temp_uint * 4) & 0xfffffffe))(tx_skb);
-        if (iVar5 != 0) goto err_set_and_drop;
-      }
-      frame_ctrl_short = tx_skb->len + 8;
-      if ((tx_skb->len & 3) != 0) {
-        frame_ctrl_short = (frame_ctrl_short & 0xfffc) + 4;
-      }
-      temp_byte = ah_lmac.beacon_s1g_format_flags & 1;
-      temp_uint = (uint)(short)frame_ctrl_short;
-      txd->frame_ctrl = frame_ctrl_short;
-      if (temp_byte == 0) {
-        iVar5 = 0x67b;
-      }
-      else if (ah_lmac.tx_mcs_min_limit == 0) {
-        iVar5 = 0x17f;
-      }
-      else {
-        iVar5 = *(int *)(max_byte_table + (uint)ah_lmac.tx_mcs_min_limit * 0x10);
-      }
-      if (iVar5 < (int)temp_uint) {
-        hgprintf("\x02lmac error!!!packet= %dB too long, drop!\r\n", temp_uint);
-        goto err_set_and_drop;
-      }
-      lmac_partial_aid_update(txd);
-      if (((ah_lmac.sta0_added_or_assoc_flag == 1) && ((ah_lmac.beacon_s1g_format_flags & 1) == 0))
-         && (txd->sta_idx_ptr != 0)) {
-        txd->tid_ac_partial_aid = txd->tid_ac_partial_aid & 0xbf | 0x40;
-      }
-      if ((ah_lmac.sleep_ctrl_flags & 2) == 0) {
-        aVar7.word = frame_data_ptr->word & 0xefff;
-      }
-      else {
-        aVar7.word = frame_data_ptr->word | 0x1000;
-      }
-      *frame_data_ptr = aVar7;
-      if ((int)ah_lmac._rsv_9cc - 2U < 2) {
-        frame_data_ptr->word = frame_data_ptr->word | 0x1000;
-      }
-      tx_desc_ptr = tx_skb->head;
-      if ((tx_desc_ptr[0x26] & 0x10) == 0) {
-ce_start_ok:
-        pBufOrHead = tx_skb->head;
-        if (7 < (pBufOrHead[0x26] & 0xf)) {
-          pBufOrHead[0x26] = pBufOrHead[0x26] & 0xf0 | 7;
-          hgprintf("\x02lmac error!!!*tid= %d\r\n",7);
-          hgics_print_hex(*(undefined4 *)(pBufOrHead + 0x10),0x20);
-        }
-        temp_byte = *(byte *)((pBufOrHead[0x26] & 7) + 0x2004b885);
-        psVar3 = ah_lmac_tx.pTx_ac_queues + (short)(ushort)temp_byte;
-        iVar5 = (int)skb_list_last(psVar3);
-        nAggCheckResult = lmac_check_aggregation(tx_skb,(struct sk_buff *)iVar5);
-        if (nAggCheckResult != 0) {
-          psVar3 = &ah_lmac_tx.tx_status_queue;
-        }
-        skb_list_queue(psVar3,tx_skb);
-        hdr_len = ah_lmac_tx.pTx_agg_count_per_ac[temp_byte];
-        ah_lmac_tx.pTx_agg_count_per_ac[temp_byte] = hdr_len + '\x01';
-        if (((ah_lmac_tx.pTx_agg_count_per_ac[3] == '\0') || (iVar5 != 0)) &&
-           ((ah_lmac_tx.pTx_agg_count_per_ac[2] < ah_lmac.aggcnt >> 1 &&
-            ((byte)(hdr_len + 1) < ah_lmac.aggcnt)))) {
-          if (((uint)tx_desc_ptr & 0x40) == 0) goto process_frame;
-          bVar6 = false;
-agg_check_done:
-          if (!bVar6) goto process_frame;
-        }
-        else if (((uint)tx_desc_ptr & 0x40) != 0) {
-          bVar6 = true;
-          goto agg_check_done;
-        }
+
+        log_debug("tx_task: drain done iter=%u processed=%u queued=%u dropped=%u pending=%u status=%u ac0=%u ac1=%u ac2=%u ac3=%u pend_frames=%u -> final reload",
+                  loop_iter,
+                  processed,
+                  queued,
+                  dropped,
+                  skb_list_count(&ah_lmac_tx_orig.tx_pending_queue),
+                  skb_list_count(&ah_lmac_tx_orig.tx_status_queue),
+                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[0]),
+                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[1]),
+                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[2]),
+                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[3]),
+                  skb_list_count(&ah_lmac_tx_orig.tx_frames_pending_queue));
+
         lmac_tx_data_reload();
-        goto process_frame;
-      }
-      ah_lmac_tx.tx_packet_count_low = ah_lmac_tx.tx_packet_count_low + 1;
-      if (ah_lmac_tx.tx_packet_count_low == 0) {
-        ah_lmac_tx.tx_packet_count_high = ah_lmac_tx.tx_packet_count_high + 1;
-      }
-      if (0xffff < ah_lmac_tx.tx_packet_count_high) {
-        ah_lmac_tx.tx_packet_count_low = 1;
-        ah_lmac_tx.tx_packet_count_high = 0;
-      }
-      if ((tx_desc_ptr[0x24] & 3) == 0) {
-        pn_num_13617 = pn_num_13617 + 1;
-        if (pn_num_13617 == 0) {
-          pn_num_hi = pn_num_hi + 1;
-        }
-        hdr_len = ah_lmac.key0.cipher;
-        if (-1 < (char)tx_desc_ptr[0x26]) {
-          if (*(int *)(tx_desc_ptr + 0xc) == 0) {
-            hgprintf("\x02lmac error!!!null sta for ccmp\r\n");
-            hdr_len = key_id_13616;
-          }
-          else {
-            hdr_len = *(uint8_t *)(*(int *)(tx_desc_ptr + 0xc) + 0x75);
-          }
-        }
-        key_id_13616 = hdr_len;
-        ah_lmac_tx.pCcmp_auth_header[1] = (uint8_t)((uint)pn_num_13617 >> 8);
-        ah_lmac_tx.pCcmp_auth_header[2] = '\0';
-        ah_lmac_tx.pCcmp_auth_header[3] = key_id_13616 << 6 | 0x20;
-        ah_lmac_tx.pCcmp_auth_header[0] = (uint8_t)pn_num_13617;
-        ah_lmac_tx.pCcmp_auth_header[6] = (uint8_t)pn_num_hi;
-        ah_lmac_tx.pCcmp_auth_header[7] = (uint8_t)((uint)pn_num_hi >> 8);
-        ah_lmac_tx.pCcmp_auth_header[4] = (uint8_t)((uint)pn_num_13617 >> 0x10);
-        ah_lmac_tx.pCcmp_auth_header[5] = (uint8_t)((uint)pn_num_13617 >> 0x18);
-        tx_stat_ptr = (ushort *)tx_skb->data;
-        pBufOrHead = tx_skb->head;
-        *(uint16_t *)ah_lmac_tx.pTx_ccmp_aad_additional_data_a =
-             *tx_stat_ptr & 0xc78f | 0x4000;
-        memcpy(ah_lmac_tx.pTx_ccmp_aad_additional_data_a + 2,tx_stat_ptr + 2,0x12);
-        frame_ptr_short = tx_stat_ptr + 0xc;
-        *(uint16_t *)(ah_lmac_tx.pTx_ccmp_aad_additional_data_a + 20) =
-             *(byte *)(*(int *)(pBufOrHead + 0xc) + 0xb9) & 1;
-        if ((*(byte *)(*(int *)(pBufOrHead + 0xc) + 0xb9) & 1) != 0) {
-          *(uint16_t *)(ah_lmac_tx.pTx_ccmp_aad_additional_data_a + 20) =
-               *(ushort *)(pBufOrHead + 0x18) & 0xf;
-        }
-        ah_lmac_tx.pTx_cipher_desc_reserved[0] = '\x16';
-        if ((pBufOrHead[0x25] & 0xc0) == 0xc0) {
-          memcpy(ah_lmac_tx.pTx_ccmp_aad_additional_data_a + 0x16,frame_ptr_short,6);
-          frame_ptr_short = tx_stat_ptr + 0xf;
-          ah_lmac_tx.pTx_cipher_desc_reserved[0] = '\x1c';
-          pBufOrHead = ah_lmac_tx.pTx_ccmp_aad_additional_data_a + 0x1c;
-        }
-        else {
-          pBufOrHead = ah_lmac_tx.pTx_ccmp_aad_additional_data_a + 0x16;
-        }
-        iVar5 = ieee80211_is_data_qos(*(undefined2 *)tx_skb->data);
-        if (iVar5 != 0) {
-          *(uint16_t *)ah_lmac_tx.pTx_ccmp_aad_additional_data_a &= 0x3fff;
-          *pBufOrHead = (uint8_t)*frame_ptr_short;
-          pBufOrHead[1] = *(uint8_t *)((int)frame_ptr_short + 1);
-          ah_lmac_tx.pTx_cipher_desc_reserved[0] = ah_lmac_tx.pTx_cipher_desc_reserved[0] + '\x02';
-        }
-        pBufOrHead = tx_skb->data;
-        lmac_get_tid(pBufOrHead);
-        ah_lmac_tx.pCcmp_auth_nonce[0] = (byte)pBufOrHead & 0xf;
-        memcpy(ah_lmac_tx.pCcmp_auth_nonce + 1,tx_skb->data + 10,6);
-        ah_lmac_tx.pCcmp_auth_nonce[7] = ah_lmac_tx.pCcmp_auth_header[0];
-        ah_lmac_tx.pCcmp_auth_nonce[8] = ah_lmac_tx.pCcmp_auth_header[1];
-        ah_lmac_tx.pCcmp_auth_nonce[9] = ah_lmac_tx.pCcmp_auth_header[4];
-        ah_lmac_tx.pCcmp_auth_nonce[10] = ah_lmac_tx.pCcmp_auth_header[5];
-        ah_lmac_tx.pCcmp_auth_nonce[0xb] = ah_lmac_tx.pCcmp_auth_header[6];
-        ah_lmac_tx.pCcmp_auth_nonce[0xc] = ah_lmac_tx.pCcmp_auth_header[7];
-        pBufOrHead = tx_skb->head;
-        lmac_cfg_tx_ce_para_isra5(pBufOrHead);
-        iVar5 = ah_ce_start(pBufOrHead,&ah_lmac_tx.cipher_engine_descriptor);
-        temp_byte = ah_lmac.key0.key_len;
-        if (-1 < (char)tx_desc_ptr[0x26]) {
-          temp_byte = *(byte *)(*(int *)(tx_desc_ptr + 0xc) + 0x76);
-        }
-        temp_uint = (temp_byte >> 1) + 8;
-        memcpy((void *)(*(int *)(tx_desc_ptr + 0x10) + (uint)tx_desc_ptr[0x2a]),
-               ah_lmac_tx.pCcmp_auth_header,8);
-      }
-      else {
-        ah_lmac_tx.pTx_cipher_desc_reserved[0] = '\x10';
-        temp_uint = (tx_desc_ptr[0x24] & 0xf) >> 2;
-        if (temp_uint < 3) {
-          if (temp_uint == 0) {
-            pBufOrHead = tx_skb->data;
-            if ((tx_desc_ptr[0x25] & 0x40) == 0) {
-              memcpy(ah_lmac_tx.pTx_ccmp_aad_additional_data_b + 2,pBufOrHead + 2,6);
-              pvVar4 = (void *)lmac_convert_sid2mac(*(undefined2 *)(pBufOrHead + 8));
-              memcpy(ah_lmac_tx.pTx_ccmp_aad_additional_data_b + 8,pvVar4,6);
-              if ((pBufOrHead[9] & 0x20) == 0) {
-                if ((tx_desc_ptr[0x26] & 0x20) != 0) {
-                  ah_lmac_tx.pTx_ccmp_aad_additional_data_b[0x10] = '\x02';
-                  ah_lmac_tx.pTx_ccmp_aad_additional_data_b[0x11] = 0xd2;
-                  ah_lmac_tx.pTx_ccmp_aad_additional_data_b[0x12] = 0xe1;
-                  ah_lmac_tx.pTx_ccmp_aad_additional_data_b[0x13] = '(';
-                  ah_lmac_tx.pTx_ccmp_aad_additional_data_b[0x14] = 0xa5;
-                  ah_lmac_tx.pTx_ccmp_aad_additional_data_b[0x15] = '|';
-                  goto ccmp_aad_htc;
-                }
-                __dest = ah_lmac_tx.pTx_ccmp_aad_additional_data_b + 0x10;
-              }
-              else {
-                memcpy(ah_lmac_tx.pTx_ccmp_aad_additional_data_b + 0x10,tx_skb->data + 0xc,6);
-ccmp_aad_htc:
-                ah_lmac_tx.pTx_cipher_desc_reserved[0] =
-                     ah_lmac_tx.pTx_cipher_desc_reserved[0] + '\x06';
-                __dest = ah_lmac_tx.pTx_ccmp_aad_additional_data_b + 0x16;
-              }
-              temp_byte = pBufOrHead[9];
-            }
-            else {
-              memcpy(ah_lmac_tx.pTx_ccmp_aad_additional_data_b + 2,ah_lmac.bssid_or_peer_mac,6);
-              memcpy(ah_lmac_tx.pTx_ccmp_aad_additional_data_b + 8,tx_desc_ptr + 0x1a,6);
-              if ((pBufOrHead[3] & 0x20) == 0) {
-                __dest = ah_lmac_tx.pTx_ccmp_aad_additional_data_b + 0x10;
-              }
-              else {
-                memcpy(ah_lmac_tx.pTx_ccmp_aad_additional_data_b + 0x10,tx_skb->data + 0xc,6);
-                ah_lmac_tx.pTx_cipher_desc_reserved[0] = '\x16';
-                __dest = ah_lmac_tx.pTx_ccmp_aad_additional_data_b + 0x16;
-              }
-              temp_byte = pBufOrHead[3];
-            }
-            if ((temp_byte & 0x40) != 0) {
-              memcpy(__dest,tx_skb->data + 0x12,6);
-              ah_lmac_tx.pTx_cipher_desc_reserved[0] =
-                   ah_lmac_tx.pTx_cipher_desc_reserved[0] + '\x06';
-            }
-            goto ccmp_aad_done;
-          }
-          /* temp_uint == 1 or 2: unsupported PV1 subtype for AAD generation */
-          hgprintf("\x02lmac error!!!generate aad for PV1 MGMT/CTRL not supported!\r\n");
-          /* falls through to after the if-else → after_pv1_aad */
-        }
-        else {
-          if (temp_uint != 3) {
-            hgprintf("\x02lmac error!!!generate aad for invalid PV1 type!\r\n");
-            goto after_pv1_aad;
-          }
-          hgprintf("\x02lmac error!!!not sure about A3/A4, just suppose they are stored in receiver!\r\n");
-          memcpy(ah_lmac_tx.pTx_ccmp_aad_additional_data_b + 2,tx_skb->data + 2,6);
-          memcpy(ah_lmac_tx.pTx_ccmp_aad_additional_data_b + 8,tx_skb->data + 8,6);
-          ah_lmac_tx.pTx_ccmp_aad_additional_data_b[0x10] = '\x02';
-          ah_lmac_tx.pTx_ccmp_aad_additional_data_b[0x11] = 0xd2;
-          ah_lmac_tx.pTx_ccmp_aad_additional_data_b[0x12] = 0xe1;
-          ah_lmac_tx.pTx_ccmp_aad_additional_data_b[0x13] = '(';
-          ah_lmac_tx.pTx_ccmp_aad_additional_data_b[0x14] = 0xa5;
-          ah_lmac_tx.pTx_ccmp_aad_additional_data_b[0x15] = '|';
-          ah_lmac_tx.pTx_cipher_desc_reserved[0] = ah_lmac_tx.pTx_cipher_desc_reserved[0] + '\x06';
-ccmp_aad_done:
-          *(uint16_t *)ah_lmac_tx.pTx_ccmp_aad_additional_data_b =
-               *(ushort *)tx_skb->data & 0x3ff | 0x1000;
-          *(uint16_t *)(ah_lmac_tx.pTx_ccmp_aad_additional_data_b + 14) =
-               *(ushort *)(tx_desc_ptr + 0x18) & 0xf;
-        }
-after_pv1_aad:
-        pBufOrHead = tx_skb->head;
-        pBufOrHead[0x26] = pBufOrHead[0x26] & 0xf0 | 3;
-        ah_lmac_tx.pCcmp_auth_nonce[0] = ' ';
-        memcpy(ah_lmac_tx.pCcmp_auth_nonce + 1,ah_lmac_tx.pTx_ccmp_aad_additional_data_b + 8,6);
-        ah_lmac_tx.pCcmp_auth_nonce[0xc] = '\0';
-        ah_lmac_tx.pCcmp_auth_nonce[0xb] = '\0';
-        ah_lmac_tx.pCcmp_auth_nonce[10] = '\0';
-        ah_lmac_tx.pCcmp_auth_nonce[9] = '{';
-        ah_lmac_tx.pCcmp_auth_nonce[7] = (uint8_t)*(undefined2 *)(pBufOrHead + 0x18);
-        ah_lmac_tx.pCcmp_auth_nonce[8] = (uint8_t)((ushort)*(undefined2 *)(pBufOrHead + 0x18) >> 8);
-        pBufOrHead = tx_skb->head;
-        lmac_cfg_tx_ce_para_isra5(pBufOrHead);
-        iVar5 = ah_ce_start(pBufOrHead,&ah_lmac_tx.cipher_engine_descriptor);
-        temp_byte = ah_lmac.key0.key_len;
-        if (-1 < (char)tx_desc_ptr[0x26]) {
-          temp_byte = *(byte *)(*(int *)(tx_desc_ptr + 0xc) + 0x76);
-        }
-        temp_uint = (uint)(temp_byte >> 1);
-      }
-      skb_put(tx_skb,temp_uint);
-      frame_ctrl_short = tx_skb->len;
-      *(ushort *)(tx_desc_ptr + 0x14) = frame_ctrl_short;
-      aligned_frame_len = frame_ctrl_short + 8;
-      if ((frame_ctrl_short & 3) != 0) {
-        aligned_frame_len = (aligned_frame_len & 0xfffc) + 4;
-      }
-      *(ushort *)(tx_desc_ptr + 0x16) = aligned_frame_len;
-      if (iVar5 == 0) goto ce_start_ok;
-      hgprintf("\x02Func:lmac_encrypt_hdl failed\r\n");
-      goto err_cleanup;
-    }
-    else {
-      hgprintf("\x02lmac error!!!unaligned addr= 0x%x\r\n",(uint)frame_data_ptr);
-      hgics_print_hex(tx_skb->data,tx_skb->len);
-err_set_and_drop:
-      hgprintf("\x02Func:lmac_gen_tx_info failed\r\n");
-    }
-err_cleanup:
-    tx_skb->acked = 0;
-    skb_list_queue(&ah_lmac_tx.tx_frames_pending_queue,tx_skb);
-    os_sema_up(&ah_lmac_tx.tx_status_sem);
-    hgprintf("\x02lmac error!!!tx skb drop\r\n");
-  } while( true );
-reload_and_retry:
-  lmac_tx_data_reload();
-  goto main_loop;
-}
 
+        log_debug("tx_task: final reload done iter=%u pending=%u status=%u ac0=%u ac1=%u ac2=%u ac3=%u pend_frames=%u",
+                  loop_iter,
+                  skb_list_count(&ah_lmac_tx_orig.tx_pending_queue),
+                  skb_list_count(&ah_lmac_tx_orig.tx_status_queue),
+                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[0]),
+                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[1]),
+                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[2]),
+                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[3]),
+                  skb_list_count(&ah_lmac_tx_orig.tx_frames_pending_queue));
+    }
+
+    log_debug("tx_task: exit exit_flag=0x%02x", (uint8_t)ah_lmac_tx_orig.exit_flag);
+    log_debug("lmac_tx_task_min exit!!!\r\n");
+}
 
 void lmac_tx_status_task(void *_arg)
 {
@@ -966,9 +760,9 @@ void lmac_tx_status_task(void *_arg)
   uint32_t send_time;
   lmac_txd *txd;
 
-  while (((byte)ah_lmac_tx.exit_flag & 1) == 0) {
-    os_sema_down(&ah_lmac_tx.tx_status_sem,-1);
-    sk_buff_log = skb_list_dequeue(&ah_lmac_tx.tx_frames_pending_queue);
+  while (((byte)ah_lmac_tx_orig.exit_flag & 1) == 0) {
+    os_sema_down(&ah_lmac_tx_orig.tx_status_sem,-1);
+    sk_buff_log = skb_list_dequeue(&ah_lmac_tx_orig.tx_frames_pending_queue);
     while (sk_buff_log != (sk_buff *)0x0) {
       ah_lmac._rsv_a64[0] = ah_lmac._rsv_a64[0] & 0xfe;
       txd = (lmac_txd *)sk_buff_log->head;
@@ -979,7 +773,7 @@ void lmac_tx_status_task(void *_arg)
       lmac_sta_put((void *)txd->sta_idx_ptr);
       if ((txd->data_beacon_flag & 2) != 0) {
         send_duration = (uint32_t)os_jiffies();
-        send_time = send_duration - skb_start_send_time(sk_buff_log);
+        send_time = send_duration - (int32_t)sk_buff_log->lifetime;
         ah_lmac.send_time_sum = ah_lmac.send_time_sum + send_time;
         if ((int)ah_lmac.last_send_time < (int)send_time) {
           ah_lmac.last_send_time = send_time;
@@ -990,16 +784,538 @@ void lmac_tx_status_task(void *_arg)
       }
       else if (sk_buff_log == (sk_buff *)*(uint32_t *)(ah_lmac._rsv_a64 + 5)) {
         if ((ah_lmac.debug_flags & 8) != 0) {
-          hgprintf("\x02SP_Tx over\r\n");
+          log_debug("\x02SP_Tx over\r\n");
         }
         ah_lmac._rsv_a64[0] = ah_lmac._rsv_a64[0] & 0xef;
       }
       else {
         kfree_skb(sk_buff_log);
       }
-      sk_buff_log = skb_list_dequeue(&ah_lmac_tx.tx_frames_pending_queue);
+      sk_buff_log = skb_list_dequeue(&ah_lmac_tx_orig.tx_frames_pending_queue);
     }
   }
-  hgprintf("\x02%s exit!!!\r\n", "lmac tx status");
+  log_debug("\x02%s exit!!!\r\n", "lmac tx status");
   return;
 }
+
+/* ============================================================
+ * Functions formerly static in the original binary.
+ * Ported from Ghidra decompilation (TXW8301-PHY.elf).
+ * ============================================================ */
+
+/* Raw byte access helpers */
+#define _LM  ((uint8_t *)&ah_lmac)
+#define _LMX ((uint8_t *)&ah_lmac_tx_orig)
+
+/* LMAC HW register at offset from the base stored in *(uint32_t*)0x20006c4c */
+static inline volatile uint32_t *lmac_hw_reg(uint32_t offset)
+{
+    return (volatile uint32_t *)(*(uint32_t *)0x40008000 + offset);
+}
+
+#define LMAC_HW_BASE        0x40008000u
+
+#define LMAC_REG32(off)     (*(volatile uint32_t *)(LMAC_HW_BASE + (off)))
+
+#define LMAC_MACADDRL       LMAC_REG32(0x000)
+#define LMAC_MACADDRH       LMAC_REG32(0x004)
+#define LMAC_AID            LMAC_REG32(0x008)
+#define LMAC_TSFL           LMAC_REG32(0x010)
+#define LMAC_TSFH           LMAC_REG32(0x014)
+#define LMAC_NAV_CNT        LMAC_REG32(0x018)
+#define LMAC_SIFS_INIT      LMAC_REG32(0x01c)
+#define LMAC_BO_CNT0        LMAC_REG32(0x020)
+#define LMAC_BO_CNT1        LMAC_REG32(0x024)
+#define LMAC_FSM_TSF        LMAC_REG32(0x02c)
+#define LMAC_FSM_CFG        LMAC_REG32(0x030)
+#define LMAC_FSM_STAT       LMAC_REG32(0x034)
+#define LMAC_FSM_TSF1       LMAC_REG32(0x038)
+#define LMAC_RAND_GEN       LMAC_REG32(0x03c)
+#define LMAC_COMN_CTRL      LMAC_REG32(0x040)
+#define LMAC_IRQ_EN         LMAC_REG32(0x044)
+#define LMAC_IRQ_PD         LMAC_REG32(0x048)
+#define LMAC_AC_PD          LMAC_REG32(0x04c)
+#define LMAC_FCS_RES        LMAC_REG32(0x054)
+#define LMAC_AGGR_CTRL      LMAC_REG32(0x058)
+#define LMAC_END_TO_LIMIT   LMAC_REG32(0x05c)
+
+#define LMAC_TXVEC1         LMAC_REG32(0x064)
+#define LMAC_TXVEC2         LMAC_REG32(0x068)
+#define LMAC_TXVEC3         LMAC_REG32(0x06c)
+#define LMAC_TXVEC4         LMAC_REG32(0x070)
+
+#define LMAC_TX_STAT        LMAC_REG32(0x074)
+#define LMAC_TX_DLY1        LMAC_REG32(0x078)
+#define LMAC_TX_BYTCNT      LMAC_REG32(0x07c)
+#define LMAC_TX_EOFBYT      LMAC_REG32(0x080)
+#define LMAC_TX_DLY2        LMAC_REG32(0x084)
+#define LMAC_TX_PRBS_GEN    LMAC_REG32(0x088)
+#define LMAC_TX_DLY3        LMAC_REG32(0x08c)
+
+#define LMAC_RX_CTRL        LMAC_REG32(0x0a0)
+#define LMAC_RXVEC1         LMAC_REG32(0x0a4)
+#define LMAC_RXVEC2         LMAC_REG32(0x0a8)
+#define LMAC_RXVEC3         LMAC_REG32(0x0ac)
+#define LMAC_RXVEC4         LMAC_REG32(0x0b0)
+#define LMAC_RX_STAT        LMAC_REG32(0x0b4)
+#define LMAC_CCA_STAT       LMAC_REG32(0x0bc)
+
+#define LMAC_HF_TIMER1      LMAC_REG32(0x0c0)
+#define LMAC_HF_TIMER2      LMAC_REG32(0x0c4)
+#define LMAC_LF_TIMER       LMAC_REG32(0x0c8)
+#define LMAC_TIMER_CTL      LMAC_REG32(0x0cc)
+#define LMAC_HF_TIMER3      LMAC_REG32(0x0d0)
+#define LMAC_HF_TIMER4      LMAC_REG32(0x0d4)
+#define LMAC_HF_TIMER5      LMAC_REG32(0x0d8)
+#define LMAC_HF_TIMER6      LMAC_REG32(0x0dc)
+
+#define LMAC_TEST_CTRL      LMAC_REG32(0x0f8)
+#define LMAC_DBG_CTRL       LMAC_REG32(0x0fc)
+
+#define LMAC_TXDMACTL       LMAC_REG32(0x100)
+#define LMAC_CURTXDMACNT    LMAC_REG32(0x104)
+#define LMAC_TXDMASTAT      LMAC_REG32(0x108)
+
+#define LMAC_RXDMACTL       LMAC_REG32(0x400)
+#define LMAC_RXFSTADDR      LMAC_REG32(0x404)
+#define LMAC_RXFENADDR      LMAC_REG32(0x408)
+#define LMAC_CURRXDMACNT    LMAC_REG32(0x410)
+#define LMAC_RXDMASTAT      LMAC_REG32(0x414)
+#define LMAC_RXFCS1         LMAC_REG32(0x418)
+#define LMAC_RXFCS2         LMAC_REG32(0x41c)
+
+#define LMAC_RXFSTADDR_SEC  LMAC_REG32(0x620)
+#define LMAC_RXFENADDR_SEC  LMAC_REG32(0x624)
+#define LMAC_CCADBGCTL      LMAC_REG32(0x630)
+#define LMAC_CCAINFO1       LMAC_REG32(0x634)
+#define LMAC_CCAINFO2       LMAC_REG32(0x638)
+#define LMAC_CCAINFO3       LMAC_REG32(0x63c)
+#define LMAC_CCAINFO4       LMAC_REG32(0x640)
+#define LMAC_CCAINFO5       LMAC_REG32(0x644)
+#define LMAC_DUMMY1         LMAC_REG32(0x648)
+#define LMAC_DUMMY2         LMAC_REG32(0x64c)
+
+/* ---- lmac_tx_queue_init ----------------------------------------- */
+
+int32 lmac_tx_queue_init(void){
+    int32 ret;
+
+    log_info("initialising TX queues");
+
+    ret = skb_list_init(&ah_lmac_tx_orig.tx_pending_queue);
+    if (ret) {
+        log_fatal("tx_pending_queue init failed ret=%d", ret);
+        return -1;
+    }
+
+    ret = skb_list_init(&ah_lmac_tx_orig.tx_status_queue);
+    if (ret) {
+        log_fatal("tx_status_queue init failed ret=%d", ret);
+        return -1;
+    }
+
+    ret = skb_list_init(&ah_lmac_tx_orig.tx_retry_queue);
+    if (ret) {
+        log_fatal("tx_retry_queue init failed ret=%d", ret);
+        return -1;
+    }
+
+    for (int32_t i = 0; i < 4; i++) {
+        ret = skb_list_init(&ah_lmac_tx_orig.pTx_ac_queues[i]);
+        if (ret) {
+            log_fatal("ac_queue[%d] init failed ret=%d", i, ret);
+            return -1;
+        }
+    }
+
+    ret = skb_list_init(&ah_lmac_tx_orig.tx_frames_pending_queue);
+    if (ret) {
+        log_fatal("tx_frames_pending_queue init failed ret=%d", ret);
+        return -1;
+    }
+
+    log_info("done, tx_ctx base=0x%08x", (uint32_t)_LMX);
+    return ret;
+}
+
+/* ---- lmac_check_aggregation ------------------------------------- */
+
+int32 lmac_check_aggregation(struct sk_buff *skb0, struct sk_buff *skb1)
+{
+    uint8_t *txd0, *txd1;
+    uint8_t b0, b1;
+
+    if (!skb0 || !skb1) {
+        log_trace("check_agg: null skb skb0=%p skb1=%p -> -1", skb0, skb1);
+        return -1;
+    }
+
+    txd0 = skb0->head;
+    txd1 = skb1->head;
+
+    if (!txd0 || !txd1) {
+        log_warn("check_agg: null head txd0=%p txd1=%p -> -1", txd0, txd1);
+        return -1;
+    }
+
+    if ((*(uint32_t *)(txd0 + 0x08) & 1u) != 0) return -1;  /* dup flag */
+    if ((*(uint32_t *)(txd1 + 0x08) & 1u) != 0) return -1;
+    if ((txd0[0x27] & 0x08) != 0) return -1;  /* data_beacon_flag: not-data */
+    if ((txd1[0x27] & 0x08) != 0) return -1;
+    if (((txd0[0x25] ^ txd1[0x25]) & 0x40) != 0) return -1;  /* ack policy */
+    if ((int8_t)txd0[0x3c] != (int8_t)txd1[0x3c]) return -1; /* bw */
+    if ((int8_t)txd0[0x3d] != (int8_t)txd1[0x3d]) return -1; /* mcs */
+    if (((txd0[0x3f] ^ txd1[0x3f]) & 0x60) != 0) return -1;  /* rate_flags */
+    if (((txd0[0x26] ^ txd1[0x26]) & 0x0f) != 0) return -1;  /* tid/AC */
+
+    if (!ieee80211_is_data(*(uint16_t *)skb0->data)) return -1;
+    if (!ieee80211_is_data(*(uint16_t *)skb1->data)) return -1;
+
+    /* Reject QoS-null aggregation (0x188 = data|qos|null subtype) */
+    if ((*(uint16_t *)(txd0 + 0x24) & 0x1fc) == 0x188) return -1;
+
+    b0 = txd0[0x1a];
+    b1 = txd1[0x1a] ^ b0;
+    if ((b1 & 1) != 0) return -1;  /* addr mismatch */
+    if ((b0 & 1) != 0) {
+        log_trace("check_agg: mcast aggregate OK skb0=%p skb1=%p", skb0, skb1);
+        return 0;
+    }
+
+    if (*(uint16_t *)(txd0 + 0x1a) != *(uint16_t *)(txd1 + 0x1a)) return -1;
+    if (*(uint32_t *)(txd0 + 0x1c) != *(uint32_t *)(txd1 + 0x1c)) return -1;
+
+    log_trace("check_agg: ucast aggregate OK skb0=%p skb1=%p", skb0, skb1);
+    return 0;
+}
+
+/* ---- seq_num_space_update --------------------------------------- */
+
+uint32 seq_num_space_update(void *sta, uint32 tid)
+{
+    uint8_t *tx = _LMX;
+    uint32_t sn, next;
+
+    if (sta == NULL) {
+        /* Broadcast/management: use global counter at ah_lmac_tx_orig+0x6cc */
+        sn   = *(uint32_t *)(tx + 0x6cc) & 0xffff;
+        next = (*(uint32_t *)(tx + 0x6cc) + 1) & 0xfff;
+        *(uint32_t *)(tx + 0x6cc) = (next == 0xfff) ? 0 : next;
+    } else {
+        /* Per-STA per-TID counter at sta+0x152+tid*0x10 */
+        uint16_t *p = (uint16_t *)((uint8_t *)sta + tid * 0x10 + 0x152);
+        sn = (uint32_t)*p;
+        *p = (*p + 1) & 0xfff;
+    }
+    return sn;
+}
+static const uint8_t ieee802_1d_to_ac_tbl[8] = {
+    0, 1, 1, 0, 2, 2, 3, 3
+};
+
+#define LMAC_AC_PD (*(volatile uint32_t *)0x4000804cu)
+
+void lmac_tx_data_reload(void)
+{
+    struct skb_list *src_queue = &ah_lmac_tx_orig.tx_status_queue;
+    struct sk_buff *skb;
+    uint32_t moved = 0;
+
+    while ((skb = skb_list_dequeue(src_queue)) != NULL) {
+        uint8_t tid = 0;
+        uint8_t ac;
+
+        if (skb->head != NULL) {
+            tid = skb->head[0x26] & 7;
+        }
+
+        ac = ieee802_1d_to_ac_tbl[tid];
+
+        if (ac > 3) {
+            ac = 0;
+        }
+
+        skb_list_queue(&ah_lmac_tx_orig.pTx_ac_queues[ac], skb);
+        ah_lmac_tx_orig.pTx_agg_count_per_ac[ac]++;
+        moved++;
+    }
+
+    if (skb_list_count(src_queue) == 0) {
+        ah_lmac.tx_state_7ac++;
+    }
+
+    LMAC_AC_PD = 0;
+    LMAC_AC_PD = 0xf;
+
+    if (moved != 0) {
+        log_debug("reload_min: moved=%u status_q=%u ac0=%u ac1=%u ac2=%u ac3=%u pend=%u",
+                  moved,
+                  skb_list_count(&ah_lmac_tx_orig.tx_status_queue),
+                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[0]),
+                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[1]),
+                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[2]),
+                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[3]),
+                  skb_list_count(&ah_lmac_tx_orig.tx_frames_pending_queue));
+    }
+}
+
+/* ---- lmac_tx_pv0_mgmt ------------------------------------------- */
+
+int32 lmac_tx_pv0_mgmt(struct sk_buff *skb)
+{
+    uint8_t *lm  = _LM;
+    uint8_t *txd = skb->head;
+    uint16_t fc  = *(uint16_t *)skb->data;
+    log_debug("pv0_mgmt: skb=%p txd=%p fc=0x%04x subtype=%u",
+              skb, txd, fc, (fc >> 4) & 0xf);
+
+    /* If this is the beacon skb: set wide-bw flag based on bss_bw, mark retransmit */
+    if ((uint32_t)skb == *(uint32_t *)(lm + 0xa54)) {
+        txd[0x25] = (txd[0x25] & 0xdf) | (uint8_t)((1 < lm[0x308]) << 5);
+        *(uint32_t *)(txd + 0x08) |= 9u;
+    }
+
+    /* Clear protected-frame flag for broadcast/group frames */
+    if ((*(uint32_t *)(txd + 0x04) & 2u) != 0 && (int8_t)txd[0x26] >= 0)
+        txd[0x25] &= 0xfd;
+
+    /* Frame subtype check for BSS announcement / probe response */
+    uint32_t subtype = (*(uint16_t *)(txd + 0x24) & 0xff) >> 5;
+    if (subtype == 5) {
+        /* Probe response: scan IE list (no state change needed here) */
+    } else if (subtype == 0xd &&
+               (*(uint8_t *)((uint8_t *)skb + 0x2a) & 0x40) != 0 &&
+               (*(uint16_t *)(txd + 0x24) & 0x1ff) == 0x1a0) {
+        /* BSS announcement frame */
+        uint8_t *sta = (uint8_t *)*(uint32_t *)(txd + 0x10);
+        if (*(int8_t *)(sta + 0x18) == (int8_t)0xdd) {
+            if ((*(int8_t *)(sta + 0x1a) == 0) &&
+                (*(int8_t *)(sta + 0x1b) == 0x40) &&
+                (*(int8_t *)(sta + 0x1c) == 1) &&
+                (*(int8_t *)(sta + 0x1f) == 2)) {
+                /* Rotate frequency index */
+                uint8_t *freq_idx = lm + 0x430; /* bss_ann_freq_idx */
+                uint8_t  new_idx  = *freq_idx + 1;
+                *(uint32_t *)(txd + 0x08) |= 5u;
+                txd[0x3f] = (txd[0x3f] & 0xe0) | (new_idx & 0x1f);
+                *freq_idx  = new_idx;
+                if (lm[0x378] <= new_idx) *freq_idx = 0;
+            }
+        } else if (*(int8_t *)(sta + 0x18) == 0x27) {
+            *(uint32_t *)(txd + 0x08) |= 3u;
+        }
+    }
+    return 0;
+}
+
+/* ---- lmac_tx_pv0_ctrl ------------------------------------------- */
+
+int32 lmac_tx_pv0_ctrl(struct sk_buff *skb)
+{
+    uint8_t *lm  = _LM;
+    uint8_t *txd = skb->head;
+    log_debug("pv0_ctrl: skb=%p txd=%p fc=0x%04x", skb, txd, *(uint16_t *)skb->data);
+
+    if ((*(uint8_t *)((uint8_t *)skb + 0x2a) & 0x40) != 0 &&
+        (*(uint16_t *)(txd + 0x24) & 0x1e0) == 0x160) {
+        /* Antenna-probing packet (subtype = 0xb) */
+        uint8_t *ant_cnt = lm + 0x430; /* ant_cnt field */
+        uint8_t  cnt     = *ant_cnt;
+        uint8_t  opt     = lm[0x875];
+
+        *(uint32_t *)(txd + 0x08) |= 0x11u;
+        txd[0x28] = (int8_t)(lm[0x313] - 1);
+        log_debug("\x02lmac ant sel: cnt=%d, opt=%d/%d\r\n",
+                 (uint32_t)cnt, (opt >> 3) & 1, (opt >> 4) & 1);
+
+        /* Toggle antenna bit */
+        txd[0x3f] = (txd[0x3f] & 0x9f) |
+                    ((uint8_t)((cnt & 1) ? 3u : 0u) << 5);
+        txd[0x25] &= 0xfd;
+        *ant_cnt = cnt + 1;
+    }
+
+    txd[0x27] = (txd[0x27] & 0xfe) | 1; /* mark as ctrl */
+    return 0;
+}
+
+/* ---- lmac_tx_pv0_data ------------------------------------------- */
+int32 lmac_tx_pv0_data(struct sk_buff *skb)
+{
+    uint8_t *txd = skb->head;
+    uint8_t *frame = skb->data;
+
+    log_debug("pv0_data_min: skb=%p txd=%p data=%p len=%u",
+              skb, txd, frame, skb->len);
+
+    frame[1] &= 0xbf;
+    txd[0x26] &= 0xef;
+
+    return 0;
+}
+
+/* ---- lmac_tx_pv0_ext -------------------------------------------- */
+
+int32 lmac_tx_pv0_ext(struct sk_buff *skb)
+{
+    uint8_t ext_type = *(uint8_t *)skb->data >> 4;
+
+    log_debug("pv0_ext: skb=%p ext_type=%u", skb, ext_type);
+
+    if (ext_type == 0) {
+        log_error("pv0_ext: unsupported ext type 0");
+        log_debug("\x02lmac error!!!%s: unsupported ext type 0\r\n", __func__);
+    } else if (ext_type == 1) {
+        log_info("pv0_ext: S1G beacon, invoking lmac_tx_pv0_s1g_beacon");
+        lmac_tx_pv0_s1g_beacon(skb);
+    } else if (ext_type != 0xf) {
+        log_error("pv0_ext: unknown ext type %u", ext_type);
+        log_debug("\x02lmac error!!!unknown ext type\r\n");
+        return -1;
+    }
+    return 0;
+}
+
+/* ---- lmac_tx_pv0_s1g_beacon ------------------------------------- */
+/* Decompiled from lmac_tx_pv0_s1g_beacon_orig @ 0x20036dfc */
+
+void lmac_tx_pv0_s1g_beacon(struct sk_buff *skb)
+{
+    uint8_t *lm   = _LM;
+    uint8_t *data = skb->data;
+    uint8_t *tail = skb->tail;
+    log_info("s1g_beacon: skb=%p data=%p tail=%p len=%u", skb, data, tail, skb->len);
+    uint8_t  b1   = data[1];
+    uint8_t *ie;
+
+    /* Store change-sequence / beacon control byte */
+    lm[0x3f0] = data[0x0e];
+
+    /* Extra IEs: reset length field */
+    uint8_t *extra_ies = lm + 0x3f0;
+    extra_ies[1] = 0;
+    extra_ies[2] = 0;
+
+    /* Copy BSSID into extra-IE header from mac_addr (lm+0x302) */
+    memcpy(extra_ies + 0x136, lm + 0x302, 6);
+
+    /* Skip fixed fields to reach IEs */
+    if ((b1 & 1) == 0)
+        ie = data + 0x0f;
+    else
+        ie = data + 0x12;
+    if (b1 & 2) ie += 4;
+    if (b1 & 4) ie += 1;
+
+    /* Set s1g_compat_info bits [6:8] = 7 (0x1c0) — field at lm+0x9de */
+    *(uint16_t *)(lm + 0x9de) = (*(uint16_t *)(lm + 0x9de) & 0xfe3f) | 0x1c0;
+
+    /* Walk IEs */
+    while (1) {
+        if (ie >= tail) {
+            /* All IEs processed — finalise and enqueue */
+            /* Write TSF from beacon frame (data[6..9]) into LMAC HW reg+0x3c,
+             * then use it to update beacon_airtime at ah_lmac+0x656 */
+            volatile uint32_t *tsf_reg = lmac_hw_reg(0x3c);
+            *tsf_reg = *(uint32_t *)(data + 6);
+            uint32_t ai = ((uint32_t)*(uint16_t *)(lm + 0x656) +
+                           (*tsf_reg % 20u)) & 0xffff;
+            *(uint16_t *)(lm + 0x656) = (uint16_t)ai;
+            *(uint32_t *)(lm + 0x658) = (ai & 0xffff) << 10;
+
+            *(uint8_t *)((uint8_t *)skb + 0x2a) =
+                (*(uint8_t *)((uint8_t *)skb + 0x2a) & 0xef) | 0x10;
+            log_info("s1g_beacon: IE walk done, beacon_interval=%u ai=%u, enqueue to tx_status_queue",
+                     *(uint16_t *)(lm + 0x656), (uint32_t)*(uint16_t *)(lm + 0x656));
+            memset(skb->head, 0, 0x44);
+            skb_list_queue((struct skb_list *)(_LMX + 0x70), skb);
+            os_sema_up(&ah_lmac_tx_orig.tx_status_sem);
+
+            if ((lm[0x9de] & 0x20) == 0) {
+                lmac_beacon_timer_start(1000);
+                lm[0x9de] = (lm[0x9de] & 0xdf) | 0x20;
+                lm[0x9df] = lm[0x9df] & 0xdf;
+            }
+
+            uint32_t bc = *(uint32_t *)(lm + 0xbc);
+            if (bc == 0)
+                *(uint32_t *)(lm + 0xbc) = 2;
+            else if (bc == 1)
+                *(uint32_t *)(lm + 0xbc) = 3;
+            return;
+        }
+
+        uint8_t id  = ie[0];
+        uint8_t len = ie[1];
+        log_trace("s1g_beacon: IE id=0x%02x len=%u ie=%p tail=%p", id, len, ie, tail);
+
+        if (id == 0x0c) {
+            /* BSS Load IE */
+            memcpy(extra_ies + 0x112, ie + 2, 0x12);
+        } else if (id == 0x00) {
+            /* SSID */
+            if (len < 0x21) {
+                memcpy(lm + 0x52c, ie, (size_t)(len + 2));
+                lm[0x52c + len + 2] = 0; /* null-terminate */
+            }
+        } else if (id == 0x05) {
+            /* TIM */
+            lm[0x554] = ie[1];
+            lm[0x556] = ie[3];
+            lm[0x557] = ie[4] & 1;
+            memcpy(lm + 0x559, ie + 4, (size_t)(len - 2));
+        } else if (id == 0xd6) {
+            /* S1G Operation IE: beacon interval */
+            uint16_t bint = *(uint16_t *)(ie + 2);
+            *(uint16_t *)(lm + 0x656) = bint;
+            *(uint32_t *)(lm + 0x658) = (uint32_t)bint << 10;
+        } else if (id == 0xd9) {
+            /* S1G Capabilities */
+            if (len == 0x0f) {
+                memcpy(lm + 0x3f4, ie + 2, 0x0f);
+                uint8_t combined = data[7] + data[8] + data[9];
+                lm[0x668] = (lm[0x668] & 0xf8) | (combined & 7);
+                ie[10]    = (ie[10] & 0xe3) | ((combined & 7) << 2);
+            } else {
+                log_debug("\x02lmac error!!!S1G CAP len=%d\r\n", (uint32_t)len);
+            }
+        } else if (id == 0xd5) {
+            /* S1G Short Beacon Interval */
+            if (len == 0x08) {
+                *(uint16_t *)(lm + 0x654) = *(uint16_t *)(ie + 2);
+                *(uint16_t *)(lm + 0x656) = *(uint16_t *)(ie + 4);
+            } else {
+                log_debug("\x02lmac error!!!S1G SBI len=%d\r\n", (uint32_t)len);
+            }
+        } else {
+            /* Generic IE: append to extra_ies data buffer */
+            uint32_t used = (*(uint32_t *)(lm + 0x3f0) & 0x7fffff) >> 8;
+            if (used + (uint32_t)len <= 0xfdu) {
+                memcpy((void *)(used + (uint32_t)(lm + 0x3f3)), ie,
+                       (size_t)(len + 2));
+                uint32_t new_used = used + len + 2;
+                extra_ies[1] = (uint8_t)(new_used & 0xff);
+                extra_ies[2] = (uint8_t)(new_used >> 8);
+            } else {
+                log_debug("\x02lmac error!!!extra IE overflow\r\n");
+            }
+        }
+        ie += len + 2;
+    }
+}
+
+/* ---- PV1 handlers (trivial stubs from binary) ------------------- */
+
+int32 lmac_tx_pv1_data1(struct sk_buff *skb) { log_trace("pv1_data1: skb=%p", skb); (void)skb; return 0; }
+int32 lmac_tx_pv1_data2(struct sk_buff *skb) { log_trace("pv1_data2: skb=%p", skb); (void)skb; return 0; }
+int32 lmac_tx_pv1_mgmt(struct sk_buff *skb)  { log_trace("pv1_mgmt:  skb=%p", skb); (void)skb; return 0; }
+
+int32 lmac_tx_pv1_ctrl(struct sk_buff *skb)
+{
+    log_debug("pv1_ctrl: skb=%p head=%p", skb, skb->head);
+    skb->head[0x27] = (skb->head[0x27] & 0xfe) | 1; /* set ctrl bit */
+    return 0;
+}
+
+#undef _LM
+#undef _LMX

@@ -273,11 +273,46 @@ bool boot_recovery_check( void ){
     return false;
 }
 
-static int32 sys_blink_work(struct os_work *work) {
-    static bool active = 0;
+char test_send[] = "test_send";
+
+#define TEST_LEN 512
+
+static int32 sys_blink_work(struct os_work *work)
+{
+    static bool active;
+    static uint8_t pkt[TEST_LEN];
+    static uint32_t n, bytes, inited;
+    static int64_t t0;
+    int64_t now;
+    int32 ret;
+
+    if (!inited) {
+        for (uint32_t i = 0; i < TEST_LEN; i++) pkt[i] = i;
+        t0 = get_time_ms();
+        inited = 1;
+    }
+
     active = !active;
     indication_led_main_set(active);
-    os_run_work_delay(work, active ? 20 : 4980);
+
+    ret = halow_tx(pkt, TEST_LEN, mac_broadcast);
+    if (ret == 0) {
+        n++;
+        bytes += TEST_LEN;
+    }
+
+    now = get_time_ms();
+    if (now - t0 >= 1000) {
+        log_debug("tx: %u pkt/s %u KB/s ret=%d",
+                  (uint32_t)((n * 1000) / (now - t0)),
+                  (uint32_t)((bytes * 1000) / (now - t0) / 1024),
+                  ret);
+        n = 0;
+        bytes = 0;
+        t0 = now;
+    }
+
+    os_run_work_delay(work, 0);
     return 0;
 }
 

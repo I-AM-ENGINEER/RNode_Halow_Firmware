@@ -2386,7 +2386,7 @@ Board: txw4002a
         <File Name="../sdk/lib/lmac/mars_rfdigicali.c" ExcludeProjConfig="BuildSet">
           <FileOption/>
         </File>
-        <File Name="../sdk/lib/lmac/mars_lmac_tx.c" ExcludeProjConfig="BuildSet">
+        <File Name="../sdk/lib/lmac/mars_lmac_tx.c" ExcludeProjConfig="">
           <FileOption/>
         </File>
         <File Name="../sdk/lib/lmac/mars_lmac_tx_orig.c">

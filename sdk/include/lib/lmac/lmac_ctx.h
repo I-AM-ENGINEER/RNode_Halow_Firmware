@@ -34,46 +34,46 @@ typedef struct ah_ce_cfg {
     uint16_t       data_len;   // [0x16] data length (must be < 16385)
     uint32_t       src_addr;   // [0x18]
     uint32_t       dst_addr;   // [0x1C]
-} ah_ce_cfg_t;
+} __attribute__((packed)) ah_ce_cfg_t;
 
 struct lmac_ctx_key {
     uint8_t cipher;
     uint8_t key_len;
     uint8_t key[32];
-};
+} __attribute__((packed));
 
 struct lmac_ctx_extra_ies {
     uint8_t s1g_beacon_hdr_field;
     uint16_t len_flags;
     uint8_t data[256];
-};
+} __attribute__((packed));
 
 #define undefined uint8_t
 
 struct ah_ce_ctx {
     uint8_t _opaque[184];
-};
+} __attribute__((packed));
 
 struct lmac_chan_candidate {
     uint8_t _opaque[24];
-};
+} __attribute__((packed));
 
 struct lmac_ctx_s1g_capabilities {
     uint8_t capabilities_info[10];
     uint8_t mcs_nss_set[5];
-};
+} __attribute__((packed));
 
 struct lmac_ctx_ssid {
     uint8_t eid;
     uint8_t len;
     uint8_t ssid[32];
-};
+} __attribute__((packed));
 
 struct lmac_ctx_edca_ac_param {
     uint8_t aci_aifsn;
     uint8_t ecw_min_max;
     uint16_t txop_limit;
-};
+} __attribute__((packed));
 
 struct lmac_ctx_edca_params {
     uint8_t qos_info;
@@ -82,22 +82,22 @@ struct lmac_ctx_edca_params {
     struct lmac_ctx_edca_ac_param ac_bk;
     struct lmac_ctx_edca_ac_param ac_vi;
     struct lmac_ctx_edca_ac_param ac_vo;
-};
+} __attribute__((packed));
 
 struct pv0_pspoll_frame {
     uint8_t _opaque[16];
-};
+} __attribute__((packed));
 
 typedef struct lmac_ah_cipher_ctx {
     volatile uint32_t   *base_addr;    // [0x00] CE hardware register base
     struct os_mutex      mutex;        // [0x04] access mutex (8 bytes)
     struct os_semaphore  sema;         // [0x0C] completion semaphore (8 bytes)
     uint32_t             irq_num;      // [0x14] interrupt number
-} lmac_ah_cipher_ctx_t;
+} __attribute__((packed)) lmac_ah_cipher_ctx_t;
 
 struct pv0_cfend_frame {
     uint8_t _opaque[16];
-};
+} __attribute__((packed));
 
 struct rx_vendor_bss_cache_entry {
     uint32_t key;
@@ -107,7 +107,7 @@ struct rx_vendor_bss_cache_entry {
     int8_t best_rssi_or_metric;
     uint8_t ie_param3;
     uint8_t unknown[3];
-};
+}; __attribute__((packed))
 
 struct lmac_ctx {
     struct lmac_ops *ops;
@@ -708,41 +708,27 @@ struct lmac_ctx {
     undefined field595_0xbc1;
     undefined field596_0xbc2;
     uint8_t rx_frame_flag;
-};
+} __attribute__((packed));
 
 typedef struct lmac_tx_ctx lmac_tx_ctx_t;
 
 
-struct lmac_tx_ctx_buff {
-    struct sk_buff *field0_0x0[64];
-    uint32_t field1_0x100;
-    undefined field2_0x104;
-    undefined field3_0x105;
-    undefined field4_0x106;
-    undefined field5_0x107;
-    int16_t field6_0x108;
-    int16_t field7_0x10a;
-    uint8_t field8_0x10c;
-    undefined field9_0x10d;
-    undefined field10_0x10e;
-    undefined field11_0x10f;
-    undefined field12_0x110;
-    undefined field13_0x111;
-    undefined field14_0x112;
-    undefined field15_0x113;
-    undefined field16_0x114;
-    undefined field17_0x115;
-    undefined field18_0x116;
-    undefined field19_0x117;
-    undefined field20_0x118;
-    undefined field21_0x119;
-    undefined field22_0x11a;
-    undefined field23_0x11b;
-    undefined field24_0x11c;
-    undefined field25_0x11d;
-    undefined field26_0x11e;
-    undefined field27_0x11f;
-};
+typedef struct lmac_tx_ctx_buff {
+    struct sk_buff *skb_list[64];      /* 0x000 */
+
+    uint32_t total_len_bytes;          /* 0x100 */
+    uint32_t symbol_len;               /* 0x104 */
+
+    int16_t first_seq;                 /* 0x108 */
+    int16_t last_seq;                  /* 0x10a */
+
+    uint8_t selected_count;            /* 0x10c */
+    uint8_t queued_count;              /* 0x10d */
+    uint8_t rate_cfg;                  /* 0x10e */
+    uint8_t reserved_10f;              /* 0x10f */
+
+    uint8_t reserved_110[0x10];        /* 0x110..0x11f */
+} __attribute__((packed)) lmac_tx_ctx_buff;
 
 struct lmac_tx_vector {
     byte flags0; // .[0:4]=0 (clear), .[6]=mcs_hi (читается как (>>6)&1)
@@ -752,7 +738,7 @@ struct lmac_tx_vector {
     uint32_t tx_symbol_len;
     uint32_t ctrl_word_lo;
     uint32_t ctrl_word_hi;
-};
+} __attribute__((packed));
 
 struct lmac_ce_desc {
     uint32_t key_ptr;
@@ -768,7 +754,7 @@ struct lmac_ce_desc {
     uint16_t payload_len;
     uint32_t in_ptr;
     uint32_t out_ptr;
-};
+} __attribute__((packed));
 
 struct lmac_tx_ctx {
     uint32_t exit_flag;
@@ -814,7 +800,7 @@ struct lmac_tx_ctx {
     byte bTx_aad_length_padding;
     uint32_t broadcast_seq_number; // 12-битный SN-счётчик bcast/mgmt
     uint32_t next_dtim_timestamp_us; // обновляется при каждой передаче beacon'а
-};
+} __attribute__((packed));
 
 
 /* ============================================================================
@@ -822,7 +808,7 @@ struct lmac_tx_ctx {
    ========================================================================== */
 
 extern lmac_ctx_t           ah_lmac;           // main context
-extern lmac_tx_ctx_t        ah_lmac_tx;        // TX subsystem
+//extern lmac_tx_ctx_t        ah_lmac_tx;        // TX subsystem
 //extern lmac_ah_rx_ctx_t   ah_lmac_rx;        // RX subsystem
 //extern lmac_dsleep_ctx_t  ah_dsleep;         // deep-sleep
 extern lmac_ops_t         ah_ops;            // device vtable
