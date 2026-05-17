@@ -125,7 +125,8 @@ typedef struct {
     volatile uint32 RF_CTRL;         /* 0x040: RF switch, TX/RX, PA, DAC */
     volatile uint32 IRQ_EN;          /* 0x044: Interrupt enable mask */
     volatile uint32 IRQ_CLR;         /* 0x048: Interrupt clear */
-    volatile uint32 RESERVED_04C[4]; /* 0x04c..0x05b */
+    volatile uint32 AC_PD;           /* 0x04c: AC-queue pending register */
+    volatile uint32 RESERVED_050[3]; /* 0x050..0x05b */
     volatile uint32 END_TO_LIMIT;    /* 0x05c: End-timeout limit */
     volatile uint32 RESERVED_060[6]; /* 0x060..0x077 */
     volatile uint32 TX_DELAY_BEFORE; /* 0x078: Three 5-bit TX pre-delay lanes */
