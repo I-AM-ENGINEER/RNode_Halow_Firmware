@@ -386,7 +386,7 @@ __init int main(void) {
     log_debug("OS_WORK_INIT stats");
     OS_WORK_INIT(&stats_wk, sys_stats_work,0);
     log_debug("os_run_work_delay blink");
-    os_run_work_delay(&blink_wk, 1000);
+    //os_run_work_delay(&blink_wk, 1000);
     log_debug("sysheap_collect_init");
     sysheap_collect_init(&sram_heap, (uint32)&__sinit, (uint32)&__einit);
     log_info("Init done");

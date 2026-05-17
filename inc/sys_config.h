@@ -171,7 +171,7 @@
 #define LOG_LEVEL_UART_SLIP                     (LOG_NONE)
 #define LOG_LEVEL_HALOW_PKG_HANDLER             (LOG_NONE)
 #define LOG_LEVEL_MARS_LMAC_HW                  (LOG_NONE)
-#define LOG_LEVEL_MARS_LMAC_TX                  (LOG_DEBUG)
+#define LOG_LEVEL_MARS_LMAC_TX                  (LOG_TRACE)
 #define LOG_LEVEL_MARS_RFSPI                    (LOG_NONE)
 #define LOG_LEVEL_MARS_TDMA                     (LOG_NONE)
 #define LOG_LEVEL_LMAC_RXQ                      (LOG_NONE)

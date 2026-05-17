@@ -58,27 +58,27 @@ void lmac_irq_ac_pd(void) {
 
     n++;
 
-    if ((n & 0x3f) == 0) {
-        log_trace("irq_ac_pd n=%u ac0=%u ag0_q=%u ag0_sel=%u pend=%u pd=0x%08x",
-                  n,
-                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[0]),
-                  ah_lmac_tx_orig.pTx_ac_aggr_data[0].queued_count,
-                  ah_lmac_tx_orig.pTx_ac_aggr_data[0].selected_count,
-                  skb_list_count(&ah_lmac_tx_orig.tx_frames_pending_queue),
-                  LMAC_HW->AC_PD);
-    }
+//    if ((n & 0x3f) == 0) {
+//        log_trace("irq_ac_pd n=%u ac0=%u ag0_q=%u ag0_sel=%u pend=%u pd=0x%08x",
+//                  n,
+//                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[0]),
+//                  ah_lmac_tx_orig.pTx_ac_aggr_data[0].queued_count,
+//                  ah_lmac_tx_orig.pTx_ac_aggr_data[0].selected_count,
+//                  skb_list_count(&ah_lmac_tx_orig.tx_frames_pending_queue),
+//                  LMAC_HW->AC_PD);
+//    }
 
     lmac_irq_ac_pd_orig();
-
-    if ((n & 0x3f) == 0) {
-        log_trace("irq_ac_pd exit n=%u ac0=%u ag0_sel=%u first=%p pend=%u pd=0x%08x",
-                  n,
-                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[0]),
-                  ah_lmac_tx_orig.pTx_ac_aggr_data[0].selected_count,
-                  ah_lmac_tx_orig.pTx_ac_aggr_data[0].skb_list[0],
-                  skb_list_count(&ah_lmac_tx_orig.tx_frames_pending_queue),
-                  LMAC_HW->AC_PD);
-    }
+//
+//    if ((n & 0x3f) == 0) {
+//        log_trace("irq_ac_pd exit n=%u ac0=%u ag0_sel=%u first=%p pend=%u pd=0x%08x",
+//                  n,
+//                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[0]),
+//                  ah_lmac_tx_orig.pTx_ac_aggr_data[0].selected_count,
+//                  ah_lmac_tx_orig.pTx_ac_aggr_data[0].skb_list[0],
+//                  skb_list_count(&ah_lmac_tx_orig.tx_frames_pending_queue),
+//                  LMAC_HW->AC_PD);
+//    }
 }
 
 
@@ -160,10 +160,10 @@ static void lmac_tx_task(void *_arg) {
 
         loop_iter++;
         sema_result = os_sema_down(&ah_lmac_tx_orig.tx_sem, 1);
-
-        log_trace("tx_task: wake iter=%u sema=%d pending=%u",
-                  loop_iter, sema_result,
-                  skb_list_count(&ah_lmac_tx_orig.tx_pending_queue));
+//
+//        log_trace("tx_task: wake iter=%u sema=%d pending=%u",
+//                  loop_iter, sema_result,
+//                  skb_list_count(&ah_lmac_tx_orig.tx_pending_queue));
 
         if (sema_result == 0) {
             lmac_tx_data_reload();

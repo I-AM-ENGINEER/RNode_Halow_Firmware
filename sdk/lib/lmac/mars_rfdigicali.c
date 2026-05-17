@@ -6,16 +6,19 @@ extern void os_sleep_ms(uint32 ms);
 extern void os_sleep_us(uint32 us);
 
 #define RFDIGI LMAC_RFDIGICALI
-#define RFDIGI_RX_LO_WORD(index_) (RFDIGI->RX_SLOT_LO[(index_)])
-#define RFDIGI_RX_HI_WORD(index_) (*(volatile uint32_t *)(LMAC_RFDIGICALI_BASE_ADDR + LMAC_RFDIGI_RX_HI_BASE + ((index_) * 4U)))
-#define RFDIGI_TX_WORD(index_) (RFDIGI->TX_SLOT[(index_)])
+#define RFDIGI_RX_LO_WORD(index_) (((volatile uint32_t *)&RFDIGI->RX1MDC0)[(index_)])
+#define RFDIGI_RX_LO_PHASE_WORD_OFFSET 6U
+#define RFDIGI_RX_HI_WORD(index_) (((volatile uint32_t *)&RFDIGI->RXFBDC0)[(index_)])
+#define RFDIGI_RX_HI_PHASE_WORD_OFFSET 6U
+#define RFDIGI_TX_DC_WORD(index_) (((volatile uint32_t *)&RFDIGI->TXDC0)[(index_)])
+#define RFDIGI_TX_IMB_WORD(index_) (((volatile uint32_t *)&RFDIGI->TXIMB0)[(index_)])
 
 void ah_rfdigicali_bknoise_calc_dis(void) {
-    LMAC_CLEAR_BIT(RFDIGI->BKNOISE_CTRL, LMAC_RFDIGI_BKNOISE_CLR | LMAC_RFDIGI_BKNOISE_EN);
+    LMAC_CLEAR_BIT(RFDIGI->RFPWRCON0, LMAC_RFDIGI_BKNOISE_CLR | LMAC_RFDIGI_BKNOISE_EN);
 }
 
 void ah_rfdigicali_bknoise_calc_en(void) {
-    LMAC_SET_BIT(RFDIGI->BKNOISE_CTRL, LMAC_RFDIGI_BKNOISE_EN);
+    LMAC_SET_BIT(RFDIGI->RFPWRCON0, LMAC_RFDIGI_BKNOISE_EN);
 }
 
 int8_t ah_rfdigicali_bknoise_get(void) {
@@ -24,22 +27,22 @@ int8_t ah_rfdigicali_bknoise_get(void) {
     if (!LMAC_RFDIGI_BKNOISE_IS_VALID()) {
         return -1;
     }
-    int8_t result = (int8_t)RFDIGI->BKNOISE_RESULT;
-    bknoise_ctrl = RFDIGI->BKNOISE_CTRL;
-    LMAC_WRITE_REG(RFDIGI->BKNOISE_CTRL, bknoise_ctrl | LMAC_RFDIGI_BKNOISE_VALID);
+    int8_t result = (int8_t)RFDIGI->RFPWRCON1;
+    bknoise_ctrl = RFDIGI->RFPWRCON0;
+    LMAC_WRITE_REG(RFDIGI->RFPWRCON0, bknoise_ctrl | LMAC_RFDIGI_BKNOISE_VALID);
     return result;
 }
 
 void ah_rfdigicali_bknoise_hw_trig_dis(void) {
-    LMAC_CLEAR_BIT(RFDIGI->BKNOISE_CTRL, LMAC_RFDIGI_BKNOISE_HW_TRIG);
+    LMAC_CLEAR_BIT(RFDIGI->RFPWRCON0, LMAC_RFDIGI_BKNOISE_HW_TRIG);
 }
 
 void ah_rfdigicali_bknoise_hw_trig_en(void) {
-    LMAC_SET_BIT(RFDIGI->BKNOISE_CTRL, LMAC_RFDIGI_BKNOISE_HW_TRIG);
+    LMAC_SET_BIT(RFDIGI->RFPWRCON0, LMAC_RFDIGI_BKNOISE_HW_TRIG);
 }
 
 void ah_rfdigicali_bknoise_valid_pd_clr(void) {
-    LMAC_SET_BIT(RFDIGI->BKNOISE_CTRL, LMAC_RFDIGI_BKNOISE_CLR);
+    LMAC_SET_BIT(RFDIGI->RFPWRCON0, LMAC_RFDIGI_BKNOISE_CLR);
 }
 
 uint32_t ah_rfdigicali_bknoise_valid_pd_get(void) {
@@ -48,32 +51,32 @@ uint32_t ah_rfdigicali_bknoise_valid_pd_get(void) {
 
 void ah_rfdigicali_cfg_fb_comp(bool enable) {
     uint32_t val;
-    val = RFDIGI->IMB_CTRL;
+    val = RFDIGI->RFDCOCCON4;
     val &= ~LMAC_RFDIGI_IMB_FB_COMP_GATE;
-    RFDIGI->IMB_CTRL = val;
-    val = RFDIGI->RX_GAIN_CTRL;
+    RFDIGI->RFDCOCCON4 = val;
+    val = RFDIGI->RXPWRIDX;
     if (!enable) {
         val &= ~LMAC_RFDIGI_RX_FB_COMP_EN;
-        RFDIGI->RX_GAIN_CTRL = val;
-        val = RFDIGI->RX_FILTER_CTRL;
+        RFDIGI->RXPWRIDX = val;
+        val = RFDIGI->RXFILTER;
         val &= ~LMAC_RFDIGI_RX_FILTER_MANUAL;
-        RFDIGI->RX_FILTER_CTRL = val;
-        val = RFDIGI->RX_FILTER_CTRL;
+        RFDIGI->RXFILTER = val;
+        val = RFDIGI->RXFILTER;
         val |= LMAC_RFDIGI_RX_FILTER_AUTO;
-        RFDIGI->RX_FILTER_CTRL = val;
+        RFDIGI->RXFILTER = val;
     } else {
         val |= LMAC_RFDIGI_RX_FB_COMP_EN;
-        RFDIGI->RX_GAIN_CTRL = val;
-        val = RFDIGI->RX_FILTER_CTRL;
+        RFDIGI->RXPWRIDX = val;
+        val = RFDIGI->RXFILTER;
         val |= LMAC_RFDIGI_RX_FILTER_MANUAL;
-        RFDIGI->RX_FILTER_CTRL = val;
+        RFDIGI->RXFILTER = val;
     }
 }
 
 void ah_rfdigicali_config_hw_bknoise(uint16_t arg0, uint16_t arg1) {
     uint32_t val = 0xC000;  /* 192 << 7 = 0xC000 */
-    RFDIGI->BKNOISE_CTRL = val;
-    uint32_t bknoise_ctrl = RFDIGI->BKNOISE_CTRL;
+    RFDIGI->RFPWRCON0 = val;
+    uint32_t bknoise_ctrl = RFDIGI->RFPWRCON0;
     uint32_t window_field = ((uint32_t)arg1 << 7) & 0x780;  /* 1920 = 0x780 */
     bknoise_ctrl |= 0x1000860;  /* 0x1000000 + 0x860 = 0x1000860 */
     bknoise_ctrl |= window_field;
@@ -81,32 +84,32 @@ void ah_rfdigicali_config_hw_bknoise(uint16_t arg0, uint16_t arg1) {
     bknoise_ctrl |= step_field;
     uint32_t period_field = ((uint32_t)arg0 << 17) & 0xFFFC0000;  /* 0x3FFE0000 & 0xFFFC0000 = 0xFFFC0000 */
     bknoise_ctrl |= period_field;
-    RFDIGI->BKNOISE_CTRL = bknoise_ctrl;
+    RFDIGI->RFPWRCON0 = bknoise_ctrl;
 }
 
 void ah_rfdigicali_config_hw_rx_dcoc(uint32_t arg0, uint32_t arg1, uint32_t arg2) {
-    uint32_t dcoc_ctrl = RFDIGI->DCOC_CTRL;
+    uint32_t dcoc_ctrl = RFDIGI->RFDCOCCON0;
     dcoc_ctrl &= 0xfc001e00;
-    RFDIGI->DCOC_CTRL = dcoc_ctrl;
-    dcoc_ctrl = RFDIGI->DCOC_CTRL;
+    RFDIGI->RFDCOCCON0 = dcoc_ctrl;
+    dcoc_ctrl = RFDIGI->RFDCOCCON0;
     uint32_t estimate_window = (arg1 >> 3) << 17;
     dcoc_ctrl |= 0xA704;
     dcoc_ctrl |= estimate_window;
-    RFDIGI->DCOC_CTRL = dcoc_ctrl;
-    uint32_t dcoc_cfg0 = RFDIGI->DCOC_CFG0;
+    RFDIGI->RFDCOCCON0 = dcoc_ctrl;
+    uint32_t dcoc_cfg0 = RFDIGI->RFDCOCCON1;
     dcoc_cfg0 &= 0xFF000000;
-    RFDIGI->DCOC_CFG0 = dcoc_cfg0;
+    RFDIGI->RFDCOCCON1 = dcoc_cfg0;
     uint32_t sum = arg1 + arg2;
-    dcoc_cfg0 = RFDIGI->DCOC_CFG0;
+    dcoc_cfg0 = RFDIGI->RFDCOCCON1;
     uint32_t mask = 0xFFFF00;
     uint32_t val = (sum << 5) & mask;
     dcoc_cfg0 |= arg0;
     dcoc_cfg0 |= val;
-    RFDIGI->DCOC_CFG0 = dcoc_cfg0;
-    RFDIGI->DCOC_CFG1 = 0;
-    uint32_t imb_ctrl = RFDIGI->IMB_CTRL;
+    RFDIGI->RFDCOCCON1 = dcoc_cfg0;
+    RFDIGI->RFDCOCCON2 = 0;
+    uint32_t imb_ctrl = RFDIGI->RFDCOCCON4;
     imb_ctrl &= 0xF1FFFFFF;
-    RFDIGI->IMB_CTRL = imb_ctrl;
+    RFDIGI->RFDCOCCON4 = imb_ctrl;
 }
 
 void ah_rfdigicali_config_rx_dcoc(uint16_t *rx_dcoc_res, uint8_t gain_step) {
@@ -132,7 +135,7 @@ void ah_rfdigicali_config_rx_dcoc(uint16_t *rx_dcoc_res, uint8_t gain_step) {
         val |= q_field | i_field;
         RFDIGI_RX_HI_WORD(offset) = val;
     }
-    LMAC_SET_BIT(RFDIGI->RX_GAIN_CTRL, LMAC_RFDIGI_BUSY);
+    LMAC_SET_BIT(RFDIGI->RXPWRIDX, LMAC_RFDIGI_BUSY);
     LMAC_RFDIGI_WAIT_RX_READY();
 }
 
@@ -140,33 +143,33 @@ void ah_rfdigicali_config_rx_filter(uint32_t arg0) {
     uint32_t val = arg0 << 1;
     val &= 6U;
     val |= 17U;
-    RFDIGI->RX_FILTER_CTRL = 0xFFFFFFE0U;
-    RFDIGI->RX_FILTER_CTRL = val;
+    RFDIGI->RXFILTER = 0xFFFFFFE0U;
+    RFDIGI->RXFILTER = val;
 }
 
 void ah_rfdigicali_config_rx_filter_auto(void) {
-    RFDIGI->RX_FILTER_CTRL = (uint32_t)(-26);
-    RFDIGI->RX_FILTER_CTRL = 25U;
+    RFDIGI->RXFILTER = (uint32_t)(-26);
+    RFDIGI->RXFILTER = 25U;
 }
 
 void ah_rfdigicali_config_rx_gain(uint32_t arg0, uint32_t arg1) {
-    LMAC_CLEAR_BITS_RMW(RFDIGI->RX_GAIN_CTRL, ~0x300U);
-    LMAC_SET_BITS_RMW(RFDIGI->RX_GAIN_CTRL, arg1 << 8);
+    LMAC_CLEAR_BITS_RMW(RFDIGI->RXPWRIDX, ~0x300U);
+    LMAC_SET_BITS_RMW(RFDIGI->RXPWRIDX, arg1 << 8);
 
-    LMAC_CLEAR_BITS_RMW(RFDIGI->RX_GAIN_CTRL, 0xFFFFFFF8U);
-    LMAC_SET_BITS_RMW(RFDIGI->RX_GAIN_CTRL, arg0);
+    LMAC_CLEAR_BITS_RMW(RFDIGI->RXPWRIDX, 0xFFFFFFF8U);
+    LMAC_SET_BITS_RMW(RFDIGI->RXPWRIDX, arg0);
 
-    LMAC_CLEAR_BITS_RMW(RFDIGI->RX_GAIN_CTRL, 0xFFFFFF1FU);
-    LMAC_SET_BITS_RMW(RFDIGI->RX_GAIN_CTRL, arg0 << 5);
+    LMAC_CLEAR_BITS_RMW(RFDIGI->RXPWRIDX, 0xFFFFFF1FU);
+    LMAC_SET_BITS_RMW(RFDIGI->RXPWRIDX, arg0 << 5);
 
-    LMAC_SET_BIT(RFDIGI->RX_GAIN_CTRL, LMAC_RFDIGI_BUSY);
+    LMAC_SET_BIT(RFDIGI->RXPWRIDX, LMAC_RFDIGI_BUSY);
     LMAC_RFDIGI_WAIT_RX_READY();
 }
 
 void ah_rfdigicali_config_rx_gain_idx_src(uint32_t src) {
     uint32_t set_mask = (src << 4) & LMAC_RFDIGI_RX_GAIN_IDX_SRC;
-    LMAC_CLEAR_BITS_RMW(RFDIGI->RX_GAIN_CTRL, ~LMAC_RFDIGI_RX_GAIN_IDX_SRC);
-    LMAC_SET_BITS_RMW(RFDIGI->RX_GAIN_CTRL, set_mask);
+    LMAC_CLEAR_BITS_RMW(RFDIGI->RXPWRIDX, ~LMAC_RFDIGI_RX_GAIN_IDX_SRC);
+    LMAC_SET_BITS_RMW(RFDIGI->RXPWRIDX, set_mask);
 }
 
 void ah_rfdigicali_config_rx_imb(uint32_t arg0, uint32_t arg1, uint32_t arg2, uint32_t arg3) {
@@ -193,15 +196,15 @@ void ah_rfdigicali_config_rx_imb(uint32_t arg0, uint32_t arg1, uint32_t arg2, ui
         r0 &= 0x3FF00000U;
         val |= r0;
         RFDIGI_RX_HI_WORD(slot) = val;
-        val = RFDIGI_RX_HI_WORD(slot + LMAC_REG_IDX(LMAC_RFDIGI_RX_HI_PHASE_BASE - LMAC_RFDIGI_RX_HI_BASE));
+        val = RFDIGI_RX_HI_WORD(slot + RFDIGI_RX_HI_PHASE_WORD_OFFSET);
         val &= 0xFF000000U;
-        RFDIGI_RX_HI_WORD(slot + LMAC_REG_IDX(LMAC_RFDIGI_RX_HI_PHASE_BASE - LMAC_RFDIGI_RX_HI_BASE)) = val;
-        val = RFDIGI_RX_HI_WORD(slot + LMAC_REG_IDX(LMAC_RFDIGI_RX_HI_PHASE_BASE - LMAC_RFDIGI_RX_HI_BASE));
+        RFDIGI_RX_HI_WORD(slot + RFDIGI_RX_HI_PHASE_WORD_OFFSET) = val;
+        val = RFDIGI_RX_HI_WORD(slot + RFDIGI_RX_HI_PHASE_WORD_OFFSET);
         uint32_t mask = 0xFFFFF000U;
         r13 &= mask;
         val |= r1;
         val |= r13;
-        RFDIGI_RX_HI_WORD(slot + LMAC_REG_IDX(LMAC_RFDIGI_RX_HI_PHASE_BASE - LMAC_RFDIGI_RX_HI_BASE)) = val;
+        RFDIGI_RX_HI_WORD(slot + RFDIGI_RX_HI_PHASE_WORD_OFFSET) = val;
     } else {
         int16_t idx = (int16_t)r3;
         uint32_t slot = idx + idx + idx;
@@ -212,18 +215,18 @@ void ah_rfdigicali_config_rx_imb(uint32_t arg0, uint32_t arg1, uint32_t arg2, ui
         r0 &= 0x3FF00000U;
         val |= r0;
         RFDIGI_RX_LO_WORD(slot) = val;
-        val = RFDIGI_RX_LO_WORD(slot + LMAC_REG_IDX(LMAC_RFDIGI_RX_LO_PHASE_BASE - LMAC_RFDIGI_RX_LO_BASE));
+        val = RFDIGI_RX_LO_WORD(slot + RFDIGI_RX_LO_PHASE_WORD_OFFSET);
         val &= 0xFF000000U;
-        RFDIGI_RX_LO_WORD(slot + LMAC_REG_IDX(LMAC_RFDIGI_RX_LO_PHASE_BASE - LMAC_RFDIGI_RX_LO_BASE)) = val;
-        val = RFDIGI_RX_LO_WORD(slot + LMAC_REG_IDX(LMAC_RFDIGI_RX_LO_PHASE_BASE - LMAC_RFDIGI_RX_LO_BASE));
+        RFDIGI_RX_LO_WORD(slot + RFDIGI_RX_LO_PHASE_WORD_OFFSET) = val;
+        val = RFDIGI_RX_LO_WORD(slot + RFDIGI_RX_LO_PHASE_WORD_OFFSET);
         uint32_t mask = 0xFFFFF000U;
         r13 &= mask;
         val |= r1;
         val |= r13;
-        RFDIGI_RX_LO_WORD(slot + LMAC_REG_IDX(LMAC_RFDIGI_RX_LO_PHASE_BASE - LMAC_RFDIGI_RX_LO_BASE)) = val;
+        RFDIGI_RX_LO_WORD(slot + RFDIGI_RX_LO_PHASE_WORD_OFFSET) = val;
     }
-    uint32_t ctrl = RFDIGI->RX_GAIN_CTRL;
-    LMAC_WRITE_REG(RFDIGI->RX_GAIN_CTRL, ctrl | LMAC_RFDIGI_BUSY);
+    uint32_t ctrl = RFDIGI->RXPWRIDX;
+    LMAC_WRITE_REG(RFDIGI->RXPWRIDX, ctrl | LMAC_RFDIGI_BUSY);
     LMAC_RFDIGI_WAIT_RX_READY();
 }
 
@@ -236,7 +239,7 @@ void ah_rfdigicali_config_tx_digi_gain(uint16_t gain, uint8_t idx) {
         idx = 4;
     }
 
-    volatile uint32 *reg = &RFDIGI->TX_DIGI_GAIN[idx >> 1];
+    volatile uint32 *reg = &RFDIGI->TXDIGPWR01 + (idx >> 1);
     uint32_t clear_mask, set_mask;
 
     if (idx & 1) {
@@ -250,107 +253,107 @@ void ah_rfdigicali_config_tx_digi_gain(uint16_t gain, uint8_t idx) {
     LMAC_CLEAR_BITS_RMW(*reg, clear_mask);
     LMAC_SET_BITS_RMW(*reg, set_mask);
 
-    LMAC_SET_BIT(RFDIGI->TX_GAIN_CTRL, LMAC_RFDIGI_BUSY);
+    LMAC_SET_BIT(RFDIGI->TXPWRIDX, LMAC_RFDIGI_BUSY);
     LMAC_RFDIGI_WAIT_TX_READY();
 }
 
 void ah_rfdigicali_config_tx_gain_idx_src(uint32_t src) {
-    uint32_t val = RFDIGI->TX_GAIN_CTRL;
+    uint32_t val = RFDIGI->TXPWRIDX;
     val &= ~LMAC_RFDIGI_TX_GAIN_IDX_SRC;
-    RFDIGI->TX_GAIN_CTRL = val;
-    val = RFDIGI->TX_GAIN_CTRL;
+    RFDIGI->TXPWRIDX = val;
+    val = RFDIGI->TXPWRIDX;
     uint32_t src_bits = (src << 15) & LMAC_RFDIGI_TX_GAIN_IDX_SRC;
     val |= src_bits;
-    RFDIGI->TX_GAIN_CTRL = val;
+    RFDIGI->TXPWRIDX = val;
 }
 
 void ah_rfdigicali_config_tx_imb(uint32_t arg0, uint32_t arg1, uint32_t idx) {
     uint32_t slot = idx << 2;
-    uint32_t tx_imb_gain_word = RFDIGI_TX_WORD(slot);
+    uint32_t tx_imb_gain_word = RFDIGI_TX_DC_WORD(slot);
     tx_imb_gain_word &= 0xE000FFFF;
-    RFDIGI_TX_WORD(slot) = tx_imb_gain_word;
+    RFDIGI_TX_DC_WORD(slot) = tx_imb_gain_word;
     uint32_t gain_field = (arg0 << 20) & 0x1FF00000;
-    tx_imb_gain_word = RFDIGI_TX_WORD(slot);
+    tx_imb_gain_word = RFDIGI_TX_DC_WORD(slot);
     tx_imb_gain_word |= gain_field;
-    RFDIGI_TX_WORD(slot) = tx_imb_gain_word;
+    RFDIGI_TX_DC_WORD(slot) = tx_imb_gain_word;
     uint32_t mask = 0xFF000000;
-    uint32_t tx_imb_phase_word = RFDIGI_TX_WORD(slot + LMAC_REG_IDX(0x48U - LMAC_RFDIGI_TX_DCOC_BASE));
+    uint32_t tx_imb_phase_word = RFDIGI_TX_IMB_WORD(slot);
     tx_imb_phase_word &= mask;
-    RFDIGI_TX_WORD(slot + LMAC_REG_IDX(0x48U - LMAC_RFDIGI_TX_DCOC_BASE)) = tx_imb_phase_word;
+    RFDIGI_TX_IMB_WORD(slot) = tx_imb_phase_word;
     if (arg1 >= 1025) {
         uint32_t div = (128U << 15) / arg1;
         arg1 &= 0xFFF;
-        tx_imb_phase_word = RFDIGI_TX_WORD(slot + LMAC_REG_IDX(0x48U - LMAC_RFDIGI_TX_DCOC_BASE));
+        tx_imb_phase_word = RFDIGI_TX_IMB_WORD(slot);
         tx_imb_phase_word |= arg1;
         uint32_t scaled = div << 12;
         scaled &= 0xFFF00000;
         tx_imb_phase_word |= scaled;
-        RFDIGI_TX_WORD(slot + LMAC_REG_IDX(0x48U - LMAC_RFDIGI_TX_DCOC_BASE)) = tx_imb_phase_word;
+        RFDIGI_TX_IMB_WORD(slot) = tx_imb_phase_word;
     } else {
         arg1 = 0xFFF;
-        tx_imb_phase_word = RFDIGI_TX_WORD(slot + LMAC_REG_IDX(0x48U - LMAC_RFDIGI_TX_DCOC_BASE));
+        tx_imb_phase_word = RFDIGI_TX_IMB_WORD(slot);
         tx_imb_phase_word |= arg1;
-        RFDIGI_TX_WORD(slot + LMAC_REG_IDX(0x48U - LMAC_RFDIGI_TX_DCOC_BASE)) = tx_imb_phase_word;
+        RFDIGI_TX_IMB_WORD(slot) = tx_imb_phase_word;
     }
-    uint32_t ctrl_val = RFDIGI->TX_GAIN_CTRL;
-    LMAC_WRITE_REG(RFDIGI->TX_GAIN_CTRL, ctrl_val | LMAC_RFDIGI_BUSY);
+    uint32_t ctrl_val = RFDIGI->TXPWRIDX;
+    LMAC_WRITE_REG(RFDIGI->TXPWRIDX, ctrl_val | LMAC_RFDIGI_BUSY);
     LMAC_RFDIGI_WAIT_TX_READY();
 }
 
 void ah_rfdigicali_dcoc_est_en(void) {
-    RFDIGI->DCOC_CTRL = 0x8540000;
-    RFDIGI->DCOC_CFG0 = 0x1E02;
-    RFDIGI->DCOC_CFG1 = 0x2;
+    RFDIGI->RFDCOCCON0 = 0x8540000;
+    RFDIGI->RFDCOCCON1 = 0x1E02;
+    RFDIGI->RFDCOCCON2 = 0x2;
 }
 
 void ah_rfdigicali_dcoc_est_kick_start(int32_t *result) {
     uint32_t dcoc_ctrl;
     uint32_t dcoc_result;
 
-    dcoc_ctrl = RFDIGI->DCOC_CTRL;
+    dcoc_ctrl = RFDIGI->RFDCOCCON0;
     dcoc_ctrl |= 3U;
-    RFDIGI->DCOC_CTRL = dcoc_ctrl;
+    RFDIGI->RFDCOCCON0 = dcoc_ctrl;
     os_sleep_ms(2);
 
-    dcoc_ctrl = RFDIGI->DCOC_CTRL;
+    dcoc_ctrl = RFDIGI->RFDCOCCON0;
     dcoc_ctrl |= 0x40U;
-    RFDIGI->DCOC_CTRL = dcoc_ctrl;
+    RFDIGI->RFDCOCCON0 = dcoc_ctrl;
     os_sleep_us(2);
 
-    dcoc_result = RFDIGI->DCOC_RESULT;
+    dcoc_result = RFDIGI->RFDCOCCON3;
     int32_t i_result = ((int32_t)(dcoc_result << 20)) >> 20;
     result[0] = i_result;
 
-    dcoc_result = RFDIGI->DCOC_RESULT;
+    dcoc_result = RFDIGI->RFDCOCCON3;
     int32_t q_result = ((int32_t)(dcoc_result << 8)) >> 20;
     result[1] = q_result;
 
-    dcoc_ctrl = RFDIGI->DCOC_CTRL;
+    dcoc_ctrl = RFDIGI->RFDCOCCON0;
     dcoc_ctrl &= ~(1U << 0);
     dcoc_ctrl &= ~(1U << 1);
-    RFDIGI->DCOC_CTRL = dcoc_ctrl;
+    RFDIGI->RFDCOCCON0 = dcoc_ctrl;
 
-    dcoc_ctrl = RFDIGI->DCOC_CTRL;
+    dcoc_ctrl = RFDIGI->RFDCOCCON0;
     dcoc_ctrl &= ~(1U << 6);
-    RFDIGI->DCOC_CTRL = dcoc_ctrl;
+    RFDIGI->RFDCOCCON0 = dcoc_ctrl;
 
-    dcoc_ctrl = RFDIGI->DCOC_CTRL;
+    dcoc_ctrl = RFDIGI->RFDCOCCON0;
     dcoc_ctrl |= 0x8U;
-    RFDIGI->DCOC_CTRL = dcoc_ctrl;
+    RFDIGI->RFDCOCCON0 = dcoc_ctrl;
 }
 
 void ah_rfdigicali_dcoc_imb_est_kick_start(void) {
-    RFDIGI->IMB_CTRL = 0x20000;
-    RFDIGI->BKNOISE_CTRL = 40;
-    RFDIGI->DCOC_CTRL |= 3;
+    RFDIGI->RFDCOCCON4 = 0x20000;
+    RFDIGI->RFPWRCON0 = 40;
+    RFDIGI->RFDCOCCON0 |= 3;
 }
 
 int16_t ah_rfdigicali_dcoci_get(void) {
-    uint32_t dcoc_ctrl = RFDIGI->DCOC_CTRL;
+    uint32_t dcoc_ctrl = RFDIGI->RFDCOCCON0;
     if (LMAC_REG_IS_SET(dcoc_ctrl, LMAC_RFDIGI_DCOC_EN_I)) {
         return (int16_t)32767;
     }
-    uint32_t dcoc_result = RFDIGI->DCOC_RESULT;
+    uint32_t dcoc_result = RFDIGI->RFDCOCCON3;
     uint32_t i_dcoc = dcoc_result & 0xFFFU;
     if (i_dcoc >= 2048U) {
         i_dcoc -= 4096U;
@@ -359,11 +362,11 @@ int16_t ah_rfdigicali_dcoci_get(void) {
 }
 
 int16_t ah_rfdigicali_dcocq_get(void) {
-    uint32_t dcoc_ctrl = RFDIGI->DCOC_CTRL;
+    uint32_t dcoc_ctrl = RFDIGI->RFDCOCCON0;
     if (LMAC_REG_IS_SET(dcoc_ctrl, LMAC_RFDIGI_DCOC_EN_Q)) {
         return (int16_t)32767;
     }
-    uint32_t dcoc_result = RFDIGI->DCOC_RESULT;
+    uint32_t dcoc_result = RFDIGI->RFDCOCCON3;
     uint32_t q_dcoc = (dcoc_result >> 12) & 0xFFFU;
     if (q_dcoc < 2048U) {
         return (int16_t)q_dcoc;
@@ -391,12 +394,12 @@ void ah_rfdigicali_get_rx_imb(uint16_t *gain_out, uint16_t *phase_out, uint32_t 
     if (idx >= 4) {
         val = RFDIGI_RX_HI_WORD((idx - 4) * 3);
         *gain_out = (uint16_t)((val >> 20) & 0x3FF);
-        val = RFDIGI_RX_HI_WORD(LMAC_REG_IDX(LMAC_RFDIGI_RX_HI_PHASE_BASE - LMAC_RFDIGI_RX_HI_BASE) + (idx - 4) * 3);
+        val = RFDIGI_RX_HI_WORD(RFDIGI_RX_HI_PHASE_WORD_OFFSET + (idx - 4) * 3);
         *phase_out = (uint16_t)(val & 0xFFF);
     } else {
         val = RFDIGI_RX_LO_WORD(idx * 3);
         *gain_out = (uint16_t)((val >> 20) & 0x3FF);
-        val = RFDIGI_RX_LO_WORD(LMAC_REG_IDX(LMAC_RFDIGI_RX_LO_PHASE_BASE - LMAC_RFDIGI_RX_LO_BASE) + idx * 3);
+        val = RFDIGI_RX_LO_WORD(RFDIGI_RX_LO_PHASE_WORD_OFFSET + idx * 3);
         *phase_out = (uint16_t)(val & 0xFFF);
     }
 }
@@ -404,92 +407,92 @@ void ah_rfdigicali_get_rx_imb(uint16_t *gain_out, uint16_t *phase_out, uint32_t 
 uint32_t ah_rfdigicali_get_tx_digi_gain(uint32_t idx) {
     switch (idx) {
     case 0:
-        return RFDIGI->TX_DIGI_GAIN[0] & LMAC_RFDIGI_TX_DIGI_GAIN_MASK;
+        return RFDIGI->TXDIGPWR01 & LMAC_RFDIGI_TX_DIGI_GAIN_MASK;
     case 1:
-        return (RFDIGI->TX_DIGI_GAIN[0] >> LMAC_RFDIGI_TX_DIGI_GAIN_HI_SHIFT) & LMAC_RFDIGI_TX_DIGI_GAIN_MASK;
+        return (RFDIGI->TXDIGPWR01 >> LMAC_RFDIGI_TX_DIGI_GAIN_HI_SHIFT) & LMAC_RFDIGI_TX_DIGI_GAIN_MASK;
     case 2:
-        return RFDIGI->TX_DIGI_GAIN[1] & LMAC_RFDIGI_TX_DIGI_GAIN_MASK;
+        return RFDIGI->TXDIGPWR23 & LMAC_RFDIGI_TX_DIGI_GAIN_MASK;
     case 3:
-        return (RFDIGI->TX_DIGI_GAIN[1] >> LMAC_RFDIGI_TX_DIGI_GAIN_HI_SHIFT) & LMAC_RFDIGI_TX_DIGI_GAIN_MASK;
+        return (RFDIGI->TXDIGPWR23 >> LMAC_RFDIGI_TX_DIGI_GAIN_HI_SHIFT) & LMAC_RFDIGI_TX_DIGI_GAIN_MASK;
     case 4:
-        return RFDIGI->TX_DIGI_GAIN[2] & LMAC_RFDIGI_TX_DIGI_GAIN_MASK;
+        return RFDIGI->TXDIGPWR45 & LMAC_RFDIGI_TX_DIGI_GAIN_MASK;
     default:
-        return (RFDIGI->TX_DIGI_GAIN[2] >> LMAC_RFDIGI_TX_DIGI_GAIN_HI_SHIFT) & LMAC_RFDIGI_TX_DIGI_GAIN_MASK;
+        return (RFDIGI->TXDIGPWR45 >> LMAC_RFDIGI_TX_DIGI_GAIN_HI_SHIFT) & LMAC_RFDIGI_TX_DIGI_GAIN_MASK;
     }
 }
 
 uint32_t ah_rfdigicali_power_calc_kick_start(void) {
     uint32_t bknoise_ctrl;
-    bknoise_ctrl = RFDIGI->BKNOISE_CTRL;
+    bknoise_ctrl = RFDIGI->RFPWRCON0;
     bknoise_ctrl |= 0x2000;
-    RFDIGI->BKNOISE_CTRL = bknoise_ctrl;
-    bknoise_ctrl = RFDIGI->BKNOISE_CTRL;
+    RFDIGI->RFPWRCON0 = bknoise_ctrl;
+    bknoise_ctrl = RFDIGI->RFPWRCON0;
     bknoise_ctrl |= 0x0001;
-    RFDIGI->BKNOISE_CTRL = bknoise_ctrl;
+    RFDIGI->RFPWRCON0 = bknoise_ctrl;
     do {
-        bknoise_ctrl = RFDIGI->BKNOISE_CTRL;
+        bknoise_ctrl = RFDIGI->RFPWRCON0;
     } while (LMAC_REG_IS_CLEAR(bknoise_ctrl, LMAC_RFDIGI_HW_BKNOISE_VALID_MASK));
-    bknoise_ctrl = RFDIGI->BKNOISE_CTRL;
+    bknoise_ctrl = RFDIGI->RFPWRCON0;
     bknoise_ctrl |= 0x2000;
-    RFDIGI->BKNOISE_CTRL = bknoise_ctrl;
-    uint32_t result = RFDIGI->BKNOISE_RESULT;
-    bknoise_ctrl = RFDIGI->BKNOISE_CTRL;
+    RFDIGI->RFPWRCON0 = bknoise_ctrl;
+    uint32_t result = RFDIGI->RFPWRCON1;
+    bknoise_ctrl = RFDIGI->RFPWRCON0;
     bknoise_ctrl &= ~0x0001U;
-    RFDIGI->BKNOISE_CTRL = bknoise_ctrl;
+    RFDIGI->RFPWRCON0 = bknoise_ctrl;
     result >>= 8;
     return result;
 }
 
 void ah_rfdigicali_rx_dcoc_hw_trig_dis(void) {
-    uint32_t val = RFDIGI->DCOC_CTRL;
+    uint32_t val = RFDIGI->RFDCOCCON0;
     val &= ~LMAC_RFDIGI_RX_DCOC_HW_TRIG;
-    RFDIGI->DCOC_CTRL = val;
+    RFDIGI->RFDCOCCON0 = val;
 }
 
 void ah_rfdigicali_rx_dcoc_hw_trig_en(void) {
-    uint32_t val = RFDIGI->DCOC_CTRL;
-    LMAC_WRITE_REG(RFDIGI->DCOC_CTRL, val | LMAC_RFDIGI_RX_DCOC_HW_TRIG);
+    uint32_t val = RFDIGI->RFDCOCCON0;
+    LMAC_WRITE_REG(RFDIGI->RFDCOCCON0, val | LMAC_RFDIGI_RX_DCOC_HW_TRIG);
 }
 
 void ah_rfdigicali_stop_tx_cali(void) {
-    uint32_t val = RFDIGI->DCOC_CTRL;
+    uint32_t val = RFDIGI->RFDCOCCON0;
     val &= ~LMAC_RFDIGI_DCOC_EN_I;
     val &= ~LMAC_RFDIGI_DCOC_EN_Q;
-    RFDIGI->DCOC_CTRL = val;
-    val = RFDIGI->DCOC_CTRL;
+    RFDIGI->RFDCOCCON0 = val;
+    val = RFDIGI->RFDCOCCON0;
     val &= ~LMAC_RFDIGI_DCOC_KICK;
-    RFDIGI->DCOC_CTRL = val;
-    val = RFDIGI->DCOC_CTRL;
+    RFDIGI->RFDCOCCON0 = val;
+    val = RFDIGI->RFDCOCCON0;
     val |= LMAC_RFDIGI_DCOC_STOP;
-    RFDIGI->DCOC_CTRL = val;
+    RFDIGI->RFDCOCCON0 = val;
 }
 
 void ah_rfdigicali_tx_dcoc(const int16_t *dcoc_data, uint32_t idx) {
     uint32_t slot = idx;
-    uint32_t tx_dcoc_word = RFDIGI_TX_WORD(slot);
+    uint32_t tx_dcoc_word = RFDIGI_TX_DC_WORD(slot);
     tx_dcoc_word &= 0xFFFF000F;
-    RFDIGI_TX_WORD(slot) = tx_dcoc_word;
+    RFDIGI_TX_DC_WORD(slot) = tx_dcoc_word;
     uint32_t i_val = (uint32_t)dcoc_data[1];
     i_val = (i_val << 10) & 0x000FFC00;
-    tx_dcoc_word = RFDIGI_TX_WORD(slot);
+    tx_dcoc_word = RFDIGI_TX_DC_WORD(slot);
     tx_dcoc_word = (tx_dcoc_word & 0xFFF003FF) | i_val;
     uint32_t q_val = (uint32_t)dcoc_data[0];
     q_val &= 0x000003FF;
     tx_dcoc_word |= q_val;
-    RFDIGI_TX_WORD(slot) = tx_dcoc_word;
-    LMAC_SET_BIT(RFDIGI->TX_GAIN_CTRL, LMAC_RFDIGI_BUSY);
+    RFDIGI_TX_DC_WORD(slot) = tx_dcoc_word;
+    LMAC_SET_BIT(RFDIGI->TXPWRIDX, LMAC_RFDIGI_BUSY);
     LMAC_RFDIGI_WAIT_TX_READY();
 }
 
 void ah_rfdigicali_tx_pwr(uint32_t arg0) {
-    uint32_t val = RFDIGI->TX_GAIN_CTRL;
+    uint32_t val = RFDIGI->TXPWRIDX;
     val &= ~LMAC_RFDIGI_TX_GAIN_IDX_SRC;
-    RFDIGI->TX_GAIN_CTRL = val;
-    val = RFDIGI->TX_GAIN_CTRL;
+    RFDIGI->TXPWRIDX = val;
+    val = RFDIGI->TXPWRIDX;
     val &= ~LMAC_RFDIGI_TX_GAIN_LOW_MASK;
     val |= arg0;
-    RFDIGI->TX_GAIN_CTRL = val;
-    val = RFDIGI->TX_GAIN_CTRL;
-    LMAC_WRITE_REG(RFDIGI->TX_GAIN_CTRL, val | LMAC_RFDIGI_BUSY);
+    RFDIGI->TXPWRIDX = val;
+    val = RFDIGI->TXPWRIDX;
+    LMAC_WRITE_REG(RFDIGI->TXPWRIDX, val | LMAC_RFDIGI_BUSY);
     LMAC_RFDIGI_WAIT_TX_READY();
 }

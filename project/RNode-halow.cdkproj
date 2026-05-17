@@ -2392,6 +2392,9 @@ Board: txw4002a
         <File Name="../sdk/lib/lmac/mars_lmac_tx_orig.c">
           <FileOption/>
         </File>
+        <File Name="../sdk/lib/lmac/mars_lmac_phy.c" ExcludeProjConfig="">
+          <FileOption/>
+        </File>
       </VirtualDirectory>
     </VirtualDirectory>
     <VirtualDirectory Name="hal">
