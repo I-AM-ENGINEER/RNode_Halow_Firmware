@@ -11,10 +11,10 @@ WRAP(uint32, lmac_statq_count, (void), ())
 WRAP(uint32, lmac_txq_count, (void), ())
 WRAP(uint32, lmac_acq_count, (uint32 ac), (ac))
 WRAP(uint32, lmac_txagg_count, (uint32 ac), (ac))
-WRAPV(lmac_kick_tx_task, (void), ())
+//WRAPV(lmac_kick_tx_task, (void), ())  /* C impl in mars_lmac_tx.c */
 WRAPV(lmac_tx_vec_init, (void), ())
 WRAPV(lmac_tx_queue_agglist_init, (void), ())
-WRAP(int32, lmac_ah_tx, (struct lmac_ops *ops, struct sk_buff *skb), (ops, skb))
+//WRAP(int32, lmac_ah_tx, (struct lmac_ops *ops, struct sk_buff *skb), (ops, skb))  /* C impl */
 //WRAPV(lmac_tx_init, (void), ())  /* Already commented out - using C implementation */
 //WRAP(uint8_t *, lmac_gen_tx_agglist,(uint param_1, uint param_2, uint param_3, uint param_4),(param_1, param_2, param_3, param_4))
 WRAP(int32, lmac_ah_test_tx, (struct lmac_ops *ops, struct sk_buff *skb), (ops, skb))

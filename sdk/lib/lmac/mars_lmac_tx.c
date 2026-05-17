@@ -53,6 +53,43 @@ typedef struct skb_list skb_list;
 static const uint8_t ieee802_1d_to_ac_tbl[8] = {0, 1, 1, 0, 2, 2, 3, 3};
 
 
+int32 lmac_ah_tx(struct lmac_ops *ops, struct sk_buff *skb)
+{
+    uint32_t headroom;
+    int32 ret;
+
+    if (!skb || !ops->radio_on)
+        return -1;
+
+    headroom = skb_headroom(skb);
+    if (headroom <= 0x47) {
+        log_warn("ah_tx: skb=%p headroom=%u too small (need>0x47)", skb, headroom);
+        return -1;
+    }
+
+    /* low 32: submission timestamp; high 32: headroom (used by cipher path) */
+    skb->lifetime = (uint64_t)(uint32_t)os_jiffies() | ((uint64_t)headroom << 32);
+
+    ret = skb_list_queue(&ah_lmac_tx_orig.tx_pending_queue, skb);
+    if (ret) {
+        log_error("ah_tx: queue failed ret=%d", ret);
+        return ret;
+    }
+
+    os_sema_up(&ah_lmac_tx_orig.tx_sem);
+    ah_lmac.pending_pkg_to_status_check++;
+
+    log_trace("ah_tx: skb=%p len=%u headroom=%u", skb, skb->len, headroom);
+    return 0;
+}
+
+
+void lmac_kick_tx_task(void)
+{
+    os_sema_up(&ah_lmac_tx_orig.tx_sem);
+}
+
+
 void lmac_irq_ac_pd(void) {
     static uint32_t n;
 
