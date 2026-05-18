@@ -105,9 +105,8 @@ int32 lmac_send_mgmt_skb(struct sk_buff *skb);
 int32 lmac_tx_beacon(struct sk_buff *skb);
 
 /**
- * @brief Transmit data frame
- * @param skb Data frame to transmit
- * @return 0 on success, negative on error
+ * @brief Submit prepared AC frame to PHY and re-arm TX vector.
+ * skb is accepted for API compatibility but ignored; AC is read from hardware state.
  */
 int32 lmac_tx_frm(struct sk_buff *skb);
 
@@ -1166,8 +1165,12 @@ extern void lmac_beacon_timer_start(uint32 us);
 #define AH_LMAC_TXSTART_OFS  0x670U
 
 /* Return codes */
+#ifndef RET_OK
 #define RET_OK      0
+#endif
+#ifndef RET_ERR
 #define RET_ERR     (-1)
+#endif
 
 #ifdef __cplusplus
 }

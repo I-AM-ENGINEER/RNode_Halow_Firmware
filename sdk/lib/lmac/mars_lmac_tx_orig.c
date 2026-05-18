@@ -16,9 +16,9 @@ WRAPV(lmac_tx_vec_init, (void), ())
 WRAPV(lmac_tx_queue_agglist_init, (void), ())
 //WRAP(int32, lmac_ah_tx, (struct lmac_ops *ops, struct sk_buff *skb), (ops, skb))  /* C impl */
 //WRAPV(lmac_tx_init, (void), ())  /* Already commented out - using C implementation */
-//WRAP(uint8_t *, lmac_gen_tx_agglist,(uint param_1, uint param_2, uint param_3, uint param_4),(param_1, param_2, param_3, param_4))
+//WRAP(struct sk_buff *, lmac_gen_tx_agglist, (uint32 ac, uint32 rate, uint32 bw, uint32 max_aggr), (ac, rate, bw, max_aggr))  /* plain name in binary, no _orig */
 WRAP(int32, lmac_ah_test_tx, (struct lmac_ops *ops, struct sk_buff *skb), (ops, skb))
-//WRAP(int32, lmac_send_data_to_phy, (uint32 ac), (ac))
+//WRAP(int32, lmac_send_data_to_phy, (uint32 ac), (ac))  /* C impl in mars_lmac_phy.c */
 WRAP(int32, lmac_beacon_add_s1g_beacon_compatibility, (struct sk_buff *skb), (skb))
 WRAP(int32, lmac_beacon_build_s1gbeacon, (struct sk_buff *skb), (skb))
 WRAP(int32, lmac_tx_ba, (struct sk_buff *skb), (skb))
@@ -29,12 +29,12 @@ WRAP(int32, lmac_tx_pv0_null, (struct sk_buff *skb), (skb))
 WRAP(int32, lmac_tx_pv0_pspoll, (struct sk_buff *skb), (skb))
 WRAP(int32, lmac_tx_pv0_cfpoll, (struct sk_buff *skb), (skb))
 WRAP(int32, lmac_tx_pv0_cfend, (struct sk_buff *skb), (skb))
-//WRAP(int32, lmac_tx_frm, (struct sk_buff *skb), (skb))
+//WRAPV(lmac_tx_frm, (void), ())  /* C impl in mars_lmac_phy.c (int32, skb ignored) */
 WRAP(int32, lmac_tx_beacon, (struct sk_buff *skb), (skb))
 WRAP(void *, lmac_gen_txvec, (uint32 ac, uint32 ac_hint, uint32 mcs), (ac, ac_hint, mcs))
 WRAP(int32, lmac_cfg_txvec_part1, (void), ())
 WRAPV(lmac_ant_sel, (uint32 ant), (ant))
-//WRAP(int32, lmac_cfg_txvec_part2, (void), ())
+//WRAP(int32, lmac_cfg_txvec_part2, (void), ())  /* C impl in mars_lmac_phy.c */
 WRAP(int32, lmac_update_frm_tx_vec, (void), ())
 WRAP(int32, lmac_update_ndp_cts_tx_vec, (uint32 arg0, uint32 arg1), (arg0, arg1))
 WRAP(int32, lmac_update_ndp_ack_tx_vec, (uint32 arg0, uint32 arg1), (arg0, arg1))
@@ -45,10 +45,10 @@ WRAP(int32, lmac_update_pv0_wpcts_tx_vec, (void), ())
 WRAP(int32, lmac_update_pv0_cfend_tx_vec, (void), ())
 WRAPV(ndp_tx_vec_init, (void), ())
 WRAP(uint32, pv0_ctrl_uplink_txpwr_gen, (void), ())
-WRAPV(lmac_irq_tx_end, (void), ())
+//WRAPV(lmac_irq_tx_end, (void), ())  /* C impl in mars_lmac_phy.c */
 WRAPV(lmac_irq_tx_tmo, (void), ())
-//WRAPV(lmac_irq_bo_fns, (void), ())
-//WRAPV(lmac_irq_ac_pd, (void), ())
+//WRAPV(lmac_irq_bo_fns, (void), ())   /* C impl in mars_lmac_phy.c */
+WRAPV(lmac_irq_ac_pd, (void), ())      /* sub-fns are local in binary, cannot reimplement */
 WRAP(int32, lmac_update_tx_rate, (uint32 ac, uint8 *rate_out, uint8 *bw_out), (ac, rate_out, bw_out))
 WRAP(int32, lmac_update_tx_state_ack, (uint32 ok, uint32 arg1, uint32 arg2), (ok, arg1, arg2))
 WRAP(int32, lmac_update_tx_state_ba, (uint32 start_ssn, uint32 bitmap_lo, uint32 bitmap_hi), (start_ssn, bitmap_lo, bitmap_hi))
@@ -67,6 +67,9 @@ WRAPV(lmac_pv0_cfend_init, (void), ())
 WRAPV(lmac_pv0_qos_null_init, (void), ())
 WRAP(int32, lmac_reorder_tx_agglist, (void), ())
 WRAP(struct sk_buff *, lmac_get_first_skb, (uint32 ac), (ac))
+//WRAP(uint32, lmac_check_tx_queue_empty, (void), ())  /* plain name in binary, no _orig */
+//WRAP(int32, lmac_attempt_tx, (uint32 ac), (ac))          /* plain name in binary, no _orig */
+//WRAP(int32, lmac_attempt_tx_obss, (uint32 ch), (ch))     /* plain name in binary, no _orig */
 WRAP(uint32, lmac_get_ack_policy, (void *txi), (txi))
 WRAP(uint32, lmac_select_tx_acq, (void), ())
 WRAP(int32, tx_skbs_cached, (void), ())
@@ -90,7 +93,7 @@ WRAP(int32, lmac_tx_frame_regen, (uint32 ac, uint32 ac_hint, uint32 mcs, void *a
 WRAP(int32, lmac_tx_date_prepared, (void), ())
 WRAPV(lmac_partial_aid_update, (void *txi), (txi))
 WRAP(uint32, lmac_dtim_timer_rem, (void), ())
-WRAP(uint32, lmac_hdr_dur_calc, (uint32 len), (len))
+//WRAP(uint32, lmac_hdr_dur_calc, (uint32 len), (len))  /* C impl in mars_lmac_phy.c */
 WRAP(int32, lmac_tx_to_pm_ap, (void), ())
 WRAPV(switch_ctrl_normal_mode, (void), ())
 WRAPV(switch_ctrl_recover, (void), ())

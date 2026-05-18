@@ -6,6 +6,7 @@
 #include "lib/lmac/lmac_ctx.h"
 #include "lib/lmac/lmac_def.h"
 #include "lib/lmac/lmac_regmap.h"
+#include "lib/lmac/mars_lmac_tx.h"
 #include "lib/skb/skb.h"
 #include "lib/skb/skb_list.h"
 #include "lib/skb/skbuff.h"
@@ -21,7 +22,6 @@ extern void lmac_get_rx_addr(uint8 *addr, uint8 *hdr);
 extern void *lmac_sta_get(uint16 aid, uint8 *addr);
 extern uint32 lmac_get_seq_num(void *hdr);
 extern uint32 lmac_get_hdr_len_pv0(void *hdr);
-extern void lmac_irq_ac_pd_orig(void);
 extern void ndp_tx_vec_init_orig(uint8_t *txvec);
 extern uint32 lmac_get_ack_policy_orig(void *txd);
 extern void lmac_partial_aid_update_orig(void *txd);
@@ -89,34 +89,6 @@ void lmac_kick_tx_task(void)
     os_sema_up(&ah_lmac_tx_orig.tx_sem);
 }
 
-
-void lmac_irq_ac_pd(void) {
-    static uint32_t n;
-
-    n++;
-
-//    if ((n & 0x3f) == 0) {
-//        log_trace("irq_ac_pd n=%u ac0=%u ag0_q=%u ag0_sel=%u pend=%u pd=0x%08x",
-//                  n,
-//                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[0]),
-//                  ah_lmac_tx_orig.pTx_ac_aggr_data[0].queued_count,
-//                  ah_lmac_tx_orig.pTx_ac_aggr_data[0].selected_count,
-//                  skb_list_count(&ah_lmac_tx_orig.tx_frames_pending_queue),
-//                  LMAC_HW->AC_PD);
-//    }
-
-    lmac_irq_ac_pd_orig();
-//
-//    if ((n & 0x3f) == 0) {
-//        log_trace("irq_ac_pd exit n=%u ac0=%u ag0_sel=%u first=%p pend=%u pd=0x%08x",
-//                  n,
-//                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[0]),
-//                  ah_lmac_tx_orig.pTx_ac_aggr_data[0].selected_count,
-//                  ah_lmac_tx_orig.pTx_ac_aggr_data[0].skb_list[0],
-//                  skb_list_count(&ah_lmac_tx_orig.tx_frames_pending_queue),
-//                  LMAC_HW->AC_PD);
-//    }
-}
 
 
 __attribute__((weak)) void lmac_tx_init(void) {
@@ -438,6 +410,7 @@ void lmac_tx_data_reload(void) {
                   skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[3]));
     }
 }
+
 
 
 int32 lmac_tx_pv0_data(struct sk_buff *skb) {

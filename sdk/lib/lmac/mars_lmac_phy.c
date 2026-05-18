@@ -5,7 +5,6 @@
  * entries in mars_lmac_tx_orig.c must stay disabled so callers reach these
  * functions through the existing lmac_tx_orig.c override mechanism.
  */
-//#define LMAC_PHY_USE_ORIG_SEND_DATA
 #include "sys_config.h"
 
 #define LOG_LOCAL_LEVEL LOG_LEVEL_MARS_LMAC_TX
@@ -30,15 +29,36 @@
 
 #define TXCTX_U8(off)       (*(volatile uint8_t  *)((uint8_t *)&ah_lmac_tx_orig + (off)))
 #define TXCTX_U16(off)      (*(volatile uint16_t *)((uint8_t *)&ah_lmac_tx_orig + (off)))
+#define TXCTX_U32(off)      (*(volatile uint32_t *)((uint8_t *)&ah_lmac_tx_orig + (off)))
 
 #define LMAC_IRQ_CLR_BO     0x20u
 #define LMAC_CCA_STAT_CLR   0x0ff0u
+#define LMAC_IRQ_CLR_TX_END 0x04u
 
 extern lmac_tx_ctx_t ah_lmac_tx_orig;
+extern lmac_ops_t    ah_ops;
 extern void lmac_irq_bo_fns_orig(void);
 extern void lmac_ant_sel_orig(uint32 ant);
-extern void lmac_send_data_to_phy_orig(uint32 ac);
-extern void lmac_cfg_txvec_part2_orig(void);
+
+/* lmac_irq_tx_end helpers */
+extern void   lhw_abort_fsm(void);
+extern void   ah_tdma_abort(void);
+extern uint32 lmac_lo_table_kick(uint32 ch);
+extern void   lmac_delay_us(uint32 us);
+extern uint32 lmac_wait_sync(uint32 timeout);
+extern void   switch_ctrl_normal_mode(void);
+extern void   ah_rfdigicali_config_rx_gain(uint32 stage, uint32 idx);
+extern void   ah_wphy_rx_gain_stage_cfg(uint32 stage);
+extern void   ah_rfdigicali_config_hw_bknoise(uint32 a, uint32 b);
+extern void   ah_rfdigicali_bknoise_valid_pd_clr(void);
+extern void   ah_rfdigicali_bknoise_calc_en(void);
+extern void   lmac_wait_bgscan(uint32 timeout);
+extern uint32 ah_wphy_err_code_get(void);
+extern void   lmac_rx_gain_cfg(uint32 gain);
+extern void   update_rx_buff_addr(void);
+extern void   lmac_tdma_start(void);
+extern void   lmac_set_basic_nav(uint32 nav_us);
+extern void   lhw_start_rx(uint32 flags);
 
 static inline uint8_t lmac_current_ac(void)
 {
@@ -94,6 +114,23 @@ int32 lmac_cfg_txvec_part2(void)
     return 0;
 }
 
+uint32 lmac_hdr_dur_calc(uint32 len)
+{
+    uint32_t timer6 = LMAC_HW->HF_TIMER6;
+    uint32_t limit  = timer6 & 0x7fffu;
+    uint32_t result;
+
+    if (len < limit)
+        result = (timer6 - len) & 0xffffu;
+    else
+        result = 0u;
+
+    if (LMAC_U8(0x878u) & 1u)
+        result = 0x8000u;
+
+    return result;
+}
+
 int32 lmac_send_data_to_phy(uint32 ac)
 {
     lmac_tx_ctx_buff *aggr;
@@ -119,7 +156,8 @@ int32 lmac_send_data_to_phy(uint32 ac)
     if (tx_duration < duration)
         tx_duration = (uint16_t)duration;
 
-    lhw_cfg_dma_list_cnt(aggr->selected_count);
+    /* DMA scatter-gather: set frame count in TXDMACTL[6:0] */
+    LMAC_HW->TXDMACTL = (LMAC_HW->TXDMACTL & ~0x7fu) | (aggr->selected_count & 0x7fu);
 
     for (uint32 i = 0; i < aggr->selected_count; i++) {
         struct sk_buff *skb = aggr->skb_list[i];
@@ -136,7 +174,9 @@ int32 lmac_send_data_to_phy(uint32 ac)
             data[3] = (uint8_t)(tx_duration >> 8);
         }
 
-        lhw_cfg_tx_sub_frm(i, (uint32)data, skb->len);
+        /* TX_SUB_FRM[i*2] = data ptr, TX_SUB_FRM[i*2+1] = length */
+        LMAC_HW->TX_SUB_FRM[i * 2u]      = (uint32_t)data;
+        LMAC_HW->TX_SUB_FRM[i * 2u + 1u] = (uint32_t)skb->len;
     }
 
     LMAC_HW->TX_BYTCNT = aggr->total_len_bytes;
@@ -169,18 +209,8 @@ int32 lmac_tx_frm(struct sk_buff *skb)
         return -1;
     }
 
-#ifdef LMAC_PHY_USE_ORIG_SEND_DATA
-    log_warn("tx_frm: using lmac_send_data_to_phy_orig for probe ac=%u", ac);
-    lmac_send_data_to_phy_orig(ac);
-#else
     lmac_send_data_to_phy(ac);
-#endif
-#ifdef LMAC_PHY_USE_ORIG_TXVEC2
-    log_warn("tx_frm: using lmac_cfg_txvec_part2_orig for probe");
-    lmac_cfg_txvec_part2_orig();
-#else
     lmac_cfg_txvec_part2();
-#endif
 
     aggr->reserved_10f &= (uint8_t)~0x04u;
     ((volatile uint32_t *)&ah_lmac)[(uint32_t)ac + 0x1c7u] += 1u;
@@ -314,4 +344,93 @@ void lmac_irq_bo_fns(void)
 
     log_trace("irq_bo_fns: state=%u fallback to orig", state);
     lmac_irq_bo_fns_orig();
+}
+
+void lmac_irq_tx_end(void)
+{
+    uint32_t flags = 0u;
+
+    LMAC_HW->IRQ_PD = LMAC_IRQ_CLR_TX_END;
+    lhw_abort_fsm();
+    ah_tdma_abort();
+
+    /* LO recalibration if operating channel changed during TX */
+    if (LMAC_U8(0x340u) != LMAC_U8(0x33cu) &&
+        !(LMAC_U8(0xa4fu) & 0x08u) &&
+        !(LMAC_U8(0x892u) & 0x02u)) {
+        lmac_lo_table_kick(LMAC_U8(0x33cu));
+        lmac_delay_us(0x34u);
+    }
+
+    if ((LMAC_HW->TX_STAT & 3u) == 0u) {
+        /* TX success: capture FCS result and pack rate info into TX context */
+        uint32_t txvec1 = LMAC_HW->TXVEC1;
+        TXCTX_U32(0x558u) = LMAC_HW->FCS_RES;
+        TXCTX_U8(0x55cu)  = (TXCTX_U8(0x55cu)  & 0x80u) | ((uint8_t)(txvec1 >> 16) & 0x7fu);
+        TXCTX_U16(0x55cu) = (TXCTX_U16(0x55cu) & 0xfc7fu) | (uint16_t)((txvec1 & 7u) << 7);
+        TXCTX_U8(0x55du)  = (TXCTX_U8(0x55du)  & 0xe7u) | (uint8_t)(((txvec1 >>  6u) & 3u) << 3);
+        TXCTX_U8(0x55du)  = (TXCTX_U8(0x55du)  & 0x1fu) | (uint8_t)(((txvec1 >> 12u) & 7u) << 5);
+
+        uint32_t sub_state = LMAC_U32(0x998u);
+        if (sub_state < 7u) {
+            uint32_t mask = 1u << sub_state;
+            if (mask & 0x6eu) {
+                /* data/ACK/BA path: wait for sync window */
+                flags = lmac_wait_sync(0x1c0u);
+            } else if (mask & 0x10u) {
+                /* RTS path: restore RX gain and background scan */
+                if (LMAC_U8(0x37cu) & 0x01u) {
+                    lmac_lo_table_kick(LMAC_U8(0x379u));
+                    LMAC_U16(0x9d8u)++;
+                }
+                switch_ctrl_normal_mode();
+                if (LMAC_U8(0x361u) & 0x08u) {
+                    ah_rfdigicali_config_rx_gain(5u, (uint32_t)LMAC_U8(0x308u));
+                    ah_wphy_rx_gain_stage_cfg(5u);
+                }
+                ah_rfdigicali_config_hw_bknoise(0x640u, 1u);
+                ah_rfdigicali_bknoise_valid_pd_clr();
+                ah_rfdigicali_bknoise_calc_en();
+                lmac_wait_bgscan(0x50u);
+            }
+        }
+    } else {
+        /* TX error */
+        LMAC_U32(0x9b4u) |= 2u;
+        if (LMAC_U32(0x3b8u) & 0x10u) {
+            uint32_t sub = LMAC_U32(0x994u);
+            uint32_t err = ah_wphy_err_code_get();
+            log_warn("tx_end err: sub=%u wphy=0x%x stat=0x%x tv1=0x%x",
+                     sub, err, LMAC_HW->TX_STAT, LMAC_HW->TXVEC1);
+        }
+        uint16_t gain_reg = LMAC_U16(0x362u);
+        LMAC_HW->TX_STAT |= 3u;
+        flags = 0u;
+        LMAC_U32(0xa50u) = 0u;
+        LMAC_U32(0x998u) = 0u;
+        lmac_rx_gain_cfg((gain_reg & 0x7ffu) >> 4);
+    }
+
+    /* Common tail: reset TX state, restart RX */
+    LMAC_U32(0x994u) = 0u;
+    update_rx_buff_addr();
+    lmac_tdma_start();
+    if (LMAC_U8(0x9e2u) & 0x08u)
+        lmac_set_basic_nav(((LMAC_U16(0x9e2u) & 0x1fffu) >> 6) * 1000u);
+    lhw_start_rx(flags);
+
+    /* Duration timer setup if a follow-on frame is pending */
+    uint16_t dur = TXCTX_U16(0x55eu);
+    if (dur != 0u) {
+        LMAC_HW->TIMER_CTL |= 0x2000u;
+        LMAC_HW->IRQ_PD     = 0x80000u;
+        LMAC_HW->HF_TIMER6  = (uint32_t)dur;
+        LMAC_HW->TIMER_CTL |= 0x1000u;
+    }
+    if (LMAC_U32(0x998u) == 1u)
+        TXCTX_U16(0x55eu) = 0u;
+
+    /* Clear NAV continuation bits */
+    LMAC_U16(0x90eu) &= (uint16_t)~0x2000u;
+    LMAC_U16(0x91eu) &= (uint16_t)~0x2000u;
 }
