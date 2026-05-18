@@ -300,7 +300,7 @@ static void lmac_tx_status_task(void *_arg) {
         while ((skb = skb_list_dequeue(&ah_lmac_tx_orig.tx_frames_pending_queue)) != NULL) {
             uint8_t *txd = skb->head;
 
-            ah_lmac._rsv_a64[0] &= 0xfe;
+            ah_lmac.tx_irq_ctrl_flags &= 0xfe;
             ah_lmac.pending_pkg_to_status_check--;
 
             if (skb->users.counter > 1) {

@@ -205,12 +205,10 @@ struct lmac_ctx {
     uint32_t debug_flags;
     uint16_t bw_restore_count_threshold;
     uint16_t bgr_sample_threshold;
-    uint32_t ap_sleep_timer_base;
-    uint32_t ap_sleep_timer_hi_or_mark;
+    uint64_t ap_sleep_timer;          /* 0x3C0: jiffies timestamp, 0 when inactive */
     uint16_t ap_sleep_timeout_active;
     uint16_t ap_sleep_timeout_reload;
-    uint32_t bss_rx_activity_jiffies;
-    uint32_t bss_rx_activity_ref;
+    uint64_t bss_rx_activity;         /* 0x3CC: jiffies of last BSS RX activity */
     uint32_t beacon_timeout_low;
     uint32_t beacon_timeout_high;
     uint16_t ack_timeout_extra;
@@ -280,7 +278,7 @@ struct lmac_ctx {
     uint8_t tx_write_flags_70c;
     uint8_t tx_write_flags_70d;
     uint8_t tx_write_flags_70e;
-    uint8_t tx_flags_70f;
+    uint8_t tx_last_mcs_bw;       /* 0x70F: last TX MCS/BW byte from TXVEC1 (bits[3:0]=MCS-lo, bits[7:4]=BW) */
     uint8_t tx_write_only_710;
     uint8_t _rsv_711[1];
     int16_t rx_dcoc_i_offset;
@@ -296,11 +294,11 @@ struct lmac_ctx {
     uint32_t tx_queue_state_734;
     uint32_t tx_queue_state_738;
     uint32_t tx_queue_state_73c;
-    uint32_t tx_duration_low;
-    uint32_t tx_duration_high;
-    uint32_t tx_state_748;
+    uint32_t tx_attempt_count;    /* 0x740: TX event counter (+1 per backoff→TX, data and beacon) */
+    uint32_t tx_mpdu_count;       /* 0x744: total MPDUs transmitted (+=selected_count per aggregate) */
+    uint32_t tx_byte_count_total; /* 0x748: total TX bytes (+=total_len_bytes per aggregate) */
     uint32_t tx_queue_state_74c;
-    uint32_t rx_duration_low;
+    uint32_t tx_sym_time_acc;     /* 0x750: accumulated TXCTX symbol time (+=TXCTX[0x560]+[0x562]) */
     uint32_t rx_queue_state_754;
     uint32_t rx_duration_high;
     uint32_t tx_state_75c;
@@ -349,10 +347,10 @@ struct lmac_ctx {
     uint32_t tx_channel_state_800;
     uint16_t tx_state_804;
     uint16_t tx_state_806;
-    uint32_t tx_state_808;
-    uint32_t tx_state_80c;
-    uint32_t tx_state_810;
-    uint32_t tx_state_814;
+    uint32_t tx_latency_acc_lo;   /* 0x808: TX latency accumulator low word  (jiffies: acc -= enqueue_time + now) */
+    uint32_t tx_latency_acc_hi;   /* 0x80C: TX latency accumulator high word */
+    uint32_t tx_airtime_acc_lo;   /* 0x810: TX airtime accumulator low word  (half-symbol units, scaled) */
+    uint32_t tx_airtime_acc_hi;   /* 0x814: TX airtime accumulator high word */
     uint8_t _rsv_818[4];
     uint32_t tx_state_81c;
     uint32_t tx_write_only_820;
@@ -364,7 +362,7 @@ struct lmac_ctx {
     uint16_t rx_dcoc_i_last;
     int16_t rx_dcoc_q_last;
     uint8_t _rsv_83c[1];
-    uint8_t tx_byte_83d;
+    int8_t  tx_airtime_scale_offset; /* 0x83D: signed; effective airtime scale = (100 - this) % */
     uint8_t tx_write_byte_83e;
     uint8_t _rsv_83f[1];
     uint8_t tx_byte_840;
@@ -444,7 +442,9 @@ struct lmac_ctx {
     uint32_t qa_rx_channel_map;
     uint8_t _rsv_8d0[8];
     uint32_t ba_resp_timeout_or_tdma;
-    uint8_t _rsv_8dc[80];
+    uint8_t _rsv_8dc[78];
+    uint8_t ba_ctrl_flags;    /* 0x92A: bit3=NDP/delayed-BA, skip sync-wait after BA */
+    uint8_t _rsv_92b;
     uint32_t tx_vec_hdr_config;
     uint8_t _rsv_930[40];
     struct pv0_cfend_frame pv0_cfend;
@@ -457,20 +457,12 @@ struct lmac_ctx {
     uint32_t tx_active_flags;
     uint16_t tx_state_9c8;
     uint8_t _rsv_9ca[2];
-    undefined field347_0x991;
-    undefined field348_0x992;
-    undefined field349_0x993;
-    undefined field350_0x994;
-    undefined field351_0x995;
-    undefined field352_0x996;
-    undefined field353_0x997;
-    undefined field354_0x998;
-    undefined field355_0x999;
-    undefined field356_0x99a;
-    undefined field357_0x99b;
+    uint8_t  _rsv_991[3];
+    uint32_t bo_frame_type;    /* 0x994: type of frame scheduled for next backoff (1=data, 2=ACK, 3=BA, 4=RTS, 5=CTS, 6=CFPoll, 7=CFEnd, 8=Beacon, 9=Null, 10=PSPoll) */
+    uint32_t bo_tx_substate;   /* 0x998: result code written by lmac_irq_bo_fns, consumed by lmac_irq_tx_end (0=none, 1=data, 2=RTS, 3=CFPoll, 4=ACK/BA/Beacon, 5=Null, 6=PSPoll) */
     uint8_t _rsv_9cc[4];
     struct os_task main_task;
-    uint8_t _rsv_9e4[4];
+    uint32_t tx_irq_error_flags; /* 0x9B4: error accumulator: bit0=unknown_bo_state, bit1=tx_hw_error, bit14=no_data_in_aggr */
     char *allocated_print_buffer;
     struct os_semaphore print_queue_sem;
     struct os_task print_task;
@@ -479,11 +471,12 @@ struct lmac_ctx {
     uint8_t beacon_obss_slot_flags;
     uint8_t irq_ac_control_flags;
     uint8_t tx_global_flags;
-    undefined field369_0x9dd;
+    uint8_t ps_tim_state;    /* 0x9DD: low nibble = TIM PS delivery state; nonzero = PS delivery pending after beacon */
     undefined field370_0x9de;
     int8_t field371_0x9df;
-    void *tdma_buff;
-    uint32_t tdma_buff_size;
+    uint8_t  _rsv_9e0[2];     /* 0x9E0-0x9E1: reserved */
+    uint16_t bo_nav_ctrl;     /* 0x9E2: bit[1]=rts_needed bit[3]=nav_pending bit[5]=bo_active bits[12:6]=nav_dur_ms */
+    uint32_t tdma_buff_size;  /* 0x9E4 */
     struct os_mutex sta_list_mutex;
     undefined field375_0x9f0;
     undefined field376_0x9f1;
@@ -493,10 +486,7 @@ struct lmac_ctx {
     undefined field380_0x9f5;
     undefined field381_0x9f6;
     undefined field382_0x9f7;
-    undefined field383_0x9f8;
-    undefined field384_0x9f9;
-    undefined field385_0x9fa;
-    undefined field386_0x9fb;
+    void    *pSta_list_head;      /* 0x9F8: circular STA linked list head (sentinel = &ah_lmac.pSta_list_head) */
     undefined field387_0x9fc;
     undefined field388_0x9fd;
     undefined field389_0x9fe;
@@ -511,10 +501,8 @@ struct lmac_ctx {
     undefined field398_0xa07;
     undefined field399_0xa08;
     undefined field400_0xa09;
-    undefined field401_0xa0a;
-    undefined field402_0xa0b;
-    undefined field403_0xa0c;
-    undefined field404_0xa0d;
+    uint16_t ps_beacon_sta_cnt;      /* 0xA0A: count of PS STAs expecting data after beacon; 0 = normal sync path */
+    uint16_t ps_data_delivery_ctrl;  /* 0xA0C: cleared when data TX occurs during PS delivery */
     undefined field405_0xa0e;
     undefined field406_0xa0f;
     undefined field407_0xa10;
@@ -523,7 +511,9 @@ struct lmac_ctx {
     struct os_timer tick_timer;
     struct os_timer scan_timer;
     uint32_t last_rx_pv0_ctrl_info;
-    uint8_t _rsv_a64[28];
+    uint8_t tx_irq_ctrl_flags;    /* 0xA4F: bit3=PS-retry-skip; set when TX frame has PS flag, checked in lmac_irq_tx_end */
+    void   *pTx_current_sta;     /* 0xA50: pointer to last TX STA, used by lmac_irq_tx_end to update STA stats */
+    uint8_t _rsv_a54[23];        /* 0xA54-0xA6A */
     uint32_t evt_queue_head;
     uint32_t evt_queue_tail;
     uint32_t evt_queue_capacity;
@@ -773,7 +763,12 @@ struct lmac_tx_ctx {
     struct skb_list tx_frames_pending_queue;
     uint8_t pTx_cipher_iv_buffer[16];
     uint8_t pTx_agg_count_per_ac[4];
-    uint8_t pTx_cipher_reserved[10];
+    /* TX completion status save area (0x558-0x561, 10 bytes) */
+    uint32_t tx_last_fcs;           /* 0x558: LMAC_HW->FCS_RES captured at TX end */
+    uint16_t tx_last_rate_packed;   /* 0x55c: packed TXVEC1 bits: [6:0]=AID/scrambler [9:7]=MCS_lo [12:11]=BW [15:13]=MCS_hi */
+    uint16_t tx_pending_nav_dur;    /* 0x55e: pending NAV/duration for timer; also minimum duration in DMA path */
+    uint16_t tx_cca_slot_count;     /* 0x560: AIFSN slot count written by lmac_attempt_tx */
+    /* 0x562: first 2 bytes of pTx_vector_cache[0] (flags0:bw_fmt) reused as tx_cca_remain scratch */
     struct lmac_tx_vector pTx_vector_cache[5];
     uint8_t pTx_vector_array_alignment[2];
     struct lmac_tx_vector data_tx_vector;
