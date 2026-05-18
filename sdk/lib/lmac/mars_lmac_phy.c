@@ -23,35 +23,22 @@
 #define LMAC_U8(off)        (*(volatile uint8_t  *)((uint8_t *)&ah_lmac + (off)))
 #define LMAC_U16(off)       (*(volatile uint16_t *)((uint8_t *)&ah_lmac + (off)))
 #define LMAC_U32(off)       (*(volatile uint32_t *)((uint8_t *)&ah_lmac + (off)))
-#define LMAC_U64(off)       (*(volatile uint64_t *)((uint8_t *)&ah_lmac + (off)))
-#define LMAC_I8(off)        (*(volatile int8_t   *)((uint8_t *)&ah_lmac + (off)))
-#define LMAC_PTR(off)       (*(void **)((uint8_t *)&ah_lmac + (off)))
-
-#define TXCTX_U8(off)       (*(volatile uint8_t  *)((uint8_t *)&ah_lmac_tx_orig + (off)))
-#define TXCTX_U16(off)      (*(volatile uint16_t *)((uint8_t *)&ah_lmac_tx_orig + (off)))
 
 #define LMAC_IRQ_CLR_BO     0x20u
 #define LMAC_CCA_STAT_CLR   0x0ff0u
 #define LMAC_IRQ_CLR_TX_END 0x04u
 
 extern lmac_tx_ctx_t ah_lmac_tx_orig;
-extern lmac_ops_t    ah_ops;
 extern void lmac_ant_sel_orig(uint32 ant);
+extern struct sk_buff *lmac_get_first_skb_orig(uint32 ac);
 
-/* lmac_irq_tx_end helpers not already declared in mars_lmac_tx.h */
+/* lmac_irq_tx_end helpers */
 extern void   lhw_abort_fsm(void);
 extern void   ah_tdma_abort(void);
-extern void   lmac_delay_us(uint32 us);
 extern uint32 lmac_wait_sync(uint32 timeout);
-extern void   ah_rfdigicali_config_rx_gain(uint32 stage, uint32 idx);
-extern void   ah_wphy_rx_gain_stage_cfg(uint32 stage);
-extern void   ah_rfdigicali_bknoise_valid_pd_clr(void);
-extern void   ah_rfdigicali_bknoise_calc_en(void);
-extern void   lmac_wait_bgscan(uint32 timeout);
 extern uint32 ah_wphy_err_code_get(void);
 extern void   lmac_rx_gain_cfg(uint32 gain);
 extern void   update_rx_buff_addr(void);
-extern void   lmac_set_basic_nav(uint32 nav_us);
 extern void   lhw_start_rx(uint32 flags);
 
 static inline uint8_t lmac_current_ac(void)
@@ -61,19 +48,7 @@ static inline uint8_t lmac_current_ac(void)
 
 static inline void lmac_common_bo_irq_finish(void)
 {
-    uint32_t *txvec = (uint32_t *)ah_lmac_tx_orig.pPv0_txvec;
-
     ah_lmac.bo_nav_ctrl &= (uint16_t)~0x20u;
-    if (txvec != NULL)
-        ah_lmac.tx_queue_state_74c += txvec[1];
-
-    if (ah_lmac.ap_sleep_timer != 0u) {
-        ah_lmac.ap_sleep_timer = os_jiffies();
-    }
-
-    if (ah_lmac.bss_rx_activity != 0u) {
-        ah_lmac.bss_rx_activity = os_jiffies();
-    }
 }
 
 int32 lmac_cfg_txvec_part2(void)
@@ -208,121 +183,8 @@ int32 lmac_tx_frm(struct sk_buff *skb)
 
 static void lmac_irq_bo_fns_tx_data_state(void)
 {
-    uint8_t ac;
-    lmac_tx_ctx_buff *aggr;
-    struct sk_buff *first_skb;
-    uint8_t *txi;
-    uint8_t *sta;
-    uint32_t txvec1;
-    uint32_t tx_airtime;
-    uint64_t now;
-
     lmac_tx_frm(NULL);
-
-    ac = lmac_current_ac();
-    if (ac >= 4u) {
-        log_warn("bo_state_data: ac=%u out of range after tx_frm", ac);
-        return;
-    }
-
-    aggr = &ah_lmac_tx_orig.pTx_ac_aggr_data[ac];
-    first_skb = aggr->skb_list[0];
-
-    ah_lmac.tx_attempt_count++;
-    ah_lmac.tx_mpdu_count       += aggr->selected_count;
-    ah_lmac.tx_byte_count_total += aggr->total_len_bytes;
-    ah_lmac.tx_sym_time_acc     += (uint16_t)TXCTX_U16(0x560u) + (uint16_t)TXCTX_U16(0x562u);
-
-    if (first_skb == NULL || first_skb->head == NULL) {
-        log_warn("bo_state_data: missing first skb/head first=%p", first_skb);
-        goto finish_state;
-    }
-
-    txi = first_skb->head;
-    sta = *(uint8_t **)(txi + 0x0c);
-
-    if (sta != NULL) {
-        uint16_t cnt = *(uint16_t *)(sta + 0x1c4) + 1u;
-        ah_lmac.pTx_current_sta = sta;
-        *(uint16_t *)(sta + 0x1c4) = cnt;
-        *(uint16_t *)(sta + 0x1c6) += aggr->selected_count;
-        *(uint32_t *)(sta + 0x1c8) += aggr->total_len_bytes;
-        *(uint32_t *)(sta + 0x1cc) += aggr->symbol_len;
-        *(uint32_t *)(sta + 0x1d0) += (uint16_t)TXCTX_U16(0x560u) + (uint16_t)TXCTX_U16(0x562u);
-
-        txvec1 = *(volatile uint32_t *)((uint8_t *)(LMAC_HW) + 0x064u);
-        sta[0xb1] = (uint8_t)((sta[0xb1] & ~0x07u) | (txvec1 & 0x07u));
-        sta[0xaf] = (uint8_t)((sta[0xaf] & ~0xf0u) | (((txvec1 >> 6) & 0x0fu) << 4));
-        sta[0xae] = (uint8_t)((sta[0xae] & ~0x0fu) | ((txvec1 >> 12) & 0x0fu));
-    }
-
-    if ((*(uint16_t *)(txi + 0x26) & 0x0280u) == 0x0280u) {
-        txvec1 = *(volatile uint32_t *)((uint8_t *)(LMAC_HW) + 0x064u);
-        ah_lmac.tx_last_mcs_bw = (uint8_t)((ah_lmac.tx_last_mcs_bw & ~0x0fu) | ((txvec1 >> 6) & 0x0fu));
-        ah_lmac.tx_last_mcs_bw = (uint8_t)((ah_lmac.tx_last_mcs_bw & ~0xf0u) | ((txvec1 >> 8) & 0xf0u));
-    }
-
-    txvec1 = *(volatile uint32_t *)((uint8_t *)(LMAC_HW) + 0x064u);
-    {
-        uint32_t mcs_hi = (txvec1 >> 10) & 0x3u;
-        uint32_t rate_idx;
-        int32_t scale = 100 - ah_lmac.tx_airtime_scale_offset;
-        uint16_t *rate_half = (uint16_t *)rate_tbl;
-
-        if (mcs_hi != 0u)
-            mcs_hi = ((txvec1 >> 6) + 1u) & 0x3u;
-        rate_idx = (mcs_hi << 3) + ((txvec1 >> 12) & 0x7u);
-        tx_airtime = ((uint32_t)rate_half[rate_idx] * (uint32_t)scale) / 100u;
-    }
-
-    {
-        uint64_t a = ((uint64_t)ah_lmac.tx_airtime_acc_hi << 32) | ah_lmac.tx_airtime_acc_lo;
-        a += tx_airtime;
-        ah_lmac.tx_airtime_acc_lo = (uint32_t)a;
-        ah_lmac.tx_airtime_acc_hi = (uint32_t)(a >> 32);
-    }
-    now = os_jiffies();
-    {
-        uint64_t lat = ((uint64_t)ah_lmac.tx_latency_acc_hi << 32) | ah_lmac.tx_latency_acc_lo;
-        lat = lat - *(uint64_t *)(txi + 0x34) + now;
-        ah_lmac.tx_latency_acc_lo = (uint32_t)lat;
-        ah_lmac.tx_latency_acc_hi = (uint32_t)(lat >> 32);
-    }
-
-    if ((*(uint32_t *)(txi + 0x08) & 0x02u) != 0u) {
-        for (uint32_t off = 0; off != 0xc0u; off += 0x0cu)
-            *((volatile int8_t *)((uint8_t *)&ah_lmac + off + 0x247u)) = -128;
-    }
-
-    if ((*(uint32_t *)(txi + 0x08) & 0x08u) != 0u) {
-        ah_lmac.tx_irq_ctrl_flags |= 0x08u;
-    }
-
-    for (uint32_t i = 0; i < aggr->selected_count; i++) {
-        struct sk_buff *sub = aggr->skb_list[i];
-        uint8_t *sub_txi;
-
-        if (sub == NULL || sub->head == NULL)
-            continue;
-
-        sub_txi = sub->head;
-        if ((sub_txi[0x25] & 0x02u) != 0u)
-            sub_txi[0x27] |= 0x80u;
-        sub_txi[0x28]++;
-        if (sub_txi[0x2c] != 0u)
-            sub_txi[0x2c]--;
-    }
-
-    for (uint8_t *node = ah_lmac.pSta_list_head;
-         node != (uint8_t *)&ah_lmac.pSta_list_head;
-         node = *(uint8_t **)node) {
-        node[0x6b] &= (uint8_t)~0x08u;
-    }
-
-    ah_lmac.ps_data_delivery_ctrl = 0u;
     ah_lmac.bo_tx_substate = 1u;
-
-finish_state:
     lmac_common_bo_irq_finish();
 }
 
@@ -348,7 +210,6 @@ void lmac_irq_bo_fns(void)
         break;
     case 4:                                     /* send RTS */
         lmac_tx_rts(NULL);
-        ah_lmac.tx_queue_state_72c++;
         ah_lmac.bo_tx_substate = 2u;
         break;
     case 5:                                     /* send CTS */
@@ -363,10 +224,7 @@ void lmac_irq_bo_fns(void)
         break;
     case 8:                                     /* send Beacon */
         lmac_tx_beacon(NULL);
-        if (!(ah_lmac.ps_tim_state & 0x0fu) && !ah_lmac.ps_beacon_sta_cnt)
-            ah_lmac.bo_tx_substate = 4u;
-        ah_lmac.tx_attempt_count++;
-        ah_lmac.tx_queue_state_730++;
+        ah_lmac.bo_tx_substate = 4u;
         break;
     case 9:                                     /* send Null frame */
         lmac_tx_pv0_null(NULL);
@@ -391,92 +249,128 @@ void lmac_irq_tx_end(void)
     lhw_abort_fsm();
     ah_tdma_abort();
 
-    /* LO recalibration if operating channel changed during TX */
-    if (LMAC_U8(0x340u) != LMAC_U8(0x33cu) &&
-        !(ah_lmac.tx_irq_ctrl_flags & 0x08u) &&
-        !(LMAC_U8(0x892u) & 0x02u)) {
-        lmac_lo_table_kick(LMAC_U8(0x33cu));
-        lmac_delay_us(0x34u);
-    }
-
     if ((LMAC_HW->TX_STAT & 3u) == 0u) {
-        /* TX success: capture FCS result and pack TXVEC1 rate/AID info */
-        uint32_t txvec1 = LMAC_HW->TXVEC1;
-        ah_lmac_tx_orig.tx_last_fcs = LMAC_HW->FCS_RES;
-        /* tx_last_rate_packed bit layout:
-         * byte[0] [6:0] = TXVEC1[22:16] (partial AID / scrambler seed)
-         * byte[0]   [7] = preserved
-         * [9:7]         = TXVEC1[2:0]   (MCS low)
-         * byte[1] [4:3] = TXVEC1[7:6]   (BW / format)
-         * byte[1] [7:5] = TXVEC1[14:12] (MCS high)
-         */
-        volatile uint8_t *rp = (uint8_t *)&ah_lmac_tx_orig.tx_last_rate_packed;
-        rp[0] = (rp[0] & 0x80u) | ((uint8_t)(txvec1 >> 16) & 0x7fu);
-        ah_lmac_tx_orig.tx_last_rate_packed =
-            (ah_lmac_tx_orig.tx_last_rate_packed & 0xfc7fu) | (uint16_t)((txvec1 & 7u) << 7);
-        rp[1] = (rp[1] & 0xe7u) | (uint8_t)(((txvec1 >>  6u) & 3u) << 3);
-        rp[1] = (rp[1] & 0x1fu) | (uint8_t)(((txvec1 >> 12u) & 7u) << 5);
-
+        /* TX success: wait for sync window on data/response paths */
         uint32_t sub_state = ah_lmac.bo_tx_substate;
-        if (sub_state < 7u) {
-            uint32_t mask = 1u << sub_state;
-            if (mask & 0x6eu) {
-                /* data/ACK/BA path: wait for sync window */
-                flags = lmac_wait_sync(0x1c0u);
-            } else if (mask & 0x10u) {
-                /* RTS path: restore RX gain and background scan */
-                if (LMAC_U8(0x37cu) & 0x01u) {
-                    lmac_lo_table_kick(LMAC_U8(0x379u));
-                    LMAC_U16(0x9d8u)++;
-                }
-                switch_ctrl_normal_mode();
-                if (LMAC_U8(0x361u) & 0x08u) {
-                    ah_rfdigicali_config_rx_gain(5u, (uint32_t)LMAC_U8(0x308u));
-                    ah_wphy_rx_gain_stage_cfg(5u);
-                }
-                ah_rfdigicali_config_hw_bknoise(0x640u, 1u);
-                ah_rfdigicali_bknoise_valid_pd_clr();
-                ah_rfdigicali_bknoise_calc_en();
-                lmac_wait_bgscan(0x50u);
-            }
-        }
+        if (sub_state < 7u && ((1u << sub_state) & 0x6eu))
+            flags = lmac_wait_sync(0x1c0u);
     } else {
-        /* TX error */
+        /* TX error: log, clear HW error bits, restore RX gain */
         ah_lmac.tx_irq_error_flags |= 2u;
         if (LMAC_U32(0x3b8u) & 0x10u) {
-            uint32_t sub = ah_lmac.bo_frame_type;
             uint32_t err = ah_wphy_err_code_get();
             log_warn("tx_end err: sub=%u wphy=0x%x stat=0x%x tv1=0x%x",
-                     sub, err, LMAC_HW->TX_STAT, LMAC_HW->TXVEC1);
+                     ah_lmac.bo_frame_type, err, LMAC_HW->TX_STAT, LMAC_HW->TXVEC1);
         }
         uint16_t gain_reg = LMAC_U16(0x362u);
         LMAC_HW->TX_STAT |= 3u;
-        flags = 0u;
-        ah_lmac.pTx_current_sta = NULL;
         ah_lmac.bo_tx_substate = 0u;
         lmac_rx_gain_cfg((gain_reg & 0x7ffu) >> 4);
     }
 
-    /* Common tail: reset TX state, restart RX */
     ah_lmac.bo_frame_type = 0u;
     update_rx_buff_addr();
     lmac_tdma_start();
-    if (ah_lmac.bo_nav_ctrl & 0x08u)
-        lmac_set_basic_nav(((ah_lmac.bo_nav_ctrl & 0x1fffu) >> 6) * 1000u);
     lhw_start_rx(flags);
+}
 
-    /* Duration timer setup if a follow-on frame is pending */
-    uint16_t dur = ah_lmac_tx_orig.tx_pending_nav_dur;
-    if (dur != 0u) {
-        LMAC_HW->TIMER_CTL |= 0x2000u;
-        LMAC_HW->IRQ_PD     = 0x80000u;
-        LMAC_HW->HF_TIMER6  = (uint32_t)dur;
-        LMAC_HW->TIMER_CTL |= 0x1000u;
+/* Mark the first frame in the current AC aggregate as done.
+ * Modem mode: fire-and-forget — mark done regardless of ACK outcome. */
+int32 lmac_update_tx_state_ack(uint32 ok, uint32 arg1, uint32 arg2)
+{
+    (void)ok; (void)arg1; (void)arg2;
+    uint8_t ac = lmac_current_ac();
+    if (ac >= 4u)
+        return -1;
+    struct sk_buff *skb = ah_lmac_tx_orig.pTx_ac_aggr_data[ac].skb_list[0];
+    if (skb != NULL && skb->head != NULL)
+        skb->head[0x27] |= 0x80u;
+    return 0;
+}
+
+/* Mark all frames in the current AC aggregate as done after BA. */
+int32 lmac_update_tx_state_ba(uint32 start_ssn, uint32 bitmap_lo, uint32 bitmap_hi)
+{
+    (void)start_ssn; (void)bitmap_lo; (void)bitmap_hi;
+    uint8_t ac = lmac_current_ac();
+    if (ac >= 4u)
+        return -1;
+    lmac_tx_ctx_buff *aggr = &ah_lmac_tx_orig.pTx_ac_aggr_data[ac];
+    for (uint32_t i = 0u; i < aggr->selected_count; i++) {
+        struct sk_buff *skb = aggr->skb_list[i];
+        if (skb != NULL && skb->head != NULL)
+            skb->head[0x27] |= 0x80u;
     }
-    if (ah_lmac.bo_tx_substate == 1u)
-        ah_lmac_tx_orig.tx_pending_nav_dur = 0u;
+    return 0;
+}
 
-    /* Clear NAV continuation bits */
-    LMAC_U16(0x90eu) &= (uint16_t)~0x2000u;
-    LMAC_U16(0x91eu) &= (uint16_t)~0x2000u;
+/* No-op in modem mode: Partial AID requires a STA table entry, which we don't use. */
+void lmac_partial_aid_update(void *txi)
+{
+    (void)txi;
+}
+
+/*
+ * Modem-mode rate selection: pass forced MCS/BW from TXI through to gen_txvec
+ * without the binary's two failure modes:
+ *   1. TXI[0x3d] >= 8 causes binary to re-read lmac[0x866] as mcs, silently
+ *      replacing MCS10 with the auto-default unless auto-default is also 10.
+ *   2. Min-MCS floor lmac[0x865] silently raises MCS0 to >=1.
+ *
+ * Explicit TXI[0x3d] (!=0xff): use it directly, only cap at HW max.
+ * Explicit TXI[0x3c] (!=0xff): use it directly, no config override.
+ * MCS10 hardware requires S1G_1M mode (bw_hint=3); any other BW is a hard error.
+ * Invalid MCS (>7 and not 10): clamp to 1 with a warning.
+ */
+int32 lmac_update_tx_rate(uint32 ac, uint8 *bw_hint_out, uint8 *mcs_out)
+{
+    struct sk_buff *skb;
+    uint8_t *txi;
+    uint8_t mcs, bw_hint, max_mcs;
+
+    if (ac >= 4u)
+        return -1;
+
+    skb = lmac_get_first_skb_orig(ac);
+    if (skb == NULL)
+        return -1;
+
+    txi = (uint8_t *)skb->head;
+    max_mcs = LMAC_U8(0x864u);
+
+    mcs = txi[0x3du];
+    if (mcs == 0xffu) {
+        /* Auto MCS: read default and apply min/max config clamping */
+        mcs = LMAC_U8(0x866u);
+        uint8_t min_mcs = LMAC_U8(0x865u);
+        if (mcs != 10u) {
+            if (mcs > max_mcs) mcs = max_mcs;
+            if (mcs < min_mcs) mcs = min_mcs;
+        }
+    } else {
+        /* Explicit MCS: cap at HW max only, skip the min-floor */
+        if (mcs != 10u && mcs > max_mcs)
+            mcs = max_mcs;
+    }
+
+    if (mcs > 7u && mcs != 10u) {
+        log_warn("update_tx_rate: ac=%u invalid mcs=%u, clamping to 1", ac, mcs);
+        mcs = 1u;
+    }
+
+    bw_hint = txi[0x3cu];
+    if (bw_hint == 0xffu)
+        bw_hint = (LMAC_U8(0x34au) & 1u) ? 3u : 0u;
+
+    /* MCS10 is only valid in S1G_1M mode (2 MHz physical, bw_hint=3). */
+    if (mcs == 10u && bw_hint != 3u) {
+        log_warn("update_tx_rate: ac=%u MCS10 needs S1G_1M (bw=3), got bw=%u, clamping to mcs=1", ac, bw_hint);
+        mcs = 1u;
+    }
+
+    *bw_hint_out = (char)bw_hint;
+    *mcs_out     = (char)mcs;
+    LMAC_U32(0x6e8u) = (uint32_t)mcs;
+    LMAC_U32(0x6ecu) = (uint32_t)bw_hint;
+    return 0;
 }

@@ -49,9 +49,9 @@ WRAP(uint32, pv0_ctrl_uplink_txpwr_gen, (void), ())
 WRAPV(lmac_irq_tx_tmo, (void), ())
 //WRAPV(lmac_irq_bo_fns, (void), ())   /* C impl in mars_lmac_phy.c */
 WRAPV(lmac_irq_ac_pd, (void), ())      /* sub-fns are local in binary, cannot reimplement */
-WRAP(int32, lmac_update_tx_rate, (uint32 ac, uint8 *rate_out, uint8 *bw_out), (ac, rate_out, bw_out))
-WRAP(int32, lmac_update_tx_state_ack, (uint32 ok, uint32 arg1, uint32 arg2), (ok, arg1, arg2))
-WRAP(int32, lmac_update_tx_state_ba, (uint32 start_ssn, uint32 bitmap_lo, uint32 bitmap_hi), (start_ssn, bitmap_lo, bitmap_hi))
+//WRAP(int32, lmac_update_tx_rate, (uint32 ac, uint8 *rate_out, uint8 *bw_out), (ac, rate_out, bw_out))  /* C impl in mars_lmac_phy.c */
+//WRAP(int32, lmac_update_tx_state_ack, (uint32 ok, uint32 arg1, uint32 arg2), (ok, arg1, arg2))  /* C impl in mars_lmac_phy.c */
+//WRAP(int32, lmac_update_tx_state_ba, (uint32 start_ssn, uint32 bitmap_lo, uint32 bitmap_hi), (start_ssn, bitmap_lo, bitmap_hi))  /* C impl in mars_lmac_phy.c */
 WRAP(int32, lmac_update_tx_state_cts, (uint32 ok), (ok))
 WRAP(int32, ndp_ack_rx_hdl, (uint32 rx0, uint32 rx1, uint32 ext), (rx0, rx1, ext))
 WRAP(int32, ndp_ba_rx_hdl, (uint32 rx0, uint32 rx1, uint32 ext), (rx0, rx1, ext))
@@ -91,7 +91,7 @@ WRAP(int32, lmac_send_ant_pkt, (void), ())
 WRAP(int32, lmac_send_probe_resp, (void), ())
 WRAP(int32, lmac_tx_frame_regen, (uint32 ac, uint32 ac_hint, uint32 mcs, void *arg), (ac, ac_hint, mcs, arg))
 WRAP(int32, lmac_tx_date_prepared, (void), ())
-WRAPV(lmac_partial_aid_update, (void *txi), (txi))
+//WRAPV(lmac_partial_aid_update, (void *txi), (txi))  /* C impl in mars_lmac_phy.c (no-op in modem mode) */
 WRAP(uint32, lmac_dtim_timer_rem, (void), ())
 //WRAP(uint32, lmac_hdr_dur_calc, (uint32 len), (len))  /* C impl in mars_lmac_phy.c */
 WRAP(int32, lmac_tx_to_pm_ap, (void), ())
