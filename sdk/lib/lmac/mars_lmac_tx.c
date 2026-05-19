@@ -1,6 +1,6 @@
 #include "typesdef.h"
 #include "sys_config.h"
-#define LOG_LOCAL_LEVEL LOG_LEVEL_MARS_LMAC_TX
+#define LOG_LOCAL_LEVEL LOG_WARN//LOG_LEVEL_MARS_LMAC_TX
 #include "lib/logc/log.h"
 
 #include "lib/lmac/lmac_ctx.h"

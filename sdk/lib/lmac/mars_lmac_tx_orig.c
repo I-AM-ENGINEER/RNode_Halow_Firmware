@@ -48,8 +48,8 @@ WRAP(uint32, pv0_ctrl_uplink_txpwr_gen, (void), ())
 //WRAPV(lmac_irq_tx_end, (void), ())  /* C impl in mars_lmac_phy.c */
 WRAPV(lmac_irq_tx_tmo, (void), ())
 //WRAPV(lmac_irq_bo_fns, (void), ())   /* C impl in mars_lmac_phy.c */
-WRAPV(lmac_irq_ac_pd, (void), ())      /* sub-fns are local in binary, cannot reimplement */
-//WRAP(int32, lmac_update_tx_rate, (uint32 ac, uint8 *rate_out, uint8 *bw_out), (ac, rate_out, bw_out))  /* C impl in mars_lmac_phy.c */
+//WRAPV(lmac_irq_ac_pd, (void), ())  /* C impl in mars_lmac_phy.c: clears floor before orig */
+WRAP(int32, lmac_update_tx_rate, (uint32 ac, uint8 *rate_out, uint8 *bw_out), (ac, rate_out, bw_out))
 //WRAP(int32, lmac_update_tx_state_ack, (uint32 ok, uint32 arg1, uint32 arg2), (ok, arg1, arg2))  /* C impl in mars_lmac_phy.c */
 //WRAP(int32, lmac_update_tx_state_ba, (uint32 start_ssn, uint32 bitmap_lo, uint32 bitmap_hi), (start_ssn, bitmap_lo, bitmap_hi))  /* C impl in mars_lmac_phy.c */
 WRAP(int32, lmac_update_tx_state_cts, (uint32 ok), (ok))

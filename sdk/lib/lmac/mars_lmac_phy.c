@@ -30,7 +30,7 @@
 
 extern lmac_tx_ctx_t ah_lmac_tx_orig;
 extern void lmac_ant_sel_orig(uint32 ant);
-extern struct sk_buff *lmac_get_first_skb_orig(uint32 ac);
+extern void lmac_irq_ac_pd_orig(void);
 
 /* lmac_irq_tx_end helpers */
 extern void   lhw_abort_fsm(void);
@@ -173,12 +173,124 @@ int32 lmac_tx_frm(struct sk_buff *skb)
         return -1;
     }
 
+    LMAC_U8(0x865u) = 0u;   /* belt-and-suspenders: keep floor clear for next ac_pd */
+    {
+        static uint32_t s_tx_dbg = 0;
+        static uint8_t  s_last_mcs = 0xffu;
+        uint8_t req_mcs = LMAC_U8(0x866u);
+        if (req_mcs != s_last_mcs) {
+            s_last_mcs = req_mcs;
+            s_tx_dbg   = 0u;
+        }
+        if (s_tx_dbg < 5u) {
+            s_tx_dbg++;
+            uint8_t *dbg_buf = (uint8_t *)ah_lmac_tx_orig.pPv0_txvec;
+            uint32_t dbg_tv2 = dbg_buf ? *(uint32_t *)(dbg_buf + 4u) : 0u;
+            uint32_t dbg_tv3 = dbg_buf ? *(uint32_t *)(dbg_buf + 8u) : 0u;
+            log_warn("tx_frm[%u]: tv1_mcs=%u tv2_syms=%u tv3_mcs=%u req=%u sel=%u",
+                     s_tx_dbg,
+                     (LMAC_HW->TXVEC1 >> 12) & 0xfu,
+                     dbg_tv2,
+                     (dbg_tv3 >> 7u) & 0xfu,
+                     req_mcs,
+                     LMAC_U32(0x6e8u));
+        }
+    }
+
     lmac_send_data_to_phy(ac);
     lmac_cfg_txvec_part2();
 
     aggr->reserved_10f &= (uint8_t)~0x04u;
     ((volatile uint32_t *)&ah_lmac)[(uint32_t)ac + 0x1c7u] += 1u;
     return 0;
+}
+
+/*
+ * Two bugs prevent MCS0 and MCS10 from working at 1 MHz:
+ *
+ * Bug 1 — MCS floor (lmac[0x865]):
+ *   lmac_cfg_set_bss_bw() sets lmac[0x865] = 1 on every MCS/channel change.
+ *   lmac_update_tx_rate_orig reads this floor via a compound condition whose
+ *   comma-operator side-effect forces mcs = floor for MCS0 and MCS10, even
+ *   when bw_hint==3 (the otherwise-correct 1 MHz path).
+ *   Fix: clear lmac[0x865] = 0 immediately before lmac_irq_ac_pd_orig so
+ *   lmac_update_tx_rate_orig always sees floor = 0.
+ *
+ * Bug 2 — MCS10 retry rate table (rc_tb*_orig):
+ *   When txi[0x28] (retry count) != 0, lmac_update_tx_rate_orig looks up the
+ *   retry rate table with index = mcs*4 + (bw_hint+1)&3.  For MCS10 with
+ *   bw_hint=3: index = 40.  The table was designed for MCS0-7 (32 entries),
+ *   so rc_tb1_orig[40] = 0x01 → mcs=1.  lmac_gen_txvec_orig then builds the
+ *   txvec with MCS=1 in two places:
+ *     buf[1]    bits[7:4]  → TXVEC1 bits[15:12]  (primary MCS field)
+ *     buf[8..9] bits[10:7] → TXVEC3 bits[10:7]   (MCS via param_3<<7)
+ *   Fix: after lmac_irq_ac_pd_orig, if MCS10 is configured but the txvec
+ *   buffer has MCS≠10, patch both fields and rewrite TXVEC1.  lmac_cfg_txvec_
+ *   part2 (called later from lmac_tx_frm) reads the same patched buffer and
+ *   writes the corrected value to TXVEC2-4.
+ *
+ *   The aggregate was already sized by lmac_gen_tx_agglist_orig for MCS=1
+ *   (conservative: fewer frames than MCS10 would allow), but the payload is
+ *   transmitted at the correct MCS=10 air rate.
+ */
+void lmac_irq_ac_pd(void)
+{
+    LMAC_U8(0x865u) = 0u;      /* Bug 1 fix: clear MCS floor before rate selection */
+    lmac_irq_ac_pd_orig();
+
+    /* Bug 2 fix: patch txvec buffer if MCS10 was downgraded by retry table.
+     *
+     * lmac_gen_txvec_orig is called with mcs=1 (from retry table), so it writes:
+     *   buf[1][7:4]     = 1   (TXVEC1 MCS field)
+     *   TXVEC3[10:7]    = 1   (TXVEC3 MCS field)
+     *   TXVEC2          = calc_symbol_len(bytes, bw=3, mcs=1)  — NDBPS=24
+     *   TXVEC3[20:12]   = same symbol count low 9 bits
+     *   stride[0x1bc]   = same (used by lmac_send_data_to_phy for Duration field)
+     *
+     * We must patch all five locations.  For 1MHz (bw_idx=0):
+     *   NDBPS(MCS=1)=24, NDBPS(MCS=10)=6  →  4x more symbols needed for MCS=10.
+     * Formula: n_syms = ceil((total_bytes + 4) * 8 + 14) / 6)
+     */
+    if (LMAC_U8(0x866u) == 10u) {
+        uint8_t *buf = ah_lmac_tx_orig.pPv0_txvec;
+        if (buf != NULL && ((buf[1] >> 4u) & 0xfu) != 10u) {
+            /* Derive AC from buffer address: buf = &ah_lmac_tx_orig + ac*0x120 + 0x1c8 */
+            uint32_t ac = ((uintptr_t)buf - (uintptr_t)&ah_lmac_tx_orig - 0x1c8u) / 0x120u;
+
+            /* Patch MCS in TXVEC1 (buf[1] bits[7:4]) */
+            buf[1] = (uint8_t)((buf[1] & 0x0fu) | (10u << 4u));
+
+            /* Recompute symbol count for MCS=10 at 1MHz: NDBPS=6 (from ndbps_table[40]) */
+            uint32_t total_bytes = *(uint32_t *)((uint8_t *)&ah_lmac_tx_orig + ac * 0x120u + 0x1b8u);
+            uint32_t bits = (total_bytes + 4u) * 8u + 14u;
+            uint32_t n_syms = (bits + 5u) / 6u;   /* ceil(bits / NDBPS=6) */
+
+            /* Patch source field (Duration calc in lmac_send_data_to_phy) */
+            *(uint32_t *)((uint8_t *)&ah_lmac_tx_orig + ac * 0x120u + 0x1bcu) = n_syms;
+
+            /* Patch TXVEC2 = full symbol count */
+            *(uint32_t *)(buf + 4u) = n_syms;
+
+            /* Patch TXVEC3: clear MCS bits[10:7] AND sym_len bits[20:12] in one uint32
+             * write to avoid compiler aliasing issues between uint16 and uint32 writes.
+             * Mask 0xffe0087f: keep bits[31:21] + bit[11] + bits[6:0]; clear bits[20:12] + bits[10:7]. */
+            *(uint32_t *)(buf + 8u) =
+                (*(uint32_t *)(buf + 8u) & 0xffe0087fu)  /* clear bits[20:12] + bits[10:7] */
+                | ((uint32_t)(10u) << 7u)                 /* MCS=10 in bits[10:7]           */
+                | ((n_syms & 0x1ffu) << 12u);             /* sym_len in bits[20:12]          */
+
+            /* Re-write TXVEC1 (lmac_cfg_txvec_part1_orig wrote stale value) */
+            LMAC_HW->TXVEC1  = *(uint32_t *)buf;
+
+            /* Fix AH_AGGHDR_OFS bits[5:2] = MCS (set by agglist with wrong MCS=1) */
+            uint8_t *stride_base = (uint8_t *)&ah_lmac_tx_orig + ac * 0x120u;
+            stride_base[AH_AGGHDR_OFS] =
+                (stride_base[AH_AGGHDR_OFS] & 0xc3u) | (uint8_t)((10u & 0xfu) << 2u);
+
+            /* Sync cached actual-MCS (lmac[0x6e8]) */
+            LMAC_U32(0x6e8u) = 10u;
+        }
+    }
 }
 
 static void lmac_irq_bo_fns_tx_data_state(void)
@@ -310,67 +422,3 @@ void lmac_partial_aid_update(void *txi)
     (void)txi;
 }
 
-/*
- * Modem-mode rate selection: pass forced MCS/BW from TXI through to gen_txvec
- * without the binary's two failure modes:
- *   1. TXI[0x3d] >= 8 causes binary to re-read lmac[0x866] as mcs, silently
- *      replacing MCS10 with the auto-default unless auto-default is also 10.
- *   2. Min-MCS floor lmac[0x865] silently raises MCS0 to >=1.
- *
- * Explicit TXI[0x3d] (!=0xff): use it directly, only cap at HW max.
- * Explicit TXI[0x3c] (!=0xff): use it directly, no config override.
- * MCS10 hardware requires S1G_1M mode (bw_hint=3); any other BW is a hard error.
- * Invalid MCS (>7 and not 10): clamp to 1 with a warning.
- */
-int32 lmac_update_tx_rate(uint32 ac, uint8 *bw_hint_out, uint8 *mcs_out)
-{
-    struct sk_buff *skb;
-    uint8_t *txi;
-    uint8_t mcs, bw_hint, max_mcs;
-
-    if (ac >= 4u)
-        return -1;
-
-    skb = lmac_get_first_skb_orig(ac);
-    if (skb == NULL)
-        return -1;
-
-    txi = (uint8_t *)skb->head;
-    max_mcs = LMAC_U8(0x864u);
-
-    mcs = txi[0x3du];
-    if (mcs == 0xffu) {
-        /* Auto MCS: read default and apply min/max config clamping */
-        mcs = LMAC_U8(0x866u);
-        uint8_t min_mcs = LMAC_U8(0x865u);
-        if (mcs != 10u) {
-            if (mcs > max_mcs) mcs = max_mcs;
-            if (mcs < min_mcs) mcs = min_mcs;
-        }
-    } else {
-        /* Explicit MCS: cap at HW max only, skip the min-floor */
-        if (mcs != 10u && mcs > max_mcs)
-            mcs = max_mcs;
-    }
-
-    if (mcs > 7u && mcs != 10u) {
-        log_warn("update_tx_rate: ac=%u invalid mcs=%u, clamping to 1", ac, mcs);
-        mcs = 1u;
-    }
-
-    bw_hint = txi[0x3cu];
-    if (bw_hint == 0xffu)
-        bw_hint = (LMAC_U8(0x34au) & 1u) ? 3u : 0u;
-
-    /* MCS10 is only valid in S1G_1M mode (2 MHz physical, bw_hint=3). */
-    if (mcs == 10u && bw_hint != 3u) {
-        log_warn("update_tx_rate: ac=%u MCS10 needs S1G_1M (bw=3), got bw=%u, clamping to mcs=1", ac, bw_hint);
-        mcs = 1u;
-    }
-
-    *bw_hint_out = (char)bw_hint;
-    *mcs_out     = (char)mcs;
-    LMAC_U32(0x6e8u) = (uint32_t)mcs;
-    LMAC_U32(0x6ecu) = (uint32_t)bw_hint;
-    return 0;
-}
