@@ -15,7 +15,9 @@
 #include "lib/lmac/lmac_regmap.h"
 #include "lib/lmac/mars_lmac_tx.h"
 #include "lib/skb/skbuff.h"
+#include "lib/skb/skb_list.h"
 #include "osal/time.h"
+#include "osal/semaphore.h"
 
 #define LMAC_AGGR_CTRL_START   (1u << 0)
 #define LMAC_AGGR_CTRL_AMPDU   (1u << 1)
@@ -28,9 +30,33 @@
 #define LMAC_CCA_STAT_CLR   0x0ff0u
 #define LMAC_IRQ_CLR_TX_END 0x04u
 
+/* EDCA CW parameters in ah_lmac.ce_ctx (set per-AC before lmac_attempt_tx_orig reads them) */
+/* MCS/rate fields in ah_lmac (accessed via LMAC_U8/U16/U32 macros) */
+#define AH_MCS_FLOOR        0x865u   /* uint8:  MCS floor set by lmac_cfg_set_bss_bw */
+#define AH_MCS_REQUESTED    0x866u   /* uint8:  requested MCS from rate table */
+#define AH_MCS_SELECTED     0x6e8u   /* uint32: actual MCS used for TX */
+
+/* TX state fields in ah_lmac */
+#define AH_CURRENT_AC       0x9dcu   /* uint8:  low 4 bits = current AC index */
+
 extern lmac_tx_ctx_t ah_lmac_tx_orig;
 extern void lmac_ant_sel_orig(uint32 ant);
-extern void lmac_irq_ac_pd_orig(void);
+extern struct lmac_ops *g_pAhLmacOps;
+
+extern void   lhw_start_cca(uint32 bw, uint32 dur);
+extern void   lhw_start_tx(uint32 flags);
+extern uint32  lhw_get_cca_remain(void);
+extern void   lmac_lo_table_kick(uint16 id);
+
+/* Forward declarations for functions defined below */
+struct sk_buff *lmac_gen_tx_agglist(uint32_t ac, uint32_t rate,
+                                   uint32_t bw, uint32_t max_frames);
+int32 lmac_attempt_tx(uint32_t ac);
+
+lmac_custom_cfg_t lmac_custom_cfg = {
+    .bypass_backoff = 1,   /* skip random CW backoff — safe for point-to-point */
+    .fast_tx = 1,          /* direct AC queue injection, skip tx_task */
+};
 
 /* lmac_irq_tx_end helpers */
 extern void   lhw_abort_fsm(void);
@@ -43,7 +69,7 @@ extern void   lhw_start_rx(uint32 flags);
 
 static inline uint8_t lmac_current_ac(void)
 {
-    return LMAC_U8(0x9dcu) & 0x0fu;
+    return LMAC_U8(AH_CURRENT_AC) & 0x0fu;
 }
 
 static inline void lmac_common_bo_irq_finish(void)
@@ -160,6 +186,7 @@ int32 lmac_tx_frm(struct sk_buff *skb)
     uint8_t ac = lmac_current_ac();
     lmac_tx_ctx_buff *aggr;
 
+
     (void)skb;
 
     if (ac >= 4u) {
@@ -173,27 +200,29 @@ int32 lmac_tx_frm(struct sk_buff *skb)
         return -1;
     }
 
-    LMAC_U8(0x865u) = 0u;   /* belt-and-suspenders: keep floor clear for next ac_pd */
+    LMAC_U8(AH_MCS_FLOOR) = 0u;   /* belt-and-suspenders: keep floor clear for next ac_pd */
     {
-        static uint32_t s_tx_dbg = 0;
-        static uint8_t  s_last_mcs = 0xffu;
-        uint8_t req_mcs = LMAC_U8(0x866u);
-        if (req_mcs != s_last_mcs) {
-            s_last_mcs = req_mcs;
-            s_tx_dbg   = 0u;
-        }
-        if (s_tx_dbg < 5u) {
-            s_tx_dbg++;
+        static uint32_t s_frm_cnt = 0;
+        s_frm_cnt++;
+        if ((s_frm_cnt % 200u) == 1u) {
             uint8_t *dbg_buf = (uint8_t *)ah_lmac_tx_orig.pPv0_txvec;
-            uint32_t dbg_tv2 = dbg_buf ? *(uint32_t *)(dbg_buf + 4u) : 0u;
             uint32_t dbg_tv3 = dbg_buf ? *(uint32_t *)(dbg_buf + 8u) : 0u;
-            log_warn("tx_frm[%u]: tv1_mcs=%u tv2_syms=%u tv3_mcs=%u req=%u sel=%u",
-                     s_tx_dbg,
+            /* retry count is at txd[0x28] of the first skb in aggregate */
+            uint8_t retry = 0;
+            uint8_t no_ack_flag = 0;
+            struct sk_buff *dbg_skb = aggr->skb_list[0];
+            if (dbg_skb && dbg_skb->head) {
+                retry      = dbg_skb->head[0x28];
+                no_ack_flag = (dbg_skb->head[0x25] >> 1u) & 1u;
+            }
+            log_warn("tx_frm[%u]: tv1_mcs=%u tv3_mcs=%u req=%u sel=%u retry=%u no_ack=%u",
+                     s_frm_cnt,
                      (LMAC_HW->TXVEC1 >> 12) & 0xfu,
-                     dbg_tv2,
                      (dbg_tv3 >> 7u) & 0xfu,
-                     req_mcs,
-                     LMAC_U32(0x6e8u));
+                     LMAC_U8(0x866u),
+                     LMAC_U32(0x6e8u),
+                     retry,
+                     no_ack_flag);
         }
     }
 
@@ -235,62 +264,136 @@ int32 lmac_tx_frm(struct sk_buff *skb)
  */
 void lmac_irq_ac_pd(void)
 {
-    LMAC_U8(0x865u) = 0u;      /* Bug 1 fix: clear MCS floor before rate selection */
-    lmac_irq_ac_pd_orig();
+    extern void lmac_irq_ac_pd_orig(void);
 
-    /* Bug 2 fix: patch txvec buffer if MCS10 was downgraded by retry table.
-     *
-     * lmac_gen_txvec_orig is called with mcs=1 (from retry table), so it writes:
-     *   buf[1][7:4]     = 1   (TXVEC1 MCS field)
-     *   TXVEC3[10:7]    = 1   (TXVEC3 MCS field)
-     *   TXVEC2          = calc_symbol_len(bytes, bw=3, mcs=1)  — NDBPS=24
-     *   TXVEC3[20:12]   = same symbol count low 9 bits
-     *   stride[0x1bc]   = same (used by lmac_send_data_to_phy for Duration field)
-     *
-     * We must patch all five locations.  For 1MHz (bw_idx=0):
-     *   NDBPS(MCS=1)=24, NDBPS(MCS=10)=6  →  4x more symbols needed for MCS=10.
-     * Formula: n_syms = ceil((total_bytes + 4) * 8 + 14) / 6)
-     */
-    if (LMAC_U8(0x866u) == 10u) {
-        uint8_t *buf = ah_lmac_tx_orig.pPv0_txvec;
-        if (buf != NULL && ((buf[1] >> 4u) & 0xfu) != 10u) {
-            /* Derive AC from buffer address: buf = &ah_lmac_tx_orig + ac*0x120 + 0x1c8 */
-            uint32_t ac = ((uintptr_t)buf - (uintptr_t)&ah_lmac_tx_orig - 0x1c8u) / 0x120u;
+    /* Bug 1 fix: clear MCS floor so lmac_update_tx_rate_orig doesn't clamp
+     * MCS0/MCS10 to floor=1. */
+    LMAC_U8(0x865u) = 0u;
 
-            /* Patch MCS in TXVEC1 (buf[1] bits[7:4]) */
-            buf[1] = (uint8_t)((buf[1] & 0x0fu) | (10u << 4u));
-
-            /* Recompute symbol count for MCS=10 at 1MHz: NDBPS=6 (from ndbps_table[40]) */
-            uint32_t total_bytes = *(uint32_t *)((uint8_t *)&ah_lmac_tx_orig + ac * 0x120u + 0x1b8u);
-            uint32_t bits = (total_bytes + 4u) * 8u + 14u;
-            uint32_t n_syms = (bits + 5u) / 6u;   /* ceil(bits / NDBPS=6) */
-
-            /* Patch source field (Duration calc in lmac_send_data_to_phy) */
-            *(uint32_t *)((uint8_t *)&ah_lmac_tx_orig + ac * 0x120u + 0x1bcu) = n_syms;
-
-            /* Patch TXVEC2 = full symbol count */
-            *(uint32_t *)(buf + 4u) = n_syms;
-
-            /* Patch TXVEC3: clear MCS bits[10:7] AND sym_len bits[20:12] in one uint32
-             * write to avoid compiler aliasing issues between uint16 and uint32 writes.
-             * Mask 0xffe0087f: keep bits[31:21] + bit[11] + bits[6:0]; clear bits[20:12] + bits[10:7]. */
-            *(uint32_t *)(buf + 8u) =
-                (*(uint32_t *)(buf + 8u) & 0xffe0087fu)  /* clear bits[20:12] + bits[10:7] */
-                | ((uint32_t)(10u) << 7u)                 /* MCS=10 in bits[10:7]           */
-                | ((n_syms & 0x1ffu) << 12u);             /* sym_len in bits[20:12]          */
-
-            /* Re-write TXVEC1 (lmac_cfg_txvec_part1_orig wrote stale value) */
-            LMAC_HW->TXVEC1  = *(uint32_t *)buf;
-
-            /* Fix AH_AGGHDR_OFS bits[5:2] = MCS (set by agglist with wrong MCS=1) */
-            uint8_t *stride_base = (uint8_t *)&ah_lmac_tx_orig + ac * 0x120u;
-            stride_base[AH_AGGHDR_OFS] =
-                (stride_base[AH_AGGHDR_OFS] & 0xc3u) | (uint8_t)((10u & 0xfu) << 2u);
-
-            /* Sync cached actual-MCS (lmac[0x6e8]) */
-            LMAC_U32(0x6e8u) = 10u;
+    if (lmac_custom_cfg.bypass_backoff) {
+        for (uint32_t ac = 0u; ac < 4u; ac++) {
+            ah_lmac.ce_ctx.cw_min[ac] = 1u;
+            ah_lmac.ce_ctx.cw_max[ac] = 1u;
         }
     }
+
+    lmac_irq_ac_pd_orig();
+
+    /* Bug 2 fix: when retry count > 0, lmac_update_tx_rate_orig falls into
+     * the retry rate table which maps MCS10→MCS1 (table only has 32 entries).
+     * Patch the TXVEC buffer back to MCS10 if that was the configured rate. */
+    uint8_t requested_mcs = LMAC_U8(AH_MCS_REQUESTED);
+    if (requested_mcs == 10u && ah_lmac_tx_orig.pPv0_txvec != NULL) {
+        uint8_t *tv = (uint8_t *)ah_lmac_tx_orig.pPv0_txvec;
+        uint8_t tv_mcs = (tv[1] >> 4u) & 0xfu;
+        if (tv_mcs != 10u) {
+            tv[1] = (tv[1] & 0x0fu) | (10u << 4u);
+            uint16_t tv3 = *(uint16_t *)(tv + 8u);
+            tv3 = (tv3 & ~(0xfu << 7u)) | (10u << 7u);
+            *(uint16_t *)(tv + 8u) = tv3;
+            LMAC_HW->TXVEC1 = *(uint32_t *)(tv);
+        }
+    }
+}
+
+
+/*
+ * Minimal lmac_gen_tx_agglist: dequeue one frame from AC queue,
+ * place it in the aggregate list, compute symbol length.
+ * Returns pointer to first skb on success, NULL on empty queue.
+ */
+struct sk_buff *lmac_gen_tx_agglist(uint32_t ac, uint32_t rate,
+                                   uint32_t bw, uint32_t max_frames)
+{
+    lmac_tx_ctx_buff *aggr;
+    uint8_t *txd;
+    struct sk_buff *skb;
+
+    (void)rate;
+    (void)max_frames;
+
+    if (ac >= 4u)
+        return NULL;
+
+    aggr = &ah_lmac_tx_orig.pTx_ac_aggr_data[ac];
+
+    memset(aggr->skb_list, 0, sizeof(aggr->skb_list));
+    aggr->total_len_bytes = 0u;
+    aggr->symbol_len      = 0u;
+    aggr->selected_count   = 0u;
+    aggr->first_seq        = -1;
+    aggr->last_seq         = -1;
+
+    aggr->rate_cfg = (uint8_t)((bw & 3u) << 6u);
+    if ((bw <= 7u) || (bw == 10u))
+        aggr->rate_cfg = (aggr->rate_cfg & 0xc3u) | (uint8_t)((bw & 0xfu) << 2u);
+
+    skb = skb_list_dequeue(&ah_lmac_tx_orig.pTx_ac_queues[ac]);
+    if (skb == NULL)
+        return NULL;
+
+    txd = skb->head;
+    log_debug("agglist: skb=%p txd16=%u txd18=%u", skb, txd[0x16], txd[0x18]);
+
+    aggr->skb_list[0]       = skb;
+    aggr->selected_count    = 1u;
+    aggr->queued_count      = 1u;
+    aggr->total_len_bytes   = (uint32_t)(int16_t)txd[0x16];
+    aggr->first_seq         = (int16_t)(uint16_t)txd[0x18];
+    aggr->last_seq          = aggr->first_seq;
+
+    uint32_t sym = calc_symbol_len(aggr->total_len_bytes + 4u, bw,
+                                   (rate >> 8u) & 0xfu);
+    aggr->symbol_len = (uint16_t)sym;
+    log_debug("agglist: bytes=%u sym=%u", aggr->total_len_bytes, sym);
+
+    aggr->reserved_10f &= ~0x04u;
+
+    return skb;
+}
+
+
+/*
+ * Minimal lmac_attempt_tx: start CCA timer for one AC.
+ * Replicates the essential orig logic: check conditions, compute
+ * random backoff from CW, call lhw_start_cca + lhw_start_tx.
+ */
+int32 lmac_attempt_tx(uint32_t ac)
+{
+    uint32_t cw_min, cw_max, backoff, cca_dur, slot_time;
+
+    if (ac > 3u)
+        ac = 3u;
+
+    if (ah_lmac_tx_orig.pTx_ac_aggr_data[ac].queued_count == 0u)
+        return -1;
+
+    cw_min = ah_lmac.ce_ctx.cw_min[ac];
+    cw_max = ah_lmac.ce_ctx.cw_max[ac];
+
+    slot_time = LMAC_U16((uint16_t)(ac + 0x1c) * 2u);
+    if (slot_time == 0u)
+        slot_time = 7u;
+
+    cca_dur = lhw_get_cca_remain();
+    if (cca_dur == 0u) {
+        uint32_t seed = (uint32_t)os_jiffies();
+        backoff = (seed % (cw_max - cw_min + 1u)) + cw_min;
+    } else {
+        backoff = 0u;
+    }
+
+    if ((LMAC_U8(0x892u) & 2u) == 0u)
+        lmac_lo_table_kick((uint16_t)LMAC_U16(0x33cu));
+
+    log_debug("attempt_tx: ac=%u cw=%u/%u backoff=%u slot=%u", ac, cw_min, cw_max, backoff, slot_time);
+
+    lhw_start_cca((uint32_t)((uint8_t)ac + 3u), backoff);
+    lhw_start_tx(0u);
+    lmac_cfg_txvec_part1();
+
+    log_debug("attempt_tx: done");
+    return 0;
 }
 
 static void lmac_irq_bo_fns_tx_data_state(void)
@@ -356,18 +459,24 @@ void lmac_irq_bo_fns(void)
 void lmac_irq_tx_end(void)
 {
     uint32_t flags = 0u;
+    uint8_t ac = lmac_current_ac();
+    lmac_tx_ctx_buff *aggr = (ac < 4u) ? &ah_lmac_tx_orig.pTx_ac_aggr_data[ac] : NULL;
 
     LMAC_HW->IRQ_PD = LMAC_IRQ_CLR_TX_END;
     lhw_abort_fsm();
     ah_tdma_abort();
 
     if ((LMAC_HW->TX_STAT & 3u) == 0u) {
-        /* TX success: wait for sync window on data/response paths */
         uint32_t sub_state = ah_lmac.bo_tx_substate;
-        if (sub_state < 7u && ((1u << sub_state) & 0x6eu))
-            flags = lmac_wait_sync(0x1c0u);
+        if (sub_state < 7u && ((1u << sub_state) & 0x6eu)) {
+            struct sk_buff *first = aggr ? aggr->skb_list[0] : NULL;
+            int no_ack = (first && first->head) ? ((first->head[0x25] & 0x02u) != 0u) : 0;
+            if (no_ack)
+                lmac_update_tx_state_ack(1u, 0u, 0u);
+            else
+                flags = lmac_wait_sync(0x1c0u);
+        }
     } else {
-        /* TX error: log, clear HW error bits, restore RX gain */
         ah_lmac.tx_irq_error_flags |= 2u;
         if (LMAC_U32(0x3b8u) & 0x10u) {
             uint32_t err = ah_wphy_err_code_get();
@@ -380,10 +489,36 @@ void lmac_irq_tx_end(void)
         lmac_rx_gain_cfg((gain_reg & 0x7ffu) >> 4);
     }
 
+    /* Move completed skbs from aggregate to status queue so the status task
+     * calls halow_lmac_tx_status_callback → frees skb → ups g_tx_vacated_sem.
+     * Without this, halow_tx blocks forever after TX_BUFFER_SIZE bytes. */
+    if (aggr) {
+        for (uint32_t i = 0; i < aggr->selected_count && i < 64; i++) {
+            struct sk_buff *skb = aggr->skb_list[i];
+            if (skb != NULL) {
+                skb->head[0x27] |= 0x80u;
+                skb_list_queue(&ah_lmac_tx_orig.tx_frames_pending_queue, skb);
+                aggr->skb_list[i] = NULL;
+            }
+        }
+        aggr->selected_count = 0u;
+        aggr->queued_count   = 0u;
+        if (aggr->skb_list[0] != NULL || aggr->selected_count > 0)
+            os_sema_up(&ah_lmac_tx_orig.tx_status_sem);
+        else
+            os_sema_up(&ah_lmac_tx_orig.tx_status_sem);
+    }
+
     ah_lmac.bo_frame_type = 0u;
     update_rx_buff_addr();
     lmac_tdma_start();
     lhw_start_rx(flags);
+
+    /* Re-kick AC_PD if AC queue has more packets — keeps the pipeline full. */
+    if (ac < 4u && skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[ac]) > 0) {
+        LMAC_HW->AC_PD = 0u;
+        LMAC_HW->AC_PD = 0xfu;
+    }
 }
 
 /* Mark the first frame in the current AC aggregate as done.

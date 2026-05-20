@@ -11,6 +11,28 @@ extern "C" {
 #endif
 
 /*
+ * Point-to-point TX timing overrides.
+ *
+ * bypass_backoff = 1  →  writes CW_min=CW_max=1 for all ACs before each
+ *                         lmac_irq_ac_pd_orig dispatch, so the random backoff
+ *                         computed in lmac_attempt_tx_orig is always rand()%1=0.
+ *                         This saves ~390 µs/frame at 1 MHz CWmin=15.
+ *                         Unlike FSM_BO_BYPASS, this does not corrupt the FSM.
+ *
+ * Future knob (not yet implemented — needs SIFS_INIT bit-layout study):
+ *   zero_slot_time   →  write 0 to the slot-time field of SIFS_INIT, collapsing
+ *                        DIFS from 264 µs to SIFS (160 µs).
+ */
+typedef struct {
+    uint8_t bypass_backoff;   /* 0 = standard CSMA/CA;  1 = CW=1, zero backoff */
+    uint8_t fast_tx;          /* 0 = normal path through tx_task;  1 = direct AC queue injection */
+    uint8_t defer_ac_pd;      /* 1 = lmac_fast_tx queues but does NOT trigger AC_PD; caller must kick */
+} lmac_custom_cfg_t;
+
+extern lmac_custom_cfg_t lmac_custom_cfg;
+
+
+/*
  * TX Queue Management Functions
  */
 
@@ -81,6 +103,16 @@ struct sk_buff *lmac_get_first_skb(uint32 ac);
  * @return 0 on success, negative on error
  */
 int32 lmac_ah_tx(struct lmac_ops *ops, struct sk_buff *skb);
+
+/**
+ * @brief Fast TX: fill TXD and inject directly into AC0 queue.
+ * Bypasses tx_task, tx_pending_queue and tx_data_reload.
+ * The skb must have >= 0x48 bytes headroom (as set by lmac_ah_init).
+ * Caller constructs the S1G frame at skb->data (same as halow_tx does).
+ * @param skb  Socket buffer with S1G frame at data pointer
+ * @return 0 on success, negative on error (skb is freed on error)
+ */
+int32 lmac_fast_tx(struct sk_buff *skb);
 
 /**
  * @brief Test TX function (bypasses radio check)

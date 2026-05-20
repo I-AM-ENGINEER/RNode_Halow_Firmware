@@ -1,4 +1,4 @@
-#define LOG_LOCAL_LEVEL LOG_TRACE
+#define LOG_LOCAL_LEVEL LOG_DEBUG
 #include "lib/logc/log.h"
 #include "basic_include.h"
 #include "lib/lmac/lmac.h"
@@ -275,46 +275,45 @@ bool boot_recovery_check( void ){
 
 char test_send[] = "test_send";
 
-#define TEST_LEN 512
+#define TEST_LEN 500
+//#define TEST_MCS 7
+//#define TEST_BW 1
+#define TEST_BATCH 16
 
-static int32 sys_blink_work(struct os_work *work)
+static void speedtest_task_fn(void *arg)
 {
-    static bool active;
     static uint8_t pkt[TEST_LEN];
-    static uint32_t n, bytes, inited;
-    static int64_t t0;
-    int64_t now;
-    int32 ret;
+    for (uint32_t i = 0; i < TEST_LEN; i++) pkt[i] = i;
 
-    if (!inited) {
-        for (uint32_t i = 0; i < TEST_LEN; i++) pkt[i] = i;
-        t0 = get_time_ms();
-        inited = 1;
+    os_sleep_ms(3500);
+    //halow_config_set_mcs(TEST_MCS);
+    //halow_config_set_bandwidth(TEST_BW);
+    //log_info("speedtest: MCS%u BW%u len=%u batch=%u start", TEST_MCS, TEST_BW, TEST_LEN, TEST_BATCH);
+
+    uint32_t n = 0, bytes = 0;
+    int64_t t0 = get_time_ms();
+
+    while (1) {
+        int32_t ret = halow_tx_batch(pkt, TEST_LEN, mac_broadcast, TEST_BATCH);
+        if (ret > 0) {
+            n += (uint32_t)ret;
+            bytes += (uint32_t)ret * TEST_LEN;
+        }
+
+        int64_t now = get_time_ms();
+        if (now - t0 >= 1000) {
+            log_info("speedtest: %u pkt/s %u Kbit/s",
+                      (uint32_t)((n * 1000) / (now - t0)),
+                      (uint32_t)((bytes * 1000) / (now - t0) / 1024));
+            n = 0;
+            bytes = 0;
+            t0 = now;
+        }
     }
-
-    active = !active;
-    indication_led_main_set(active);
-
-    ret = halow_tx(pkt, TEST_LEN, mac_broadcast);
-    if (ret == 0) {
-        n++;
-        bytes += TEST_LEN;
-    }
-
-    now = get_time_ms();
-    if (now - t0 >= 1000) {
-        log_debug("tx: %u pkt/s %u KB/s ret=%d",
-                  (uint32_t)((n * 1000) / (now - t0)),
-                  (uint32_t)((bytes * 1000) / (now - t0) / 1024),
-                  ret);
-        n = 0;
-        bytes = 0;
-        t0 = now;
-    }
-
-    os_run_work_delay(work, 0);
-    return 0;
 }
+
+static struct os_work blink_wk;
+static struct os_work stats_wk;
 
 __init int main(void) {
     extern uint32 __sinit, __einit;
@@ -381,15 +380,22 @@ __init int main(void) {
     telemetry_init();
     log_debug("rns_stream_decoder_init");
     rns_stream_decoder_init(&tcp_rns_decoder, rns_tcp_rx_handler);
-    log_debug("OS_WORK_INIT blink");
-    OS_WORK_INIT(&blink_wk, sys_blink_work,0);
     log_debug("OS_WORK_INIT stats");
     OS_WORK_INIT(&stats_wk, sys_stats_work,0);
-    log_debug("os_run_work_delay blink");
-    //os_run_work_delay(&blink_wk, 1000);
+    log_debug("os_run_work_delay stats");
+    os_run_work_delay(&stats_wk, 2000);
+    {
+        static struct os_task speedtest_task;
+        os_task_init((const uint8 *)"speedtest", &speedtest_task, speedtest_task_fn, 0);
+        os_task_set_stacksize(&speedtest_task, 2048);
+        extern int32_t _os_task_set_priority(struct os_task *task, uint8_t priority);
+        _os_task_set_priority(&speedtest_task, OS_TASK_PRIORITY_ABOVE_NORMAL + 1);
+        os_task_run(&speedtest_task);
+    }
     log_debug("sysheap_collect_init");
     sysheap_collect_init(&sram_heap, (uint32)&__sinit, (uint32)&__einit);
     log_info("Init done");
+    log_debug("!!!!!");
     return 0;
 }
 

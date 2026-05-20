@@ -83,6 +83,123 @@ int32 lmac_ah_tx(struct lmac_ops *ops, struct sk_buff *skb)
     return 0;
 }
 
+static inline uint16_t lmac_tx_align_len_min(uint16_t len);
+int32 lmac_fast_tx(struct sk_buff *skb)
+{
+    uint8_t *txd;
+    uint16_t fc, combined;
+    uint32_t headroom;
+
+    if (!skb)
+        return -1;
+
+    headroom = skb_headroom(skb);
+    if (headroom <= 0x47) {
+        log_warn("fast_tx: skb=%p headroom=%u too small", skb, headroom);
+        kfree_skb(skb);
+        return -2;
+    }
+
+    if (((uintptr_t)skb->data & 1) != 0) {
+        log_debug("fast_tx: skb=%p unaligned data=%p", skb, skb->data);
+        kfree_skb(skb);
+        return -3;
+    }
+
+    skb->lifetime = (uint64_t)(uint32_t)os_jiffies() | ((uint64_t)headroom << 32);
+
+    txd = skb->head;
+    memset(txd, 0, 0x44);
+
+    txd[0x3c] = 0xff;
+    txd[0x3d] = 0xff;
+    txd[0x3e] = 0x0f;
+    txd[0x3f] = (txd[0x3f] & 0x9f) | 0x60;
+
+    *(uint32_t *)(txd + 0x10) = (uint32_t)skb->data;
+    *(uint16_t *)(txd + 0x14) = skb->len;
+
+    txd[0x24] = (txd[0x24] & 0xfc) | (skb->data[0] & 3);
+    txd[0x27] |= 0x02;
+
+    lmac_get_rx_addr(txd + 0x1a, skb->data);
+    *(uint32_t *)(txd + 0x0c) = (uint32_t)lmac_sta_get(0xffff, txd + 0x1a);
+
+    if ((txd[0x1a] & 1) != 0)
+        txd[0x26] |= 0x80;
+
+    {
+        uint32_t ack = lmac_get_ack_policy_orig(txd);
+        txd[0x25] = (txd[0x25] & 0xfd) | ((ack & 1) << 1);
+    }
+
+    txd[0x26] &= 0xf0;
+
+    *(int16_t *)(txd + 0x18) =
+        (int16_t)lmac_get_seq_num((void *)*(uint32_t *)(txd + 0x10));
+
+    fc = *(uint16_t *)skb->data;
+    txd[0x24] = (txd[0x24] & 0xe3) | (uint8_t)(((fc >> 2) & 7) << 2);
+    combined = ((uint16_t)txd[0x25] << 8) | txd[0x24];
+    combined = (combined & 0xfe1f) | (((fc >> 4) & 0x0f) << 5);
+    txd[0x24] = (uint8_t)combined;
+    txd[0x25] = (uint8_t)(combined >> 8);
+
+    txd[0x25] = (txd[0x25] & 0xbf) | (((skb->data[1] >> 1) & 1) << 6);
+    txd[0x25] = (txd[0x25] & 0x7f) | (skb->data[1] << 7);
+
+    txd[0x2a] = lmac_get_hdr_len_pv0((uint16_t *)skb->data);
+    txd[0x2b] = (txd[0x2b] & 0xe7) | ((ah_lmac.bss_bw & 3) << 3);
+
+    if (txd[0x25] & 0x02u) {
+        txd[0x3c] = 0;
+        txd[0x3d] = 0;
+        txd[0x3e] = 0;
+    }
+
+    lmac_tx_pv0_data(skb);
+
+    *(uint16_t *)(txd + 0x16) = lmac_tx_align_len_min(skb->len);
+
+    if (((ah_lmac.beacon_s1g_format_flags & 1) == 0) &&
+        (*(uint16_t *)(txd + 0x16) > 0x067b)) {
+        log_warn("fast_tx: skb=%p too large aligned=%u", skb, *(uint16_t *)(txd + 0x16));
+        kfree_skb(skb);
+        return -4;
+    }
+
+    lmac_partial_aid_update_orig(txd);
+
+    *(uint16_t *)skb->data &= ~0x1000;
+    txd[0x26] &= ~0x10;
+
+    if ((txd[0x26] & 0x0f) > 7)
+        txd[0x26] = (txd[0x26] & 0xf0) | 7;
+
+    skb->priority = 0;
+    skb->tx       = 1;
+    skb->lmaced   = 0;
+    skb->acked    = 0;
+
+    {
+        int32_t ret = skb_list_queue(&ah_lmac_tx_orig.pTx_ac_queues[0], skb);
+        if (ret) {
+            kfree_skb(skb);
+            return -5;
+        }
+    }
+
+    ah_lmac.pending_pkg_to_status_check++;
+
+    if (!lmac_custom_cfg.defer_ac_pd) {
+        LMAC_HW->AC_PD = 0;
+        LMAC_HW->AC_PD = 0xf;
+    }
+
+    log_trace("fast_tx: skb=%p len=%u fc=0x%04x queued", skb, skb->len, fc);
+    return 0;
+}
+
 
 void lmac_kick_tx_task(void)
 {
@@ -246,6 +363,13 @@ static void lmac_tx_task(void *_arg) {
 
                 txd_raw[0x2a] = lmac_get_hdr_len_pv0((uint16_t *)skb->data);
                 txd_raw[0x2b] = (txd_raw[0x2b] & 0xe7) | ((ah_lmac.bss_bw & 3) << 3);
+            }
+
+            /* No-ack: fire-and-forget, zero retry limits */
+            if (txd_raw[0x25] & 0x02u) {
+                txd_raw[0x3c] = 0;
+                txd_raw[0x3d] = 0;
+                txd_raw[0x3e] = 0;
             }
 
             lmac_tx_pv0_data(skb);

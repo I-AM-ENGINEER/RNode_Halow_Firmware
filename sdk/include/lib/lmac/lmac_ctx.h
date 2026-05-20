@@ -51,7 +51,11 @@ struct lmac_ctx_extra_ies {
 #define undefined uint8_t
 
 struct ah_ce_ctx {
-    uint8_t _opaque[184];
+    uint8_t _pre_cw[0x24];       /* 0x004-0x027: cipher engine + misc */
+    uint16_t cw_min[4];           /* 0x028-0x02F: EDCA CW_min per AC (read by lmac_attempt_tx_orig) */
+    uint8_t _gap_030[8];          /* 0x030-0x037 */
+    uint16_t cw_max[4];           /* 0x038-0x03F: EDCA CW_max per AC */
+    uint8_t _post_cw[0x7C];      /* 0x040-0x0BB: remaining opaque */
 } __attribute__((packed));
 
 struct lmac_chan_candidate {
