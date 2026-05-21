@@ -4,7 +4,7 @@ Flash RNode-Halow via CK-Link + DebugServer.
 
 Usage:
     python flash.py
-    python flash.py --elf project/Obj/RNode-Halow.elf
+    python flash.py --elf build/Debug/TXW8301-PHY.elf
 """
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ _defaults = _load_env(ENV_FILE) if ENV_FILE.exists() else {}
 DEBUGSERVER = Path(os.environ.get("CSKY_DEBUGSERVER", _defaults.get("CSKY_DEBUGSERVER", "")))
 GDB         = Path(os.environ.get("CSKY_GDB", _defaults.get("CSKY_GDB", "")))
 GDB_INIT    = HERE / "flasher" / "gdb.init"
-DEFAULT_ELF = HERE / "project" / "Obj" / "RNode-Halow.elf"
+DEFAULT_ELF = HERE / "build" / "Debug" / "TXW8301-PHY.elf"
 
 if sys.platform == "win32":
     _MINGW_BIN = os.environ.get("CSKY_MINGW_BIN", _defaults.get("CSKY_MINGW_BIN", ""))
@@ -79,8 +79,9 @@ def flash(elf: Path) -> None:
     """
     Download ELF to target SRAM via GDB + DebugServer and start CPU.
 
-    Writes to VIC ICER+ICPR to clear stale IRQ state, then kills GDB
-    (TCP drop triggers detech-resume-target, CPU keeps running).
+    Asserts nRESET via JTAG SRST (-trst, -prereset), then does soft reset
+    (sreset -c 0xABCD0048). Writes to VIC ICER+ICPR to clear stale IRQ
+    state, then kills GDB (TCP drop triggers detech-resume-target, CPU runs).
     """
     entry = elf_entry(elf)
 
@@ -90,7 +91,8 @@ def flash(elf: Path) -> None:
         "-arch", DS_ARCH,
         "-setclk", DS_CLOCK,
         "-ddc",
-        "-no-trst",
+        "-trst",
+        "-prereset",
         "-disable-cmdline",
     ]
     ds = subprocess.Popen(
@@ -107,12 +109,6 @@ def flash(elf: Path) -> None:
         ds.wait(5)
         raise RuntimeError(f"DebugServer: {e}") from e
 
-    # Match CDK's debug launch sequence (no hardware reset pin connected):
-    #   connect → detech-resume-target → soft reset (insn 0xABCD0048) →
-    #   download → gdb.init → run
-    # Soft reset executes instruction 0xABCD0048 on the target CPU.
-    # After soft reset the CPU runs; -target-download halts it automatically,
-    # then gdb.init register writes (WDT disable, clock config) take effect.
     script_lines = [
         "set pagination off",
         "set confirm off",
@@ -121,6 +117,9 @@ def flash(elf: Path) -> None:
         f"target remote {host}:{DS_PORT}",
         "monitor set detech-resume-target on",
         "monitor sreset -c 0xABCD0048",
+    ]
+
+    script_lines += [
         "interpreter-exec mi -target-download",
         f'source "{GDB_INIT.resolve().as_posix()}"',
         f"set $pc = 0x{entry:08x}",
@@ -174,7 +173,7 @@ def flash(elf: Path) -> None:
     # Wait for remaining GDB script commands (gdb.init, set $pc, VIC, continue)
     # to execute before killing GDB. After `continue` GDB blocks waiting for
     # the target to stop, so we give it a short window then SIGKILL.
-    time.sleep(1)
+    time.sleep(3)
 
     # Kill GDB first → TCP drop → DebugServer detech-resume-target → CPU runs.
     if gdb_proc.poll() is None:
