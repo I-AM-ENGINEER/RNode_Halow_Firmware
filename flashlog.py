@@ -44,13 +44,12 @@ def _serial_buffer(port: str, baud: int, buf: collections.deque,
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Flash RNode-Halow and capture boot logs.")
-    ap.add_argument("--elf",  type=Path, default=HERE / "project" / "Obj" / "RNode-Halow.elf")
+    ap.add_argument("--elf",  type=Path, default=HERE / "build" / "Debug" / "TXW8301-PHY.elf")
     ap.add_argument("--port", default=LOG_PORT)
     ap.add_argument("--baud", type=int, default=LOG_BAUD)
     ap.add_argument("-n", "--lines", type=int, default=200,
                     help="Number of log lines to capture (default: 200)")
-    ap.add_argument("--timeout", type=float, default=10.0,
-                    help="Max seconds to wait for logs after flash (default: 10)")
+    ap.add_argument("--timeout", type=float, default=10.0)
     args = ap.parse_args()
 
     if not args.elf.exists():
@@ -77,7 +76,9 @@ def main() -> int:
         stop.set()
         return 1
 
-    # Drain buffered serial data + keep reading until N lines or timeout.
+    # Discard stale data from before the reset so we only capture fresh boot logs.
+    buf.clear()
+
     print(f"[LOG] Capturing up to {args.lines} lines ...", flush=True)
     partial = b""
     count = 0

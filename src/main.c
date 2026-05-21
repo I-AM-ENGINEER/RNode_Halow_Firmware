@@ -317,6 +317,7 @@ static struct os_work stats_wk;
 
 __init int main(void) {
     extern uint32 __sinit, __einit;
+    os_sleep_ms(5000);
     log_debug("mcu_watchdog_timeout");
     mcu_watchdog_timeout(0);
     log_debug("sys_event_init");
