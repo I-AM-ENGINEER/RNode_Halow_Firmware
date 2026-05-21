@@ -105,6 +105,7 @@
 #define HALOW_CONFIG_BANDWIDTH_DEF              (1)
 #define HALOW_CONFIG_MCS_DEF                    (0)
 #define HALOW_CONFIG_SPOWER_EN_DEF              (false)
+#define HALOW_LBT_IGNORE_CCA_DEF                (true)
 
 #define HALOW_LBT_CONFIG_EN_DEF                 (true)
 #define HALOW_LBT_CONFIG_NSWS_DEF               (256)

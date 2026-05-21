@@ -276,8 +276,8 @@ bool boot_recovery_check( void ){
 char test_send[] = "test_send";
 
 #define TEST_LEN 500
-//#define TEST_MCS 7
-//#define TEST_BW 1
+#define TEST_MCS 7
+#define TEST_BW 1
 #define TEST_BATCH 16
 
 static void speedtest_task_fn(void *arg)
@@ -285,10 +285,10 @@ static void speedtest_task_fn(void *arg)
     static uint8_t pkt[TEST_LEN];
     for (uint32_t i = 0; i < TEST_LEN; i++) pkt[i] = i;
 
-    os_sleep_ms(3500);
-    //halow_config_set_mcs(TEST_MCS);
-    //halow_config_set_bandwidth(TEST_BW);
-    //log_info("speedtest: MCS%u BW%u len=%u batch=%u start", TEST_MCS, TEST_BW, TEST_LEN, TEST_BATCH);
+    os_sleep_ms(1000);
+    halow_config_set_mcs(TEST_MCS);
+    halow_config_set_bandwidth(TEST_BW);
+    log_info("speedtest: MCS%u BW%u len=%u batch=%u start", TEST_MCS, TEST_BW, TEST_LEN, TEST_BATCH);
 
     uint32_t n = 0, bytes = 0;
     int64_t t0 = get_time_ms();
@@ -304,7 +304,7 @@ static void speedtest_task_fn(void *arg)
         if (now - t0 >= 1000) {
             log_info("speedtest: %u pkt/s %u Kbit/s",
                       (uint32_t)((n * 1000) / (now - t0)),
-                      (uint32_t)((bytes * 1000) / (now - t0) / 1024));
+                      (uint32_t)((bytes * 1000 * 8) / (now - t0) / 1024));
             n = 0;
             bytes = 0;
             t0 = now;

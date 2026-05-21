@@ -22,9 +22,9 @@ extern void lmac_get_rx_addr(uint8 *addr, uint8 *hdr);
 extern void *lmac_sta_get(uint16 aid, uint8 *addr);
 extern uint32 lmac_get_seq_num(void *hdr);
 extern uint32 lmac_get_hdr_len_pv0(void *hdr);
-extern void ndp_tx_vec_init_orig(uint8_t *txvec);
-extern uint32 lmac_get_ack_policy_orig(void *txd);
-extern void lmac_partial_aid_update_orig(void *txd);
+extern void ndp_tx_vec_init_one(uint8_t *txvec);
+extern uint32 lmac_get_ack_policy(void *txd);
+extern void lmac_partial_aid_update(void *txd);
 extern lmac_tx_ctx_t ah_lmac_tx_orig;
 
 
@@ -86,7 +86,7 @@ int32 lmac_ah_tx(struct lmac_ops *ops, struct sk_buff *skb)
 static inline uint16_t lmac_tx_align_len_min(uint16_t len);
 int32 lmac_fast_tx(struct sk_buff *skb)
 {
-    uint8_t *txd;
+    lmac_txd_t *txd;
     uint16_t fc, combined;
     uint32_t headroom;
 
@@ -108,73 +108,70 @@ int32 lmac_fast_tx(struct sk_buff *skb)
 
     skb->lifetime = (uint64_t)(uint32_t)os_jiffies() | ((uint64_t)headroom << 32);
 
-    txd = skb->head;
-    memset(txd, 0, 0x44);
+    txd = (lmac_txd_t *)skb->head;
+    memset(txd, 0, sizeof(*txd));
 
-    txd[0x3c] = 0xff;
-    txd[0x3d] = 0xff;
-    txd[0x3e] = 0x0f;
-    txd[0x3f] = (txd[0x3f] & 0x9f) | 0x60;
+    txd->tx_bw_hint      = ah_lmac.tx_bw_sig;
+    txd->tx_rate_mcs     = ah_lmac.tx_mcs;
+    txd->fallback_count   = 0x0F;
+    txd->rts_cfg          = (txd->rts_cfg & 0x9F) | 0x60;
 
-    *(uint32_t *)(txd + 0x10) = (uint32_t)skb->data;
-    *(uint16_t *)(txd + 0x14) = skb->len;
+    txd->frame     = skb->data;
+    txd->frame_len = skb->len;
 
-    txd[0x24] = (txd[0x24] & 0xfc) | (skb->data[0] & 3);
-    txd[0x27] |= 0x02;
+    txd->frame_type_lo = (txd->frame_type_lo & 0xFC) | (skb->data[0] & 3);
+    txd->tx_flags     |= 0x02;
 
-    lmac_get_rx_addr(txd + 0x1a, skb->data);
-    *(uint32_t *)(txd + 0x0c) = (uint32_t)lmac_sta_get(0xffff, txd + 0x1a);
+    lmac_get_rx_addr(txd->dest_mac, skb->data);
+    txd->sta = lmac_sta_get(0xFFFF, txd->dest_mac);
 
-    if ((txd[0x1a] & 1) != 0)
-        txd[0x26] |= 0x80;
+    if ((txd->dest_mac[0] & 1) != 0)
+        txd->tx_ctrl |= 0x80;
 
     {
-        uint32_t ack = lmac_get_ack_policy_orig(txd);
-        txd[0x25] = (txd[0x25] & 0xfd) | ((ack & 1) << 1);
+        uint32_t ack = lmac_get_ack_policy(txd);
+        txd->frame_type_hi = (txd->frame_type_hi & 0xFD) | ((ack & 1) << 1);
     }
 
-    txd[0x26] &= 0xf0;
+    txd->tx_ctrl &= 0xF0;
 
-    *(int16_t *)(txd + 0x18) =
-        (int16_t)lmac_get_seq_num((void *)*(uint32_t *)(txd + 0x10));
+    txd->seq_num = (int16_t)lmac_get_seq_num((void *)txd->frame);
 
     fc = *(uint16_t *)skb->data;
-    txd[0x24] = (txd[0x24] & 0xe3) | (uint8_t)(((fc >> 2) & 7) << 2);
-    combined = ((uint16_t)txd[0x25] << 8) | txd[0x24];
-    combined = (combined & 0xfe1f) | (((fc >> 4) & 0x0f) << 5);
-    txd[0x24] = (uint8_t)combined;
-    txd[0x25] = (uint8_t)(combined >> 8);
+    txd->frame_type_lo = (txd->frame_type_lo & 0xE3) | (uint8_t)(((fc >> 2) & 7) << 2);
+    combined = ((uint16_t)txd->frame_type_hi << 8) | txd->frame_type_lo;
+    combined = (combined & 0xFE1F) | (((fc >> 4) & 0x0F) << 5);
+    txd->frame_type_lo = (uint8_t)combined;
+    txd->frame_type_hi = (uint8_t)(combined >> 8);
 
-    txd[0x25] = (txd[0x25] & 0xbf) | (((skb->data[1] >> 1) & 1) << 6);
-    txd[0x25] = (txd[0x25] & 0x7f) | (skb->data[1] << 7);
+    txd->frame_type_hi = (txd->frame_type_hi & 0xBF) | (((skb->data[1] >> 1) & 1) << 6);
+    txd->frame_type_hi = (txd->frame_type_hi & 0x7F) | (skb->data[1] << 7);
 
-    txd[0x2a] = lmac_get_hdr_len_pv0((uint16_t *)skb->data);
-    txd[0x2b] = (txd[0x2b] & 0xe7) | ((ah_lmac.bss_bw & 3) << 3);
+    txd->hdr_len = lmac_get_hdr_len_pv0((uint16_t *)skb->data);
+    txd->bw_cfg  = (txd->bw_cfg & 0xE7) | ((ah_lmac.bss_bw & 3) << 3);
 
-    if (txd[0x25] & 0x02u) {
-        txd[0x3c] = 0;
-        txd[0x3d] = 0;
-        txd[0x3e] = 0;
+    if (txd->frame_type_hi & 0x02u) {
+        txd->fallback_count  = 0;
     }
 
     lmac_tx_pv0_data(skb);
 
-    *(uint16_t *)(txd + 0x16) = lmac_tx_align_len_min(skb->len);
+    txd->aligned_len = lmac_tx_align_len_min(skb->len);
 
     if (((ah_lmac.beacon_s1g_format_flags & 1) == 0) &&
-        (*(uint16_t *)(txd + 0x16) > 0x067b)) {
-        log_warn("fast_tx: skb=%p too large aligned=%u", skb, *(uint16_t *)(txd + 0x16));
+        (txd->aligned_len > 0x067B)) {
+        log_warn("fast_tx: skb=%p too large aligned=%u", skb, txd->aligned_len);
         kfree_skb(skb);
         return -4;
     }
 
-    lmac_partial_aid_update_orig(txd);
+    lmac_partial_aid_update(txd);
 
     *(uint16_t *)skb->data &= ~0x1000;
-    txd[0x26] &= ~0x10;
+    txd->tx_ctrl &= ~0x10;
 
-    if ((txd[0x26] & 0x0f) > 7)
-        txd[0x26] = (txd[0x26] & 0xf0) | 7;
+    if ((txd->tx_ctrl & 0x0F) > 7)
+        txd->tx_ctrl = (txd->tx_ctrl & 0xF0) | 7;
 
     skb->priority = 0;
     skb->tx       = 1;
@@ -193,7 +190,7 @@ int32 lmac_fast_tx(struct sk_buff *skb)
 
     if (!lmac_custom_cfg.defer_ac_pd) {
         LMAC_HW->AC_PD = 0;
-        LMAC_HW->AC_PD = 0xf;
+        LMAC_HW->AC_PD = 0xF;
     }
 
     log_trace("fast_tx: skb=%p len=%u fc=0x%04x queued", skb, skb->len, fc);
@@ -208,7 +205,7 @@ void lmac_kick_tx_task(void)
 
 
 
-__attribute__((weak)) void lmac_tx_init(void) {
+void lmac_tx_init(void) {
     log_info("tx_init: start ctx=%p", &ah_lmac_tx_orig);
 
     memset(&ah_lmac_tx_orig, 0, 0x6d4);
@@ -227,11 +224,11 @@ __attribute__((weak)) void lmac_tx_init(void) {
         aggr->rate_cfg = 0;
     }
 
-    ndp_tx_vec_init_orig(&ah_lmac_tx_orig.pTx_vector_cache[0].fmt_byte);
-    ndp_tx_vec_init_orig(&ah_lmac_tx_orig.pTx_vector_cache[1].fmt_byte);
-    ndp_tx_vec_init_orig(&ah_lmac_tx_orig.pTx_vector_cache[2].fmt_byte);
-    ndp_tx_vec_init_orig(&ah_lmac_tx_orig.pTx_vector_cache[3].fmt_byte);
-    ndp_tx_vec_init_orig(&ah_lmac_tx_orig.pTx_vector_cache[4].fmt_byte);
+    ndp_tx_vec_init_one(&ah_lmac_tx_orig.pTx_vector_cache[0].fmt_byte);
+    ndp_tx_vec_init_one(&ah_lmac_tx_orig.pTx_vector_cache[1].fmt_byte);
+    ndp_tx_vec_init_one(&ah_lmac_tx_orig.pTx_vector_cache[2].fmt_byte);
+    ndp_tx_vec_init_one(&ah_lmac_tx_orig.pTx_vector_cache[3].fmt_byte);
+    ndp_tx_vec_init_one(&ah_lmac_tx_orig.pTx_vector_cache[4].fmt_byte);
     log_debug("tx_init: vec_init done");
 
     os_sema_init(&ah_lmac_tx_orig.tx_sem, 0);
@@ -297,8 +294,8 @@ static void lmac_tx_task(void *_arg) {
         }
 
         while ((skb = skb_list_dequeue(&ah_lmac_tx_orig.tx_pending_queue)) != NULL) {
-            uint8_t *txd_raw;
-            uint16_t fc;
+            lmac_txd_t *txd;
+            uint16_t fc, combined;
 
             fc = *(uint16_t *)skb->data;
 
@@ -311,96 +308,85 @@ static void lmac_tx_task(void *_arg) {
                 continue;
             }
 
-            txd_raw = skb->head;
-            memset(txd_raw, 0, 0x44);
+            txd = (lmac_txd_t *)skb->head;
+            memset(txd, 0, sizeof(*txd));
 
-            txd_raw[0x3c] = 0xff;
-            txd_raw[0x3d] = 0xff;
-            txd_raw[0x3e] = 0x0f;
-            txd_raw[0x3f] = (txd_raw[0x3f] & 0x9f) | 0x60;
+            txd->tx_bw_hint      = ah_lmac.tx_bw_sig;
+            txd->tx_rate_mcs     = ah_lmac.tx_mcs;
+            txd->fallback_count   = 0x0F;
+            txd->rts_cfg          = (txd->rts_cfg & 0x9F) | 0x60;
 
-            *(uint32_t *)(txd_raw + 0x10) = (uint32_t)skb->data;
-            *(uint16_t *)(txd_raw + 0x14) = skb->len;
+            txd->frame     = skb->data;
+            txd->frame_len = skb->len;
 
-            txd_raw[0x24] = (txd_raw[0x24] & 0xfc) | (skb->data[0] & 3);
+            txd->frame_type_lo = (txd->frame_type_lo & 0xFC) | (skb->data[0] & 3);
+            txd->tx_flags     |= 0x02;
 
-            txd_raw[0x27] |= 0x02;
-
-            lmac_get_rx_addr(txd_raw + 0x1a, skb->data);
-            *(uint32_t *)(txd_raw + 0x0c) = (uint32_t)lmac_sta_get(0xffff, txd_raw + 0x1a);
+            lmac_get_rx_addr(txd->dest_mac, skb->data);
+            txd->sta = lmac_sta_get(0xFFFF, txd->dest_mac);
 
             log_trace("tx_task: skb=%p sta=%p mac=%02x:%02x:%02x:%02x:%02x:%02x",
-                      skb,
-                      (void *)*(uint32_t *)(txd_raw + 0x0c),
-                      txd_raw[0x1a], txd_raw[0x1b], txd_raw[0x1c],
-                      txd_raw[0x1d], txd_raw[0x1e], txd_raw[0x1f]);
+                      skb, txd->sta,
+                      txd->dest_mac[0], txd->dest_mac[1], txd->dest_mac[2],
+                      txd->dest_mac[3], txd->dest_mac[4], txd->dest_mac[5]);
 
-            if ((txd_raw[0x1a] & 1) != 0) {
-                txd_raw[0x26] |= 0x80;
-            }
+            if ((txd->dest_mac[0] & 1) != 0)
+                txd->tx_ctrl |= 0x80;
 
             {
-                uint32_t ack = lmac_get_ack_policy_orig(txd_raw);
-                txd_raw[0x25] = (txd_raw[0x25] & 0xfd) | ((ack & 1) << 1);
+                uint32_t ack = lmac_get_ack_policy(txd);
+                txd->frame_type_hi = (txd->frame_type_hi & 0xFD) | ((ack & 1) << 1);
             }
 
-            txd_raw[0x26] &= 0xf0;
+            txd->tx_ctrl &= 0xF0;
 
-            *(int16_t *)(txd_raw + 0x18) =
-                (int16_t)lmac_get_seq_num((void *)*(uint32_t *)(txd_raw + 0x10));
+            txd->seq_num = (int16_t)lmac_get_seq_num((void *)txd->frame);
 
-            {
-                uint16_t combined;
+            txd->frame_type_lo = (txd->frame_type_lo & 0xE3) | (uint8_t)(((fc >> 2) & 7) << 2);
+            combined = ((uint16_t)txd->frame_type_hi << 8) | txd->frame_type_lo;
+            combined = (combined & 0xFE1F) | (((fc >> 4) & 0x0F) << 5);
+            txd->frame_type_lo = (uint8_t)combined;
+            txd->frame_type_hi = (uint8_t)(combined >> 8);
 
-                txd_raw[0x24] = (txd_raw[0x24] & 0xe3) | (uint8_t)(((fc >> 2) & 7) << 2);
-                combined = ((uint16_t)txd_raw[0x25] << 8) | txd_raw[0x24];
-                combined = (combined & 0xfe1f) | (((fc >> 4) & 0x0f) << 5);
-                txd_raw[0x24] = (uint8_t)combined;
-                txd_raw[0x25] = (uint8_t)(combined >> 8);
+            txd->frame_type_hi = (txd->frame_type_hi & 0xBF) | (((skb->data[1] >> 1) & 1) << 6);
+            txd->frame_type_hi = (txd->frame_type_hi & 0x7F) | (skb->data[1] << 7);
 
-                txd_raw[0x25] = (txd_raw[0x25] & 0xbf) | (((skb->data[1] >> 1) & 1) << 6);
-                txd_raw[0x25] = (txd_raw[0x25] & 0x7f) | (skb->data[1] << 7);
-
-                txd_raw[0x2a] = lmac_get_hdr_len_pv0((uint16_t *)skb->data);
-                txd_raw[0x2b] = (txd_raw[0x2b] & 0xe7) | ((ah_lmac.bss_bw & 3) << 3);
-            }
+            txd->hdr_len = lmac_get_hdr_len_pv0((uint16_t *)skb->data);
+            txd->bw_cfg  = (txd->bw_cfg & 0xE7) | ((ah_lmac.bss_bw & 3) << 3);
 
             /* No-ack: fire-and-forget, zero retry limits */
-            if (txd_raw[0x25] & 0x02u) {
-                txd_raw[0x3c] = 0;
-                txd_raw[0x3d] = 0;
-                txd_raw[0x3e] = 0;
+            if (txd->frame_type_hi & 0x02u) {
+                txd->fallback_count  = 0;
             }
 
             lmac_tx_pv0_data(skb);
 
-            *(uint16_t *)(txd_raw + 0x16) = lmac_tx_align_len_min(skb->len);
+            txd->aligned_len = lmac_tx_align_len_min(skb->len);
 
             if (((ah_lmac.beacon_s1g_format_flags & 1) == 0) &&
-                (*(uint16_t *)(txd_raw + 0x16) > 0x067b)) {
+                (txd->aligned_len > 0x067B)) {
                 log_warn("tx_task: drop skb=%p frame too large aligned_len=%u",
-                         skb, *(uint16_t *)(txd_raw + 0x16));
+                         skb, txd->aligned_len);
                 lmac_tx_drop_min(skb);
                 continue;
             }
 
-            lmac_partial_aid_update_orig(txd_raw);
+            lmac_partial_aid_update(txd);
 
-            log_trace("tx_task: after partial_aid skb=%p txd26=0x%02x txd27=0x%02x",
-                      skb, txd_raw[0x26], txd_raw[0x27]);
+            log_trace("tx_task: after partial_aid skb=%p tx_ctrl=0x%02x tx_flags=0x%02x",
+                      skb, txd->tx_ctrl, txd->tx_flags);
 
             *(uint16_t *)skb->data &= ~0x1000;
 
-            txd_raw[0x26] &= ~0x10;
+            txd->tx_ctrl &= ~0x10;
 
-            if ((txd_raw[0x26] & 0x0f) > 7) {
-                txd_raw[0x26] = (txd_raw[0x26] & 0xf0) | 7;
-            }
+            if ((txd->tx_ctrl & 0x0F) > 7)
+                txd->tx_ctrl = (txd->tx_ctrl & 0xF0) | 7;
 
             skb_list_queue(&ah_lmac_tx_orig.tx_status_queue, skb);
 
             log_info("tx: skb=%p len=%u fc=0x%04x ac=%u queued",
-                     skb, skb->len, fc, txd_raw[0x26] & 3);
+                     skb, skb->len, fc, txd->tx_ctrl & 3);
 
             lmac_tx_data_reload();
         }
@@ -422,7 +408,7 @@ static void lmac_tx_status_task(void *_arg) {
         os_sema_down(&ah_lmac_tx_orig.tx_status_sem, -1);
 
         while ((skb = skb_list_dequeue(&ah_lmac_tx_orig.tx_frames_pending_queue)) != NULL) {
-            uint8_t *txd = skb->head;
+            lmac_txd_t *txd = (lmac_txd_t *)skb->head;
 
             ah_lmac.tx_irq_ctrl_flags &= 0xfe;
             ah_lmac.pending_pkg_to_status_check--;
@@ -431,9 +417,9 @@ static void lmac_tx_status_task(void *_arg) {
                 ah_lmac.tx_retry_or_multi_count++;
             }
 
-            lmac_sta_put((void *)*(uint32_t *)(txd + 0x0c));
+            lmac_sta_put(txd->sta);
 
-            if ((txd[0x27] & 2) != 0) {
+            if ((txd->tx_flags & 0x02) != 0) {
                 uint32_t now = (uint32_t)os_jiffies();
                 uint32_t dt = now - (uint32_t)skb->lifetime;
 
@@ -505,7 +491,8 @@ void lmac_tx_data_reload(void) {
     uint32_t moved = 0;
 
     while ((skb = skb_list_dequeue(src)) != NULL) {
-        uint8_t tid = (skb->head != NULL) ? (skb->head[0x26] & 7) : 0;
+        lmac_txd_t *txd = (lmac_txd_t *)skb->head;
+        uint8_t tid = (txd != NULL) ? (txd->tx_ctrl & 7) : 0;
         uint8_t ac = ieee802_1d_to_ac_tbl[tid];
 
         if (ac > 3)
@@ -538,9 +525,10 @@ void lmac_tx_data_reload(void) {
 
 
 int32 lmac_tx_pv0_data(struct sk_buff *skb) {
+    lmac_txd_t *txd = (lmac_txd_t *)skb->head;
     log_trace("pv0_data: skb=%p len=%u", skb, skb->len);
-    skb->data[1] &= 0xbf;
-    skb->head[0x26] &= 0xef;
+    skb->data[1] &= 0xBF;
+    txd->tx_ctrl &= ~0x10;
     return 0;
 }
 

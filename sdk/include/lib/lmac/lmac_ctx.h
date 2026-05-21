@@ -131,8 +131,8 @@ struct lmac_ctx {
     uint8_t chan_busy_threshold_3;
     uint8_t link_mode_flags;
     uint8_t mcs_encoding_format;
-    uint8_t tx_cnt_max_0;
-    uint8_t tx_cnt_max_1;
+    uint8_t rate_budget_threshold;    /* 0x312: compared with txd->_reserved_29 in reorder */
+    uint8_t retry_count_threshold;    /* 0x313: compared with txd->retry_count in reorder */
     uint8_t mcast_dup_filter_cfg;
     uint8_t aggcnt;
     uint8_t hw_init_param;
@@ -181,7 +181,7 @@ struct lmac_ctx {
     uint8_t pcf_percent;
     uint8_t _rsv_366[2];
     uint32_t rx_iface_queue_head;
-    uint16_t rx_iface_queue_tail;
+    uint16_t tx_power_config;     /* 0x36C: bits[4:0]=base_pwr, bits[12:5]=pwr_cap */
     uint8_t tx_rate_ctrl_flags;
     uint8_t _rsv_36f[1];
     uint32_t tx_rx_ratio_statics;
@@ -222,7 +222,7 @@ struct lmac_ctx {
     uint8_t obss_per;
     uint8_t _rsv_3e2[1];
     uint8_t _rsv_3e3[1];
-    uint8_t allways;
+    uint8_t resp_ind_ctrl;        /* 0x3E4: bit0=ack_resp_ind_override for TXVEC */
     uint8_t _rsv_3e5[3];
     uint8_t _rsv_3e8[4];
     uint8_t _rsv_3ec[4];
@@ -289,10 +289,7 @@ struct lmac_ctx {
     int16_t rx_dcoc_q_offset;
     uint8_t _rsv_716[2];
     uint32_t ac_pd_irq_tx_attempt_count;
-    uint32_t ac_pd_read_only_71c;
-    uint32_t ac_pd_read_only_720;
-    uint32_t ac_pd_read_only_724;
-    uint32_t ac_pd_read_only_728;
+    uint32_t ac_tx_attempt_count[4];   /* 0x71C-0x72B: per-AC TX attempt counter */
     uint32_t tx_queue_state_72c;
     uint32_t tx_queue_state_730;
     uint32_t tx_queue_state_734;
@@ -387,7 +384,7 @@ struct lmac_ctx {
     uint8_t tx_byte_860;
     uint8_t _rsv_861[3];
     uint8_t tx_mcs_max_limit;
-    uint8_t tx_mcs_min_limit;
+    uint8_t mcs_floor;
     uint8_t tx_mcs;
     uint8_t tx_bw_sig;
     uint8_t mcast_tx_rate;
@@ -396,7 +393,7 @@ struct lmac_ctx {
     uint8_t tx_bw_ctrl_flags;
     uint8_t gpio0_pin_flags;
     uint8_t gpio1_pin_flags;
-    uint8_t cfend_or_cfp_active_flags;
+    uint8_t force_nav_flags;
     uint8_t _rsv_879[3];
     uint16_t cfpoll_duration_calc;
     uint16_t tx_timestamp_disable_or_reset_flag;
@@ -446,11 +443,12 @@ struct lmac_ctx {
     uint32_t qa_rx_channel_map;
     uint8_t _rsv_8d0[8];
     uint32_t ba_resp_timeout_or_tdma;
-    uint8_t _rsv_8dc[78];
-    uint8_t ba_ctrl_flags;    /* 0x92A: bit3=NDP/delayed-BA, skip sync-wait after BA */
-    uint8_t _rsv_92b;
-    uint32_t tx_vec_hdr_config;
-    uint8_t _rsv_930[40];
+    uint8_t _rsv_8dc[8];                       /* 0x8DC-0x8E3: gap before response frames */
+    uint8_t rts_resp_frame[16];                /* 0x8E4-0x8F3: RTS response frame buffer (DMA source) */
+    uint8_t cts_resp_frame[16];                /* 0x8F4-0x903: CTS response frame buffer (DMA source) */
+    uint8_t ack_resp_frame[16];                /* 0x904-0x913: ACK response frame buffer (DMA source) */
+    uint8_t ba_resp_frame[34];                 /* 0x914-0x935: Block ACK response frame buffer (DMA source) */
+    uint8_t _rsv_936[34];                      /* 0x936-0x957 */
     struct pv0_cfend_frame pv0_cfend;
     struct pv0_pspoll_frame pv0_pspoll;
     uint8_t mac_state_978;
@@ -474,7 +472,7 @@ struct lmac_ctx {
     uint8_t beacon_pending_state_flags;
     uint8_t beacon_obss_slot_flags;
     uint8_t irq_ac_control_flags;
-    uint8_t tx_global_flags;
+    uint8_t current_ac_flags;
     uint8_t ps_tim_state;    /* 0x9DD: low nibble = TIM PS delivery state; nonzero = PS delivery pending after beacon */
     undefined field370_0x9de;
     int8_t field371_0x9df;
@@ -724,15 +722,58 @@ typedef struct lmac_tx_ctx_buff {
     uint8_t reserved_110[0x10];        /* 0x110..0x11f */
 } __attribute__((packed)) lmac_tx_ctx_buff;
 
+/* TX Descriptor — 0x44 bytes stored at skb->head.
+ * Filled by lmac_fast_tx / lmac_tx_task, read by the TX pipeline (AC_PD → attempt_tx → tx_frm). */
+typedef struct lmac_txd {
+    uint8_t  _reserved_00[0x0C];   /* 0x00-0x0B: unused */
+    void    *sta;                   /* 0x0C: station table entry (lmac_sta_get result) */
+    uint8_t *frame;                 /* 0x10: 802.11 frame pointer (skb->data) */
+    uint16_t frame_len;             /* 0x14: frame byte count (skb->len) */
+    uint16_t aligned_len;           /* 0x16: PHY-aligned frame length */
+    int16_t  seq_num;               /* 0x18: 802.11 sequence number */
+    uint8_t  dest_mac[6];           /* 0x1A-0x1F: destination MAC address */
+    uint8_t  _reserved_20[0x04];    /* 0x20-0x23 */
+    uint8_t  frame_type_lo;         /* 0x24: derived from FC: proto_ver[1:0]|type[4:2]|subtype[7:5] */
+    uint8_t  frame_type_hi;         /* 0x25: subtype_ext[0]|no_ack[1]|fc_bits[4:2]|more_data[6]|order[7] */
+    uint8_t  tx_ctrl;               /* 0x26: TID[3:0]|_reserved[5:4]|_reserved[6]|mcast[7] */
+    uint8_t  tx_flags;              /* 0x27: _reserved[0]|started[1]|_reserved[6:2]|completed[7] */
+    uint8_t  retry_count;           /* 0x28: current retry counter */
+    uint8_t  _reserved_29;          /* 0x29 */
+    uint8_t  hdr_len;               /* 0x2A: S1G header length (from lmac_get_hdr_len_pv0) */
+    uint8_t  bw_cfg;               /* 0x2B: bss_bw in bits[5:3] */
+    uint8_t  _reserved_2c[0x10];    /* 0x2C-0x3B */
+    uint8_t  tx_bw_hint;            /* 0x3C: TX bandwidth hint/signaling index */
+    uint8_t  tx_rate_mcs;           /* 0x3D: TX MCS override/rate field */
+    uint8_t  fallback_count;        /* 0x3E: rate fallback count (0x0F max) */
+    uint8_t  rts_cfg;              /* 0x3F: RTS config (bits[6:5] = mode, etc.) */
+    uint8_t  _reserved_40[0x04];    /* 0x40-0x43 */
+} __attribute__((packed)) lmac_txd_t;
+
 struct lmac_tx_vector {
     byte flags0; // .[0:4]=0 (clear), .[6]=mcs_hi (читается как (>>6)&1)
-    byte bw_fmt; // // .[0:1]=bss_bw, .[2:3]=ndp_type/s1g_fmt,                                         // .[4]=bw_sig_en (1, кроме случая tx_bw_ctrl&2 && tx_bw_sig==3),                                         // .[5:6]=mcs_lo (для ветвей ndp_type 0/1/2)
-    byte fmt_byte; // // .[0:3]=0xC (NDP CTS frame format),                                         //  .[7]=wide_bw (если bss_bw>1)
+    byte bw_fmt; // .[0:1]=bss_bw, .[2:3]=ndp_type/s1g_fmt, .[4]=bw_sig_en, .[5:6]=mcs_lo
+    byte fmt_byte; // .[0:3]=0xC (NDP CTS frame format), .[7]=wide_bw (if bss_bw>1)
     byte rsvd03;
     uint32_t tx_symbol_len;
     uint32_t ctrl_word_lo;
     uint32_t ctrl_word_hi;
 } __attribute__((packed));
+
+/* Per-AC TX extension area: sits at offset 0x1B8 within each AC's stride.
+ * Covers aggregation metadata (0x1B8) and the inline TX vector (0x1C8).
+ * Access via: (lmac_ac_tx_ext_t *)&_LMX[ac * AH_AC_STRIDE + 0x1B8] */
+typedef struct lmac_ac_tx_ext {
+    uint32_t _pad;                     /* 0x1B8-0x1BB */
+    uint32_t aggr_sym_len;             /* 0x1BC: total symbol length for aggregated TX */
+    uint8_t  seq_win_start;            /* 0x1C0: sequence window start index */
+    uint8_t  _rsv_1c1;
+    uint8_t  seq_win_end;              /* 0x1C2: sequence window end index */
+    uint8_t  _rsv_1c3;
+    uint8_t  agg_num;                  /* 0x1C4: frames in aggregate */
+    uint8_t  agg_cnt;                  /* 0x1C5: selected frame count */
+    uint16_t aggr_hdr_ctrl;            /* 0x1C6: aggregation header control bits */
+    struct lmac_tx_vector txvec;       /* 0x1C8-0x1D7: per-AC TX vector */
+} __attribute__((packed)) lmac_ac_tx_ext_t;
 
 struct lmac_ce_desc {
     uint32_t key_ptr;
@@ -807,7 +848,7 @@ struct lmac_tx_ctx {
    ========================================================================== */
 
 extern lmac_ctx_t           ah_lmac;           // main context
-//extern lmac_tx_ctx_t        ah_lmac_tx;        // TX subsystem
+extern lmac_tx_ctx_t        ah_lmac_tx_orig;   // TX subsystem (orig name for link with binary)
 //extern lmac_ah_rx_ctx_t   ah_lmac_rx;        // RX subsystem
 //extern lmac_dsleep_ctx_t  ah_dsleep;         // deep-sleep
 extern lmac_ops_t         ah_ops;            // device vtable

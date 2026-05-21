@@ -25,6 +25,7 @@ extern "C" {
  */
 typedef struct {
     uint8_t bypass_backoff;   /* 0 = standard CSMA/CA;  1 = CW=1, zero backoff */
+    uint8_t ignore_cca;       /* 0 = wait for CCA/BO path; 1 = force immediate BO-done */
     uint8_t fast_tx;          /* 0 = normal path through tx_task;  1 = direct AC queue injection */
     uint8_t defer_ac_pd;      /* 1 = lmac_fast_tx queues but does NOT trigger AC_PD; caller must kick */
 } lmac_custom_cfg_t;
