@@ -1368,7 +1368,7 @@ int32_t lmac_tx_ack(struct sk_buff *skb)
 void lmac_bknoise_calc_en(void)  { ah_rfdigicali_bknoise_calc_en(); }
 void lmac_bknoise_calc_dis(void) { ah_rfdigicali_bknoise_calc_dis(); }
 
-/* Get background noise measurement — simplified to avoid PHY crash */
+/* Get background noise measurement with AGC gain compensation */
 uint32 lmac_bknoise_get(void)
 {
     os_sleep_us(1);
@@ -1376,7 +1376,21 @@ uint32 lmac_bknoise_get(void)
     if (noise == 0)
         return (uint32)(-60);
 
-    return (uint32)(noise - ah_lmac.bknoise_base_offset);
+    uint32 agc_info = ah_wphy_agc_info_get();
+    /* Refresh gain ref + base offset from PHY registers.
+     * Actual signature: void ah_wphy_rx_gain_para_get(void *dst6, void *dst1)
+     * Header declares wrong prototype, cast to fix. */
+    ((void(*)(void *, void *))ah_wphy_rx_gain_para_get)(
+        ah_lmac.bknoise_gain_ref, &ah_lmac.bknoise_base_offset);
+
+    uint32 gain_idx = agc_info & 0xFu;
+    if (gain_idx > 5u)
+        gain_idx = 5u;
+
+    int8_t gain_ref = ah_lmac.bknoise_gain_ref[gain_idx];
+    int8_t base_off = ah_lmac.bknoise_base_offset;
+
+    return (uint32)(int32_t)(noise - gain_ref - base_off);
 }
 
 /* CCA threshold configuration */
