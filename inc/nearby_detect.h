@@ -14,12 +14,12 @@ typedef struct {
     int32_t lastrx_timestamp_s;
     int32_t rx_bytes;
     int32_t rx_packets;
-    void *user;
+        void *user;
 } nearby_modem_t;
 
 typedef struct {
     uint8_t mac[6];
-    uint8_t len;
+    uint16_t len;
     uint8_t mcs;
     int8_t rssi;
     uint32_t timestamp_s;
