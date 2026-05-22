@@ -6,30 +6,35 @@
 #include "osal/sleep.h"
 #include <string.h>
 
-static void test_mcs_burst(uint8_t mcs, uint32_t count, uint16_t pkt_len)
+static void test_speed_mcs10(uint16_t pkt_len, uint32_t duration_sec)
 {
     static uint8_t pkt[704];
     for (uint32_t i = 0; i < pkt_len && i < 704; i++) pkt[i] = i;
 
-    log_info("=== MCS%u burst: %u pkts len=%u ===", mcs, count, pkt_len);
-    int32_t ret = halow_tx_batch(pkt, pkt_len, mac_broadcast, count, mcs);
-    log_info("  MCS%u ret=%d", mcs, ret);
-    os_sleep_ms(2000);
+    uint32_t total_sent = 0;
+    uint32_t total_bytes = 0;
+    uint32_t t_start = (uint32_t)os_jiffies();
+
+    log_info("=== MCS10 speed: len=%u dur=%us ===", pkt_len, duration_sec);
+
+    while (((uint32_t)os_jiffies() - t_start) < (duration_sec * 1000u)) {
+        int32_t ret = halow_tx(pkt, pkt_len, mac_broadcast, 10);
+        if (ret == 0) {
+            total_sent++;
+            total_bytes += pkt_len;
+        }
+    }
+
+    uint32_t elapsed_ms = (uint32_t)os_jiffies() - t_start;
+    uint32_t kbps = (elapsed_ms > 0) ? (total_bytes * 8u / (elapsed_ms / 1000u)) / 1000u : 0;
+    uint32_t pps = (elapsed_ms > 0) ? (total_sent * 1000u / elapsed_ms) : 0;
+
+    log_info("=== MCS10 speed result: %u pkts %u KB %u ms => %u kbps %u pps ===",
+             total_sent, total_bytes / 1024u, elapsed_ms, kbps, pps);
 }
 
 void test_run_all(void)
 {
     os_sleep_ms(2000);
-
-    /* MCS10 fine sweep: find exact payload limit */
-    test_mcs_burst(10, 1, 450);
-    test_mcs_burst(10, 1, 460);
-    test_mcs_burst(10, 1, 470);
-    test_mcs_burst(10, 1, 475);
-    test_mcs_burst(10, 1, 480);
-
-    /* MCS0 regression */
-    test_mcs_burst(0,  2, 500);
-
-    log_info("MCS10 fine sweep complete");
+    test_speed_mcs10(260, 30);
 }
