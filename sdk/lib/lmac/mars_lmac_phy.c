@@ -20,6 +20,7 @@
 #include "osal/semaphore.h"
 
 void lmac_check_tx_queue_empty(void);
+extern void lmac_cfg_end_to_limit(uint32_t value);
 
 #define LMAC_AGGR_CTRL_START   (1u << 0)
 #define LMAC_AGGR_CTRL_AMPDU   (1u << 1)
@@ -302,7 +303,13 @@ void lmac_irq_ac_pd(void)
         }
     }
 
-    /* 13. Attempt TX.  BO IRQ dispatches by bo_frame_type; data must be state 1. */
+    /* 13. Adjust END_TO_LIMIT for MCS10 (OFDMA 26-tone needs longer TX window) */
+    if (mcs == 10u)
+        lmac_cfg_end_to_limit(65000u);
+    else
+        lmac_cfg_end_to_limit(25000u);
+
+    /* 14. Attempt TX.  BO IRQ dispatches by bo_frame_type; data must be state 1. */
     ah_lmac.bo_frame_type = 1u;
     ah_lmac.bo_tx_substate = 0u;
     int32_t result = lmac_attempt_tx(ac);
