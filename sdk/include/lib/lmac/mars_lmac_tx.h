@@ -113,7 +113,7 @@ int32 lmac_ah_tx(struct lmac_ops *ops, struct sk_buff *skb);
  * @param skb  Socket buffer with S1G frame at data pointer
  * @return 0 on success, negative on error (skb is freed on error)
  */
-int32 lmac_fast_tx(struct sk_buff *skb);
+int32 lmac_fast_tx(struct sk_buff *skb, uint8_t mcs);
 
 /**
  * @brief Test TX function (bypasses radio check)
@@ -1149,53 +1149,6 @@ extern int32 lmac_lo_freq_set(uint16 id);
 extern void lmac_notify_channel_switch(uint8 chan);
 extern void lmac_beacon_timer_start(uint32 us);
 
-
-/*
- * Constants and Macros
- */
-
-/* TX Queue Offsets */
-#define AH_TXQ_OFS           0x064U
-#define AH_TXSQ_OFS          0x070U
-#define AH_CUR_TXVEC_OFS     0x004U
-#define AH_BEACON_SKB_OFS    0x008U
-#define AH_ACQ_OFS           0x088U
-#define AH_STATQ_OFS         0x538U
-#define AH_AC_STRIDE         0x120U
-#define AH_AGGLIST_OFS       0x0B8U
-#define AH_AGGBYTES_OFS      0x1B8U
-#define AH_AGGSYM_OFS        0x1BCU
-#define AH_AGGNUM_OFS        0x1C4U
-#define AH_AGGCNT_OFS        0x1C5U
-#define AH_AGGHDR_OFS        0x1C6U
-#define AH_DURCACHE_OFS      0x55EU
-#define AH_LMAC_TXCNT_OFS    0xA78U
-#define AH_LMAC_TXERR_OFS    0xA7AU
-#define AH_LMAC_TXMAX_OFS    0x760U
-#define AH_LMAC_TXSUM_OFS    0x764U
-#define AH_LMAC_BEACON_CUR_OFS 0xA54U
-#define AH_LMAC_FLAG_A4F_OFS 0xA4FU
-#define AH_LMAC_BCNCTL_OFS   0x3B8U
-#define AH_LMAC_TXSTATE_OFS  0x9B4U
-#define AH_LMAC_ACSEL0_OFS   0x30CU
-#define AH_LMAC_ACSEL1_OFS   0x30DU
-#define AH_LMAC_ACSEL2_OFS   0x30EU
-#define AH_LMAC_ACLAST_OFS   0x9DCU
-#define AH_LMAC_MISC9E2_OFS  0x9E2U
-#define AH_LMAC_MISC9E0_OFS  0x9E0U
-#define AH_LMAC_STA_HEAD_OFS 0x9F8U
-#define AH_LMAC_PM_FLAG_OFS  0xA08U
-#define AH_LMAC_PM_FLAG2_OFS 0xA0AU
-#define AH_LMAC_PM_MODE_OFS  0x0BCU
-#define AH_LMAC_PM_DEADLINE_LO_OFS 0x3CCU
-#define AH_LMAC_PM_DEADLINE_HI_OFS 0x3D0U
-#define AH_LMAC_PM_MARGIN_OFS 0x3C8U
-#define AH_LMAC_DTIM_COUNT_OFS 0x555U
-#define AH_LMAC_DTIM_PERIOD_OFS 0x556U
-#define AH_LMAC_DTIM_TU_OFS  0x658U
-#define AH_LMAC_RF_PD_FLAGS_OFS 0x878U
-#define AH_LMAC_PSPOLL_ACK_OFS 0x994U
-#define AH_LMAC_TXSTART_OFS  0x670U
 
 /* Return codes */
 #ifndef RET_OK

@@ -51,7 +51,9 @@ struct lmac_ctx_extra_ies {
 #define undefined uint8_t
 
 struct ah_ce_ctx {
-    uint8_t _pre_cw[0x24];       /* 0x004-0x027: cipher engine + misc */
+    uint8_t _pre_cw_0[0x18];      /* 0x004-0x01B: cipher engine + misc */
+    uint8_t cca_mode_per_ac[4];   /* 0x01C-0x01F: CCA mode per AC (0=ED, 1=CS, 2=ED+CS) */
+    uint8_t _pre_cw_1c[8];        /* 0x020-0x027 */
     uint16_t cw_min[4];           /* 0x028-0x02F: EDCA CW_min per AC (read by lmac_attempt_tx_orig) */
     uint8_t _gap_030[8];          /* 0x030-0x037 */
     uint16_t cw_max[4];           /* 0x038-0x03F: EDCA CW_max per AC */
@@ -220,7 +222,7 @@ struct lmac_ctx {
     uint8_t pwr_cca_flags;
     uint8_t rxg_offset;
     uint8_t obss_per;
-    uint8_t _rsv_3e2[1];
+    uint8_t ndp_scramble_enable;     /* 0x3E2: bit0=enable NDP scrambling */
     uint8_t _rsv_3e3[1];
     uint8_t resp_ind_ctrl;        /* 0x3E4: bit0=ack_resp_ind_override for TXVEC */
     uint8_t _rsv_3e5[3];
@@ -239,7 +241,9 @@ struct lmac_ctx {
     uint8_t dtim_period;
     uint8_t bitmap_control_bit0;
     uint8_t bitmap_control;
-    uint8_t _rsv_559[251];
+    uint8_t _rsv_559[4];            /* 0x559-0x55C */
+    uint8_t tx_antenna_byte;       /* 0x55D: bits[2]=ant_sel for TX status */
+    uint8_t _rsv_55e[246];         /* 0x55E-0x655 */
     uint16_t s1g_compat_info;
     uint16_t beacon_interval;
     uint32_t TSF;
@@ -251,7 +255,7 @@ struct lmac_ctx {
     uint16_t tx_time_part0;
     uint16_t tx_symbol_duration;
     uint16_t tx_time_part2;
-    uint8_t _rsv_672[2];
+    uint16_t tx_time_ctrl;            /* 0x672-0x673: cleared with tx_time_part2 on TX start */
     uint16_t beacon_airtime;
     uint16_t bss_max_idle;
     int32_t chip_temp_adj;
@@ -268,8 +272,8 @@ struct lmac_ctx {
     uint8_t _rsv_6d6[2];
     uint32_t vdd13b_meas_value;
     uint32_t vdd13c_meas_value;
-    uint32_t tx_success_pkt_count;
-    uint32_t tx_fail_err_count;
+    uint32_t diag_last_tx_mcs;         /* 0x6E8: last TX MCS written by lmac_update_tx_rate */
+    uint32_t diag_last_tx_bw_hint;     /* 0x6EC: last TX BW hint written by lmac_update_tx_rate */
     uint32_t last_tx_mcs;
     uint32_t last_tx_bw_sig;
     uint32_t tx_some_counter_6f0;
@@ -277,13 +281,13 @@ struct lmac_ctx {
     uint32_t padding_6f8_6fb[2];
     uint32_t tx_state_700;
     uint32_t tx_state_704;
-    uint8_t tx_flags_708;
+    uint8_t pwr_ft_att_flags;          /* 0x708: front-end attenuator flags (bits[5:0]), compared for PA reconfig */
     uint8_t _rsv_709[3];
     uint8_t tx_write_flags_70c;
     uint8_t tx_write_flags_70d;
     uint8_t tx_write_flags_70e;
     uint8_t tx_last_mcs_bw;       /* 0x70F: last TX MCS/BW byte from TXVEC1 (bits[3:0]=MCS-lo, bits[7:4]=BW) */
-    uint8_t tx_write_only_710;
+    uint8_t pwr_sel_result;            /* 0x710: power select result (pwr_arg) written by lmac_tx_pwr_sel */
     uint8_t _rsv_711[1];
     int16_t rx_dcoc_i_offset;
     int16_t rx_dcoc_q_offset;
@@ -302,7 +306,7 @@ struct lmac_ctx {
     uint32_t tx_sym_time_acc;     /* 0x750: accumulated TXCTX symbol time (+=TXCTX[0x560]+[0x562]) */
     uint32_t rx_queue_state_754;
     uint32_t rx_duration_high;
-    uint32_t tx_state_75c;
+    uint32_t diag_tx_rate_updates;     /* 0x75C: count of lmac_update_tx_rate calls */
     uint32_t last_send_time;
     uint32_t send_time_sum;
     uint32_t tx_queue_entry_768;
@@ -322,7 +326,7 @@ struct lmac_ctx {
     uint32_t tx_state_7a0;
     uint32_t tx_state_7a4;
     uint32_t tx_state_7a8;
-    uint32_t tx_state_7ac;
+    uint32_t diag_tx_reload_count;     /* 0x7AC: count of lmac_tx_data_reload empty-queue events */
     uint32_t tx_retry_count_7b0;
     uint32_t tx_retry_limit_7b4;
     uint32_t tx_state_7b8;
@@ -364,13 +368,13 @@ struct lmac_ctx {
     int16_t rx_dcoc_q_last;
     uint8_t _rsv_83c[1];
     int8_t  tx_airtime_scale_offset; /* 0x83D: signed; effective airtime scale = (100 - this) % */
-    uint8_t tx_write_byte_83e;
+    uint8_t diag_pwr_sel_mcs;          /* 0x83E: last MCS passed to lmac_tx_pwr_sel */
     uint8_t _rsv_83f[1];
-    uint8_t tx_byte_840;
-    uint8_t tx_write_byte_841;
+    uint8_t diag_pwr_sel_power;        /* 0x840: last power level from lmac_tx_pwr_sel */
+    uint8_t diag_pwr_sel_rx_ctrl;      /* 0x841: RX PV0 ctrl byte saved by lmac_tx_pwr_sel */
     uint8_t _rsv_842[2];
-    uint32_t tx_state_844;
-    uint32_t tx_write_word_848;
+    uint32_t diag_pwr_sel_count;       /* 0x844: count of lmac_tx_pwr_sel calls */
+    uint32_t diag_pwr_sel_sta_word;    /* 0x848: sta+0x68 word saved by lmac_tx_pwr_sel */
     int16_t chan_scan_rssi_0;
     int16_t chan_scan_rssi[1];
     int16_t chan_scan_rssi_2;
@@ -515,7 +519,8 @@ struct lmac_ctx {
     uint32_t last_rx_pv0_ctrl_info;
     uint8_t tx_irq_ctrl_flags;    /* 0xA4F: bit3=PS-retry-skip; set when TX frame has PS flag, checked in lmac_irq_tx_end */
     void   *pTx_current_sta;     /* 0xA50: pointer to last TX STA, used by lmac_irq_tx_end to update STA stats */
-    uint8_t _rsv_a54[23];        /* 0xA54-0xA6A */
+    uint32_t beacon_cur_timer;   /* 0xA54: beacon current timer, cleared on TX reconfig */
+    uint8_t _rsv_a58[19];       /* 0xA58-0xA6A */
     uint32_t evt_queue_head;
     uint32_t evt_queue_tail;
     uint32_t evt_queue_capacity;
@@ -704,22 +709,31 @@ struct lmac_ctx {
 
 typedef struct lmac_tx_ctx lmac_tx_ctx_t;
 
+struct lmac_tx_vector {
+    byte flags0;
+    byte bw_fmt;
+    byte fmt_byte;
+    byte rsvd03;
+    uint32_t tx_symbol_len;
+    uint32_t ctrl_word_lo;
+    uint32_t ctrl_word_hi;
+} __attribute__((packed));
 
 typedef struct lmac_tx_ctx_buff {
-    struct sk_buff *skb_list[64];      /* 0x000 */
+    struct sk_buff *skb_list[64];
 
-    uint32_t total_len_bytes;          /* 0x100 */
-    uint32_t symbol_len;               /* 0x104 */
+    uint32_t total_len_bytes;
+    uint32_t symbol_len;
 
-    int16_t first_seq;                 /* 0x108 */
-    int16_t last_seq;                  /* 0x10a */
+    int16_t first_seq;
+    int16_t last_seq;
 
-    uint8_t selected_count;            /* 0x10c */
-    uint8_t queued_count;              /* 0x10d */
-    uint8_t rate_cfg;                  /* 0x10e */
-    uint8_t reserved_10f;              /* 0x10f */
+    uint8_t selected_count;
+    uint8_t queued_count;
+    uint8_t rate_cfg;
+    uint8_t tx_flags;                  /* bit2 = TXVEC ready flag */
 
-    uint8_t reserved_110[0x10];        /* 0x110..0x11f */
+    struct lmac_tx_vector txvec;       /* per-AC TX vector (was reserved_110) */
 } __attribute__((packed)) lmac_tx_ctx_buff;
 
 /* TX Descriptor — 0x44 bytes stored at skb->head.
@@ -749,19 +763,8 @@ typedef struct lmac_txd {
     uint8_t  _reserved_40[0x04];    /* 0x40-0x43 */
 } __attribute__((packed)) lmac_txd_t;
 
-struct lmac_tx_vector {
-    byte flags0; // .[0:4]=0 (clear), .[6]=mcs_hi (читается как (>>6)&1)
-    byte bw_fmt; // .[0:1]=bss_bw, .[2:3]=ndp_type/s1g_fmt, .[4]=bw_sig_en, .[5:6]=mcs_lo
-    byte fmt_byte; // .[0:3]=0xC (NDP CTS frame format), .[7]=wide_bw (if bss_bw>1)
-    byte rsvd03;
-    uint32_t tx_symbol_len;
-    uint32_t ctrl_word_lo;
-    uint32_t ctrl_word_hi;
-} __attribute__((packed));
-
-/* Per-AC TX extension area: sits at offset 0x1B8 within each AC's stride.
- * Covers aggregation metadata (0x1B8) and the inline TX vector (0x1C8).
- * Access via: (lmac_ac_tx_ext_t *)&_LMX[ac * AH_AC_STRIDE + 0x1B8] */
+/* Per-AC TX extension area: legacy overlay on lmac_tx_ctx_buff tail.
+ * Access via: ac_aggr(ac) for the aggr buffer, then use named fields. */
 typedef struct lmac_ac_tx_ext {
     uint32_t _pad;                     /* 0x1B8-0x1BB */
     uint32_t aggr_sym_len;             /* 0x1BC: total symbol length for aggregated TX */
@@ -794,52 +797,44 @@ struct lmac_ce_desc {
 struct lmac_tx_ctx {
     uint32_t exit_flag;
     uint8_t *pPv0_txvec;
-    struct sk_buff *pBeacon_skb;
-    uint8_t pPv0_txvec_temp_buffer[32];
+
+    /* OS tasks and semaphores */
     struct os_task tx_task;
     struct os_task tx_status_task;
     struct os_semaphore tx_sem;
     struct os_semaphore tx_status_sem;
+
+    /* Packet queues */
     struct skb_list tx_pending_queue;
     struct skb_list tx_status_queue;
-    struct skb_list tx_retry_queue;
+
+    /* Per-AC queues */
     struct skb_list pTx_ac_queues[4];
+
+    /* Per-AC aggregation data (single skb per AC in modem mode) */
     struct lmac_tx_ctx_buff pTx_ac_aggr_data[4];
+
+    /* Completion queue for tx_status_task */
     struct skb_list tx_frames_pending_queue;
-    uint8_t pTx_cipher_iv_buffer[16];
+
+    /* Per-AC counters */
     uint8_t pTx_agg_count_per_ac[4];
-    /* TX completion status save area (0x558-0x561, 10 bytes) */
-    uint32_t tx_last_fcs;           /* 0x558: LMAC_HW->FCS_RES captured at TX end */
-    uint16_t tx_last_rate_packed;   /* 0x55c: packed TXVEC1 bits: [6:0]=AID/scrambler [9:7]=MCS_lo [12:11]=BW [15:13]=MCS_hi */
-    uint16_t tx_pending_nav_dur;    /* 0x55e: pending NAV/duration for timer; also minimum duration in DMA path */
-    uint16_t tx_cca_slot_count;     /* 0x560: AIFSN slot count written by lmac_attempt_tx */
-    /* 0x562: first 2 bytes of pTx_vector_cache[0] (flags0:bw_fmt) reused as tx_cca_remain scratch */
-    struct lmac_tx_vector pTx_vector_cache[5];
-    uint8_t pTx_vector_array_alignment[2];
-    struct lmac_tx_vector data_tx_vector;
-    struct lmac_tx_vector wpcts_tx_vector;
-    struct lmac_tx_vector rts_tx_vector;
-    struct lmac_tx_vector block_ack_resp_tx_vector;
-    struct lmac_tx_vector cfpoll_tx_vector;
-    struct lmac_tx_vector cfend_tx_vector;
-    struct lmac_tx_vector pspoll_tx_vector;
-    struct lmac_tx_vector qos_null_data_tx_vector;
-    struct lmac_tx_vector beacon_tx_vector;
-    uint8_t pTx_beacon_scratch_pad[4];
-    uint32_t tx_packet_count_low;
-    uint32_t tx_packet_count_high;
-    uint8_t pTx_encryption_temp_buffer[8];
-    uint8_t pCcmp_auth_header[8];
-    uint8_t pTx_ccmp_aad_additional_data_a[30];
-    uint8_t pTx_ccmp_aad_additional_data_b[28];
-    uint8_t pCcmp_auth_nonce[13];
-    byte bTx_ccmp_flags;
-    struct lmac_ce_desc cipher_engine_descriptor;
-    uint8_t pTx_cipher_desc_reserved[2];
-    uint8_t aad_data_length;
-    byte bTx_aad_length_padding;
-    uint32_t broadcast_seq_number; // 12-битный SN-счётчик bcast/mgmt
-    uint32_t next_dtim_timestamp_us; // обновляется при каждой передаче beacon'а
+    uint8_t _pad0[4];
+
+    /* TX completion status */
+    uint32_t tx_last_fcs;
+    uint16_t tx_last_rate_packed;
+    uint16_t tx_pending_nav_dur;
+    uint16_t tx_cca_slot_count;
+    uint16_t tx_cca_remain;
+
+    /* NDP TX vector cache (5 entries x 16 bytes, raw byte access for HW) */
+    uint8_t pTx_vector_cache[80];
+
+    /* Response TX vectors (PV0 response frames) */
+    struct lmac_tx_vector resp_cts_txvec;
+    struct lmac_tx_vector resp_ba_txvec;
+    struct lmac_tx_vector resp_ack_txvec;
 } __attribute__((packed));
 
 
@@ -848,7 +843,7 @@ struct lmac_tx_ctx {
    ========================================================================== */
 
 extern lmac_ctx_t           ah_lmac;           // main context
-extern lmac_tx_ctx_t        ah_lmac_tx_orig;   // TX subsystem (orig name for link with binary)
+extern lmac_tx_ctx_t        ah_lmac_tx;        // TX subsystem context
 //extern lmac_ah_rx_ctx_t   ah_lmac_rx;        // RX subsystem
 //extern lmac_dsleep_ctx_t  ah_dsleep;         // deep-sleep
 extern lmac_ops_t         ah_ops;            // device vtable

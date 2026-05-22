@@ -25,7 +25,7 @@ extern uint32 lmac_get_hdr_len_pv0(void *hdr);
 extern void ndp_tx_vec_init_one(uint8_t *txvec);
 extern uint32 lmac_get_ack_policy(void *txd);
 extern void lmac_partial_aid_update(void *txd);
-extern lmac_tx_ctx_t ah_lmac_tx_orig;
+lmac_tx_ctx_t ah_lmac_tx;
 
 
 static void lmac_tx_drop_min(struct sk_buff *skb);
@@ -33,8 +33,6 @@ static void lmac_tx_task(void *arg);
 static void lmac_tx_status_task(void *arg);
 
 int32 lmac_tx_queue_init(void);
-int32 lmac_check_aggregation(struct sk_buff *skb0, struct sk_buff *skb1);
-uint32 seq_num_space_update(void *sta, uint32 tid);
 void lmac_tx_data_reload(void);
 int32 lmac_tx_pv0_data(struct sk_buff *skb);
 
@@ -45,9 +43,6 @@ typedef struct skb_list skb_list;
 
 #define LMAC_TX_AC_COUNT 4
 
-/* Raw byte access to LMAC context structs */
-#define _LM ((uint8_t *)&ah_lmac)
-#define _LMX ((uint8_t *)&ah_lmac_tx_orig)
 
 
 static const uint8_t ieee802_1d_to_ac_tbl[8] = {0, 1, 1, 0, 2, 2, 3, 3};
@@ -70,13 +65,13 @@ int32 lmac_ah_tx(struct lmac_ops *ops, struct sk_buff *skb)
     /* low 32: submission timestamp; high 32: headroom (used by cipher path) */
     skb->lifetime = (uint64_t)(uint32_t)os_jiffies() | ((uint64_t)headroom << 32);
 
-    ret = skb_list_queue(&ah_lmac_tx_orig.tx_pending_queue, skb);
+    ret = skb_list_queue(&ah_lmac_tx.tx_pending_queue, skb);
     if (ret) {
         log_error("ah_tx: queue failed ret=%d", ret);
         return ret;
     }
 
-    os_sema_up(&ah_lmac_tx_orig.tx_sem);
+    os_sema_up(&ah_lmac_tx.tx_sem);
     ah_lmac.pending_pkg_to_status_check++;
 
     log_trace("ah_tx: skb=%p len=%u headroom=%u", skb, skb->len, headroom);
@@ -84,7 +79,7 @@ int32 lmac_ah_tx(struct lmac_ops *ops, struct sk_buff *skb)
 }
 
 static inline uint16_t lmac_tx_align_len_min(uint16_t len);
-int32 lmac_fast_tx(struct sk_buff *skb)
+int32 lmac_fast_tx(struct sk_buff *skb, uint8_t mcs)
 {
     lmac_txd_t *txd;
     uint16_t fc, combined;
@@ -112,7 +107,7 @@ int32 lmac_fast_tx(struct sk_buff *skb)
     memset(txd, 0, sizeof(*txd));
 
     txd->tx_bw_hint      = ah_lmac.tx_bw_sig;
-    txd->tx_rate_mcs     = ah_lmac.tx_mcs;
+    txd->tx_rate_mcs     = mcs;
     txd->fallback_count   = 0x0F;
     txd->rts_cfg          = (txd->rts_cfg & 0x9F) | 0x60;
 
@@ -179,7 +174,7 @@ int32 lmac_fast_tx(struct sk_buff *skb)
     skb->acked    = 0;
 
     {
-        int32_t ret = skb_list_queue(&ah_lmac_tx_orig.pTx_ac_queues[0], skb);
+        int32_t ret = skb_list_queue(&ah_lmac_tx.pTx_ac_queues[0], skb);
         if (ret) {
             kfree_skb(skb);
             return -5;
@@ -200,19 +195,19 @@ int32 lmac_fast_tx(struct sk_buff *skb)
 
 void lmac_kick_tx_task(void)
 {
-    os_sema_up(&ah_lmac_tx_orig.tx_sem);
+    os_sema_up(&ah_lmac_tx.tx_sem);
 }
 
 
 
 void lmac_tx_init(void) {
-    log_info("tx_init: start ctx=%p", &ah_lmac_tx_orig);
+    log_info("tx_init: start ctx=%p", &ah_lmac_tx);
 
-    memset(&ah_lmac_tx_orig, 0, 0x6d4);
+    memset(&ah_lmac_tx, 0, sizeof(ah_lmac_tx));
     lmac_tx_queue_init();
 
     for (uint32_t ac = 0; ac < LMAC_TX_AC_COUNT; ac++) {
-        struct lmac_tx_ctx_buff *aggr = &ah_lmac_tx_orig.pTx_ac_aggr_data[ac];
+        struct lmac_tx_ctx_buff *aggr = &ah_lmac_tx.pTx_ac_aggr_data[ac];
 
         memset(aggr->skb_list, 0, sizeof(aggr->skb_list));
         aggr->total_len_bytes = 0;
@@ -222,34 +217,33 @@ void lmac_tx_init(void) {
         aggr->selected_count = 0;
         aggr->queued_count = 0;
         aggr->rate_cfg = 0;
+        aggr->tx_flags = 0;
+        memset(&aggr->txvec, 0, sizeof(aggr->txvec));
     }
 
-    ndp_tx_vec_init_one(&ah_lmac_tx_orig.pTx_vector_cache[0].fmt_byte);
-    ndp_tx_vec_init_one(&ah_lmac_tx_orig.pTx_vector_cache[1].fmt_byte);
-    ndp_tx_vec_init_one(&ah_lmac_tx_orig.pTx_vector_cache[2].fmt_byte);
-    ndp_tx_vec_init_one(&ah_lmac_tx_orig.pTx_vector_cache[3].fmt_byte);
-    ndp_tx_vec_init_one(&ah_lmac_tx_orig.pTx_vector_cache[4].fmt_byte);
+    for (uint32_t i = 0; i < 5; i++)
+        ndp_tx_vec_init_one(&ah_lmac_tx.pTx_vector_cache[i * 16]);
     log_debug("tx_init: vec_init done");
 
-    os_sema_init(&ah_lmac_tx_orig.tx_sem, 0);
-    os_sema_init(&ah_lmac_tx_orig.tx_status_sem, 0);
+    os_sema_init(&ah_lmac_tx.tx_sem, 0);
+    os_sema_init(&ah_lmac_tx.tx_status_sem, 0);
 
     os_task_init((const uint8 *)"lmac tx",
-                 (struct os_task *)&ah_lmac_tx_orig.tx_task,
+                 (struct os_task *)&ah_lmac_tx.tx_task,
                  (void (*)(void *))lmac_tx_task,
-                 (uint32)&ah_lmac_tx_orig);
-    os_task_set_stacksize(&ah_lmac_tx_orig.tx_task, 2048);
-    _os_task_set_priority(&ah_lmac_tx_orig.tx_task, 81);
-    os_task_run(&ah_lmac_tx_orig.tx_task);
+                 (uint32)&ah_lmac_tx);
+    os_task_set_stacksize(&ah_lmac_tx.tx_task, 2048);
+    _os_task_set_priority(&ah_lmac_tx.tx_task, 81);
+    os_task_run(&ah_lmac_tx.tx_task);
     log_debug("tx_init: tx task started");
 
     os_task_init((const uint8 *)"lmac tx status",
-                 (struct os_task *)&ah_lmac_tx_orig.tx_status_task,
+                 (struct os_task *)&ah_lmac_tx.tx_status_task,
                  (void (*)(void *))lmac_tx_status_task,
-                 (uint32)&ah_lmac_tx_orig);
-    os_task_set_stacksize(&ah_lmac_tx_orig.tx_status_task, 2048);
-    _os_task_set_priority(&ah_lmac_tx_orig.tx_status_task, 0x50);
-    os_task_run(&ah_lmac_tx_orig.tx_status_task);
+                 (uint32)&ah_lmac_tx);
+    os_task_set_stacksize(&ah_lmac_tx.tx_status_task, 2048);
+    _os_task_set_priority(&ah_lmac_tx.tx_status_task, 0x50);
+    os_task_run(&ah_lmac_tx.tx_status_task);
     log_debug("tx_init: status task started");
 
     log_info("tx_init: done");
@@ -267,8 +261,8 @@ static inline uint16_t lmac_tx_align_len_min(uint16_t len) {
 
 static void lmac_tx_drop_min(struct sk_buff *skb) {
     skb->acked = 0;
-    skb_list_queue(&ah_lmac_tx_orig.tx_frames_pending_queue, skb);
-    os_sema_up(&ah_lmac_tx_orig.tx_status_sem);
+    skb_list_queue(&ah_lmac_tx.tx_frames_pending_queue, skb);
+    os_sema_up(&ah_lmac_tx.tx_status_sem);
 }
 
 
@@ -277,23 +271,23 @@ static void lmac_tx_task(void *_arg) {
 
     log_info("tx_task: start arg=%p", _arg);
 
-    while (((uint8_t)ah_lmac_tx_orig.exit_flag & 1) == 0) {
+    while (((uint8_t)ah_lmac_tx.exit_flag & 1) == 0) {
         struct sk_buff *skb;
         int sema_result;
 
         loop_iter++;
-        sema_result = os_sema_down(&ah_lmac_tx_orig.tx_sem, 1);
+        sema_result = os_sema_down(&ah_lmac_tx.tx_sem, 1);
 //
 //        log_trace("tx_task: wake iter=%u sema=%d pending=%u",
 //                  loop_iter, sema_result,
-//                  skb_list_count(&ah_lmac_tx_orig.tx_pending_queue));
+//                  skb_list_count(&ah_lmac_tx.tx_pending_queue));
 
         if (sema_result == 0) {
             lmac_tx_data_reload();
             continue;
         }
 
-        while ((skb = skb_list_dequeue(&ah_lmac_tx_orig.tx_pending_queue)) != NULL) {
+        while ((skb = skb_list_dequeue(&ah_lmac_tx.tx_pending_queue)) != NULL) {
             lmac_txd_t *txd;
             uint16_t fc, combined;
 
@@ -383,7 +377,7 @@ static void lmac_tx_task(void *_arg) {
             if ((txd->tx_ctrl & 0x0F) > 7)
                 txd->tx_ctrl = (txd->tx_ctrl & 0xF0) | 7;
 
-            skb_list_queue(&ah_lmac_tx_orig.tx_status_queue, skb);
+            skb_list_queue(&ah_lmac_tx.tx_status_queue, skb);
 
             log_info("tx: skb=%p len=%u fc=0x%04x ac=%u queued",
                      skb, skb->len, fc, txd->tx_ctrl & 3);
@@ -395,7 +389,7 @@ static void lmac_tx_task(void *_arg) {
         lmac_tx_data_reload();
     }
 
-    log_info("tx_task: exit exit_flag=0x%02x", (uint8_t)ah_lmac_tx_orig.exit_flag);
+    log_info("tx_task: exit exit_flag=0x%02x", (uint8_t)ah_lmac_tx.exit_flag);
 }
 
 
@@ -404,10 +398,10 @@ static void lmac_tx_status_task(void *_arg) {
 
     log_info("tx_status_task: start arg=%p", _arg);
 
-    while (((uint8_t)ah_lmac_tx_orig.exit_flag & 1) == 0) {
-        os_sema_down(&ah_lmac_tx_orig.tx_status_sem, -1);
+    while (((uint8_t)ah_lmac_tx.exit_flag & 1) == 0) {
+        os_sema_down(&ah_lmac_tx.tx_status_sem, -1);
 
-        while ((skb = skb_list_dequeue(&ah_lmac_tx_orig.tx_frames_pending_queue)) != NULL) {
+        while ((skb = skb_list_dequeue(&ah_lmac_tx.tx_frames_pending_queue)) != NULL) {
             lmac_txd_t *txd = (lmac_txd_t *)skb->head;
 
             ah_lmac.tx_irq_ctrl_flags &= 0xfe;
@@ -447,35 +441,29 @@ static void lmac_tx_status_task(void *_arg) {
 int32 lmac_tx_queue_init(void) {
     int32 ret;
 
-    log_debug("tx_queue_init: start ctx=%p", _LMX);
+    log_debug("tx_queue_init: start ctx=%p", &ah_lmac_tx);
 
-    ret = skb_list_init(&ah_lmac_tx_orig.tx_pending_queue);
+    ret = skb_list_init(&ah_lmac_tx.tx_pending_queue);
     if (ret) {
         log_error("tx_queue_init: tx_pending_queue failed ret=%d", ret);
         return -1;
     }
 
-    ret = skb_list_init(&ah_lmac_tx_orig.tx_status_queue);
+    ret = skb_list_init(&ah_lmac_tx.tx_status_queue);
     if (ret) {
         log_error("tx_queue_init: tx_status_queue failed ret=%d", ret);
         return -1;
     }
 
-    ret = skb_list_init(&ah_lmac_tx_orig.tx_retry_queue);
-    if (ret) {
-        log_error("tx_queue_init: tx_retry_queue failed ret=%d", ret);
-        return -1;
-    }
-
     for (int32_t i = 0; i < LMAC_TX_AC_COUNT; i++) {
-        ret = skb_list_init(&ah_lmac_tx_orig.pTx_ac_queues[i]);
+        ret = skb_list_init(&ah_lmac_tx.pTx_ac_queues[i]);
         if (ret) {
             log_error("tx_queue_init: ac_queue[%d] failed ret=%d", i, ret);
             return -1;
         }
     }
 
-    ret = skb_list_init(&ah_lmac_tx_orig.tx_frames_pending_queue);
+    ret = skb_list_init(&ah_lmac_tx.tx_frames_pending_queue);
     if (ret) {
         log_error("tx_queue_init: tx_frames_pending_queue failed ret=%d", ret);
         return -1;
@@ -486,7 +474,7 @@ int32 lmac_tx_queue_init(void) {
 }
 
 void lmac_tx_data_reload(void) {
-    struct skb_list *src = &ah_lmac_tx_orig.tx_status_queue;
+    struct skb_list *src = &ah_lmac_tx.tx_status_queue;
     struct sk_buff *skb;
     uint32_t moved = 0;
 
@@ -498,15 +486,15 @@ void lmac_tx_data_reload(void) {
         if (ac > 3)
             ac = 0;
 
-        skb_list_queue(&ah_lmac_tx_orig.pTx_ac_queues[ac], skb);
-        ah_lmac_tx_orig.pTx_agg_count_per_ac[ac]++;
+        skb_list_queue(&ah_lmac_tx.pTx_ac_queues[ac], skb);
+        ah_lmac_tx.pTx_agg_count_per_ac[ac]++;
         moved++;
 
         log_trace("reload: skb=%p tid=%u ac=%u", skb, tid, ac);
     }
 
     if (skb_list_count(src) == 0) {
-        ah_lmac.tx_state_7ac++;
+        ah_lmac.diag_tx_reload_count++;
     }
 
     LMAC_HW->AC_PD = 0;
@@ -515,10 +503,10 @@ void lmac_tx_data_reload(void) {
     if (moved != 0) {
         log_debug("reload: moved=%u ac0=%u ac1=%u ac2=%u ac3=%u",
                   moved,
-                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[0]),
-                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[1]),
-                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[2]),
-                  skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[3]));
+                  skb_list_count(&ah_lmac_tx.pTx_ac_queues[0]),
+                  skb_list_count(&ah_lmac_tx.pTx_ac_queues[1]),
+                  skb_list_count(&ah_lmac_tx.pTx_ac_queues[2]),
+                  skb_list_count(&ah_lmac_tx.pTx_ac_queues[3]));
     }
 }
 
@@ -533,32 +521,4 @@ int32 lmac_tx_pv0_data(struct sk_buff *skb) {
 }
 
 
-#define _STUB(name) \
-    log_warn("STUB: " #name " skb=%p len=%u", skb, skb->len); \
-    (void)skb; \
-    return 0
 
-int32 lmac_check_aggregation(struct sk_buff *skb0, struct sk_buff *skb1) {
-    log_warn("STUB: lmac_check_aggregation skb0=%p skb1=%p", skb0, skb1);
-    (void)skb0; (void)skb1;
-    return -1;
-}
-
-uint32 seq_num_space_update(void *sta, uint32 tid) {
-    log_warn("STUB: seq_num_space_update sta=%p tid=%u", sta, tid);
-    (void)sta; (void)tid;
-    return 0;
-}
-
-int32 lmac_tx_pv0_mgmt(struct sk_buff *skb)  { _STUB(lmac_tx_pv0_mgmt);  }
-int32 lmac_tx_pv0_ctrl(struct sk_buff *skb)  { _STUB(lmac_tx_pv0_ctrl);  }
-int32 lmac_tx_pv0_ext(struct sk_buff *skb)   { _STUB(lmac_tx_pv0_ext);   }
-int32 lmac_tx_pv1_data1(struct sk_buff *skb) { _STUB(lmac_tx_pv1_data1); }
-int32 lmac_tx_pv1_data2(struct sk_buff *skb) { _STUB(lmac_tx_pv1_data2); }
-int32 lmac_tx_pv1_mgmt(struct sk_buff *skb)  { _STUB(lmac_tx_pv1_mgmt);  }
-int32 lmac_tx_pv1_ctrl(struct sk_buff *skb)  { _STUB(lmac_tx_pv1_ctrl);  }
-
-#undef _STUB
-
-#undef _LM
-#undef _LMX

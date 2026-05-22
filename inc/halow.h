@@ -25,12 +25,14 @@ bool halow_init(uint32_t rxbuf, uint32_t rxbuf_size,
                 uint32_t tdma_buf, uint32_t tdma_buf_size);
 
 void halow_set_rx_cb(halow_rx_cb cb);
-int32_t halow_tx(const uint8_t *data, uint32_t len, const uint8_t destination_mac[6]);
-int32_t halow_tx_batch(const uint8_t *data, uint32_t len, const uint8_t destination_mac[6], uint32_t count);
+int32_t halow_tx(const uint8_t *data, uint32_t len, const uint8_t destination_mac[6], uint8_t mcs);
+int32_t halow_tx_batch(const uint8_t *data, uint32_t len, const uint8_t destination_mac[6], uint32_t count, uint8_t mcs);
 void halow_config_set_bandwidth(uint8_t bw);
 void halow_config_load(halow_config_t *cfg);
 void halow_config_save(const halow_config_t *cfg);
 void halow_config_apply(const halow_config_t *cfg);
 void halow_config_set_mcs(uint8_t mcs);
+
+#define HALOW_MCS_DEFAULT 0xFF  /* use globally configured MCS */
 
 #endif //__HALOW_H_

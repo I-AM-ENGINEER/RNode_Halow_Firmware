@@ -7,7 +7,7 @@
  */
 #include "sys_config.h"
 
-#define LOG_LOCAL_LEVEL LOG_LEVEL_MARS_LMAC_TX
+#define LOG_LOCAL_LEVEL LOG_DEBUG
 #include "lib/logc/log.h"
 #include "typesdef.h"
 
@@ -30,17 +30,13 @@ void lmac_check_tx_queue_empty(void);
 
 /* EDCA CW parameters in ah_lmac.ce_ctx (set per-AC before lmac_attempt_tx_orig reads them) */
 
-extern lmac_tx_ctx_t ah_lmac_tx_orig;
+/* ah_lmac_tx defined in mars_lmac_tx.c */
 extern struct lmac_ops *g_pAhLmacOps;
 
-/* Raw byte access to LMAC context structs */
-#define _LM ((uint8_t *)&ah_lmac)
-#define _LMX ((uint8_t *)&ah_lmac_tx_orig)
-
-/* Per-AC TX extension: aggregation metadata + inline TX vector (0x1B8-0x1D7) */
-static inline lmac_ac_tx_ext_t *ac_tx_ext(uint32_t ac)
+/* Per-AC TX extension: aggregation metadata + inline TX vector */
+static inline lmac_tx_ctx_buff *ac_aggr(uint32_t ac)
 {
-    return (lmac_ac_tx_ext_t *)&_LMX[ac * AH_AC_STRIDE + 0x1B8];
+    return &ah_lmac_tx.pTx_ac_aggr_data[ac];
 }
 
 extern void   lhw_start_cca(uint32 bw, uint32 dur);
@@ -81,7 +77,7 @@ static inline void lmac_common_bo_irq_finish(void)
 
 int32 lmac_cfg_txvec_part2(void)
 {
-    uint32_t *txvec = (uint32_t *)ah_lmac_tx_orig.pPv0_txvec;
+    uint32_t *txvec = (uint32_t *)ah_lmac_tx.pPv0_txvec;
     uint8_t ant_fmt;
     uint8_t ant;
 
@@ -135,16 +131,16 @@ int32 lmac_send_data_to_phy(uint32 ac)
         return -1;
     }
 
-    aggr = &ah_lmac_tx_orig.pTx_ac_aggr_data[ac];
+    aggr = &ah_lmac_tx.pTx_ac_aggr_data[ac];
     if (aggr->selected_count == 0u) {
         ah_lmac.tx_irq_error_flags |= 0x4000u;
         log_warn("send_data_to_phy: ac=%u selected_count=0", ac);
         return -1;
     }
 
-    rate_flags = *(uint16_t *)((uint8_t *)aggr + 0x10eu);
+    rate_flags = *(uint16_t *)&aggr->rate_cfg;
     duration = lmac_hdr_dur_calc((aggr->symbol_len + ((rate_flags & 0x01ffu) >> 6)) * 40u);
-    tx_duration = ah_lmac_tx_orig.tx_pending_nav_dur;
+    tx_duration = ah_lmac_tx.tx_pending_nav_dur;
     if (tx_duration < duration)
         tx_duration = (uint16_t)duration;
 
@@ -196,9 +192,9 @@ int32 lmac_tx_frm(struct sk_buff *skb)
         return -1;
     }
 
-    aggr = &ah_lmac_tx_orig.pTx_ac_aggr_data[ac];
-    if (((aggr->reserved_10f >> 2u) & 1u) == 0u) {
-        log_warn("tx_frm: ac=%u not ready flags=0x%02x", ac, aggr->reserved_10f);
+    aggr = &ah_lmac_tx.pTx_ac_aggr_data[ac];
+    if (((aggr->tx_flags >> 2u) & 1u) == 0u) {
+        log_warn("tx_frm: ac=%u not ready flags=0x%02x", ac, aggr->tx_flags);
         return -1;
     }
 
@@ -207,7 +203,7 @@ int32 lmac_tx_frm(struct sk_buff *skb)
     lmac_send_data_to_phy(ac);
     lmac_cfg_txvec_part2();
 
-    aggr->reserved_10f &= (uint8_t)~0x04u;
+    aggr->tx_flags &= (uint8_t)~0x04u;
     ah_lmac.ac_tx_attempt_count[ac] += 1u;
     return 0;
 }
@@ -263,9 +259,10 @@ void lmac_irq_ac_pd(void)
     lmac_check_tx_queue_empty();
 
     /* 6. Clear state variables */
-    *(uint32_t *)&_LM[AH_LMAC_BEACON_CUR_OFS] = 0;
-    *(uint32_t *)&_LM[AH_LMAC_PSPOLL_ACK_OFS] = 0;
-    *(uint32_t *)&_LM[AH_LMAC_TXSTART_OFS] = 0;
+    ah_lmac.beacon_cur_timer = 0;
+    ah_lmac.bo_frame_type = 0;
+    ah_lmac.tx_time_part2 = 0;
+    ah_lmac.tx_time_ctrl = 0;
 
     /* 7. Skip beacon/DTIM/AP paths (modem mode only) */
 
@@ -281,16 +278,37 @@ void lmac_irq_ac_pd(void)
         return;
 
     /* 10. Generate aggregation list.
-     * _orig signature: (ac, bw_hint, mcs, max_frames) */
-    struct sk_buff *first_skb = lmac_gen_tx_agglist(ac, bw_hint, mcs, 0x1ffu);
+     * For MCS10 the symbol count overflows the 9-bit ctrl_word_lo field.
+     * Compute symbol_len with MCS=0 (fits in 9 bits). Then patch rate_cfg
+     * to store actual MCS=10 — the PHY may use rate_cfg for MCS selection. */
+    uint8_t agg_mcs = (mcs == 10u) ? 0u : mcs;
+    struct sk_buff *first_skb = lmac_gen_tx_agglist(ac, bw_hint, agg_mcs, 0x1ffu);
     if (first_skb == NULL)
         return;
 
-    /* 11. Generate TX vector */
+    /* Patch rate_cfg bits [5:2] to the real MCS for MCS10 */
+    if (mcs == 10u) {
+        lmac_tx_ctx_buff *aggr = ac_aggr(ac);
+        aggr->rate_cfg = (aggr->rate_cfg & 0xC3u) | (uint8_t)((mcs & 0xFu) << 2u);
+    }
+
+    /* 11. Generate TX vector (uses actual MCS for modulation fields) */
     lmac_gen_txvec(ac, bw_hint, mcs);
 
     /* 12. Update frame TX vector pointer */
     lmac_update_frm_tx_vec();
+
+    /* Debug: one-line MCS10 verification (only first call per burst) */
+    {
+        static uint8_t dbg_cnt = 0;
+        if (++dbg_cnt <= 3) {
+            lmac_tx_ctx_buff *dbg_aggr = ac_aggr(ac);
+            log_info("txvec: mcs=%u sym_len=%u sym_cw=%u rate=0x%04x",
+                     mcs, dbg_aggr->txvec.tx_symbol_len,
+                     (dbg_aggr->txvec.ctrl_word_lo >> 12) & 0x1FF,
+                     *(uint16_t *)&dbg_aggr->rate_cfg);
+        }
+    }
 
     /* 13. Attempt TX.  BO IRQ dispatches by bo_frame_type; data must be state 1. */
     ah_lmac.bo_frame_type = 1u;
@@ -300,15 +318,14 @@ void lmac_irq_ac_pd(void)
         return;
 
     /* 14. Update stats */
-    *(uint16_t *)&_LMX[AH_DURCACHE_OFS] = 0;
+    ah_lmac_tx.tx_pending_nav_dur = 0;
     ah_lmac.ac_tx_attempt_count[ac] += 1u;
 }
 
 
 /*
- * Minimal lmac_gen_tx_agglist: dequeue a bounded run from the AC queue,
- * place it in the aggregate list, compute total symbol length.
- * Returns pointer to first skb on success, NULL on empty queue.
+ * Single-packet agglist: dequeue exactly one skb from the AC queue.
+ * Modem mode — no aggregation, each TX is one frame.
  */
 struct sk_buff *lmac_gen_tx_agglist(uint32_t ac, uint32_t rate,
                                    uint32_t bw, uint32_t max_frames)
@@ -316,14 +333,14 @@ struct sk_buff *lmac_gen_tx_agglist(uint32_t ac, uint32_t rate,
     lmac_tx_ctx_buff *aggr;
     lmac_txd_t *txd;
     struct sk_buff *skb;
-    uint32_t limit;
+    uint32_t next_bytes, next_sym;
 
     (void)max_frames;
 
     if (ac >= 4u)
         return NULL;
 
-    aggr = &ah_lmac_tx_orig.pTx_ac_aggr_data[ac];
+    aggr = &ah_lmac_tx.pTx_ac_aggr_data[ac];
 
     memset(aggr->skb_list, 0, sizeof(aggr->skb_list));
     aggr->total_len_bytes = 0u;
@@ -332,68 +349,31 @@ struct sk_buff *lmac_gen_tx_agglist(uint32_t ac, uint32_t rate,
     aggr->first_seq        = -1;
     aggr->last_seq         = -1;
 
-    /* rate_cfg: bits [1:0] = bw_hint, bits [5:2] = mcs (matches _orig binary) */
+    /* rate_cfg: bits [1:0] = bw_hint, bits [5:2] = mcs */
     aggr->rate_cfg = (uint8_t)(rate & 3u);
     if ((bw <= 7u) || (bw == 10u))
         aggr->rate_cfg = (aggr->rate_cfg & 0xc3u) | (uint8_t)((bw & 0xfu) << 2u);
 
-    limit = ah_lmac.aggcnt;
-    if (limit == 0u || limit > 64u)
-        limit = 64u;
-    if (limit > 16u)
-        limit = 16u;
-
-    while (aggr->selected_count < limit) {
-        uint32_t next_bytes;
-        uint32_t next_sym;
-        uint32_t max_bytes;
-
-        skb = (struct sk_buff *)skb_list_first(&ah_lmac_tx_orig.pTx_ac_queues[ac]);
-        if (skb == NULL)
-            break;
-
-        txd = (lmac_txd_t *)skb->head;
-        if (txd == NULL)
-            break;
-
-        if (aggr->selected_count != 0u) {
-            int16_t expected_seq = (int16_t)(aggr->last_seq + 1);
-            if (txd->seq_num != expected_seq)
-                break;
-        }
-
-        next_bytes = aggr->total_len_bytes + (uint32_t)txd->aligned_len;
-        max_bytes = calc_max_agg_bytes(rate, bw);
-        if (aggr->selected_count != 0u && next_bytes > max_bytes)
-            break;
-        next_sym = calc_symbol_len(next_bytes + 4u, rate, bw);
-
-        /* TXVEC3 carries the PPDU symbol count in 9 bits for normal MCS0-7.
-         * Keep one MPDU even if the caller supplies an oversized test frame. */
-        if (aggr->selected_count != 0u && bw <= 7u && next_sym >= 0x200u)
-            break;
-        if (aggr->selected_count != 0u && bw == 10u && next_sym >= 0x2adu)
-            break;
-
-        skb = skb_list_dequeue(&ah_lmac_tx_orig.pTx_ac_queues[ac]);
-        if (skb == NULL)
-            break;
-
-        aggr->skb_list[aggr->selected_count] = skb;
-        aggr->selected_count++;
-        aggr->queued_count++;
-        aggr->total_len_bytes = next_bytes;
-        aggr->symbol_len = (uint16_t)next_sym;
-
-        if (aggr->first_seq < 0)
-            aggr->first_seq = txd->seq_num;
-        aggr->last_seq = txd->seq_num;
-    }
-
-    if (aggr->selected_count == 0u)
+    skb = skb_list_dequeue(&ah_lmac_tx.pTx_ac_queues[ac]);
+    if (skb == NULL)
         return NULL;
 
-    aggr->reserved_10f &= ~0x04u;
+    txd = (lmac_txd_t *)skb->head;
+    if (txd == NULL)
+        return NULL;
+
+    next_bytes = (uint32_t)txd->aligned_len;
+    next_sym = calc_symbol_len(next_bytes + 4u, rate, bw);
+
+    aggr->skb_list[0] = skb;
+    aggr->selected_count = 1u;
+    aggr->queued_count = 1u;
+    aggr->total_len_bytes = next_bytes;
+    aggr->symbol_len = (uint16_t)next_sym;
+    aggr->first_seq = txd->seq_num;
+    aggr->last_seq = txd->seq_num;
+
+    aggr->tx_flags &= ~0x04u;
 
     return aggr->skb_list[0];
 }
@@ -412,7 +392,7 @@ int32 lmac_attempt_tx(uint32_t ac)
     if (ac > 3u)
         ac = 3u;
 
-    if (ah_lmac_tx_orig.pTx_ac_aggr_data[ac].queued_count == 0u)
+    if (ah_lmac_tx.pTx_ac_aggr_data[ac].queued_count == 0u)
         return -1;
 
     cw_min = ah_lmac.ce_ctx.cw_min[ac];
@@ -424,7 +404,7 @@ int32 lmac_attempt_tx(uint32_t ac)
     } else if (lmac_custom_cfg.bypass_backoff) {
         backoff = 0u;
     } else if (cca_dur == 0u) {
-        txd = (lmac_txd_t *)ah_lmac_tx_orig.pTx_ac_aggr_data[ac].skb_list[0]->head;
+        txd = (lmac_txd_t *)ah_lmac_tx.pTx_ac_aggr_data[ac].skb_list[0]->head;
         uint32_t retry_exp = (uint32_t)txd->retry_count + (uint32_t)txd->_reserved_29;
         if (retry_exp > 0x0fu)
             retry_exp = 0x10u;
@@ -447,8 +427,7 @@ int32 lmac_attempt_tx(uint32_t ac)
         lmac_lo_table_kick(ah_lmac.lo_table_index);
     }
 
-    cca_mode = (uint32_t)_LM[0x1cu + ac] + 3u;
-    log_debug("attempt_tx: ac=%u cw=%u/%u backoff=%u cca=%u", ac, cw_min, cw_max, backoff, cca_mode);
+    cca_mode = (uint32_t)ah_lmac.ce_ctx.cca_mode_per_ac[ac] + 3u;
 
     LMAC_HW->FSM_CFG |= 0x200u;
     LMAC_HW->FSM_CFG |= 0x400u;
@@ -459,21 +438,20 @@ int32 lmac_attempt_tx(uint32_t ac)
         lhw_start_cca(2u, 0u);
         LMAC_HW->FSM_CFG &= ~0x200u;
         LMAC_HW->FSM_CFG |= 0x400u;
-        *(uint16_t *)&_LMX[0x560u] = 2u;
-        *(uint16_t *)&_LMX[0x562u] = 0u;
+        ah_lmac_tx.tx_cca_slot_count = 2;
+        ah_lmac_tx.tx_cca_remain = 0;
         lhw_start_tx(0u);
         lmac_cfg_txvec_part1();
         lmac_tdma_start();
     } else {
         lhw_start_cca(cca_mode, backoff);
-        *(uint16_t *)&_LMX[0x560u] = (uint16_t)cca_mode;
-        *(uint16_t *)&_LMX[0x562u] = (uint16_t)backoff;
+        ah_lmac_tx.tx_cca_slot_count = (uint16_t)cca_mode;
+        ah_lmac_tx.tx_cca_remain = (uint16_t)backoff;
         lhw_start_tx(0u);
         lmac_cfg_txvec_part1();
         lmac_tdma_start();
     }
 
-    log_debug("attempt_tx: done");
     return 0;
 }
 
@@ -492,43 +470,12 @@ void lmac_irq_bo_fns(void)
     ah_lmac.bo_tx_substate = 0u;
 
     switch (ah_lmac.bo_frame_type) {
-    case 1:
+    case 1:  /* data frame */
         lmac_irq_bo_fns_tx_data_state();
         return;
-    case 2:                                     /* send ACK */
+    case 2:  /* ACK */
         lmac_tx_ack(NULL);
         ah_lmac.bo_tx_substate = 4u;
-        break;
-    case 3:                                     /* send Block-ACK */
-        lmac_tx_ba(NULL);
-        if (!(ah_lmac.ba_resp_frame[0x16] & 0x08u))
-            ah_lmac.bo_tx_substate = 4u;
-        break;
-    case 4:                                     /* send RTS */
-        lmac_tx_rts(NULL);
-        ah_lmac.bo_tx_substate = 2u;
-        break;
-    case 5:                                     /* send CTS */
-        lmac_tx_cts(NULL);
-        break;
-    case 6:                                     /* send CF-Poll */
-        lmac_tx_pv0_cfpoll(NULL);
-        ah_lmac.bo_tx_substate = 3u;
-        break;
-    case 7:                                     /* send CF-End */
-        lmac_tx_pv0_cfend(NULL);
-        break;
-    case 8:                                     /* send Beacon */
-        lmac_tx_beacon(NULL);
-        ah_lmac.bo_tx_substate = 4u;
-        break;
-    case 9:                                     /* send Null frame */
-        lmac_tx_pv0_null(NULL);
-        ah_lmac.bo_tx_substate = 5u;
-        break;
-    case 10:                                    /* send PS-Poll */
-        lmac_tx_pv0_pspoll(NULL);
-        ah_lmac.bo_tx_substate = 6u;
         break;
     default:
         ah_lmac.tx_irq_error_flags |= 1u;
@@ -541,7 +488,7 @@ void lmac_irq_tx_end(void)
 {
     uint32_t flags = 0u;
     uint8_t ac = lmac_current_ac();
-    lmac_tx_ctx_buff *aggr = (ac < 4u) ? &ah_lmac_tx_orig.pTx_ac_aggr_data[ac] : NULL;
+    lmac_tx_ctx_buff *aggr = (ac < 4u) ? &ah_lmac_tx.pTx_ac_aggr_data[ac] : NULL;
 
     LMAC_HW->IRQ_PD = LMAC_IRQ_CLR_TX_END;
     lhw_abort_fsm();
@@ -575,28 +522,30 @@ void lmac_irq_tx_end(void)
      * calls halow_lmac_tx_status_callback → frees skb → ups g_tx_vacated_sem.
      * Without this, halow_tx blocks forever after TX_BUFFER_SIZE bytes. */
     if (aggr) {
+        uint32_t moved = 0;
         for (uint32_t i = 0; i < aggr->selected_count && i < 64; i++) {
             struct sk_buff *skb = aggr->skb_list[i];
             if (skb != NULL) {
                 lmac_txd_t *txd = (lmac_txd_t *)skb->head;
                 txd->tx_flags |= 0x80u;
-                skb_list_queue(&ah_lmac_tx_orig.tx_frames_pending_queue, skb);
+                skb_list_queue(&ah_lmac_tx.tx_frames_pending_queue, skb);
                 aggr->skb_list[i] = NULL;
+                moved++;
             }
         }
         aggr->selected_count = 0u;
         aggr->queued_count   = 0u;
         if (aggr->skb_list[0] != NULL || aggr->selected_count > 0)
-            os_sema_up(&ah_lmac_tx_orig.tx_status_sem);
+            os_sema_up(&ah_lmac_tx.tx_status_sem);
         else
-            os_sema_up(&ah_lmac_tx_orig.tx_status_sem);
+            os_sema_up(&ah_lmac_tx.tx_status_sem);
     }
 
     ah_lmac.bo_frame_type = 0u;
     update_rx_buff_addr();
     lmac_tdma_start();
     lhw_start_rx(flags);
-    if (ac < 4u && skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[ac]) > 0u) {
+    if (ac < 4u && skb_list_count(&ah_lmac_tx.pTx_ac_queues[ac]) > 0u) {
         LMAC_HW->AC_PD = 0u;
         LMAC_HW->AC_PD = 0xfu;
     }
@@ -612,7 +561,7 @@ int32 lmac_update_tx_state_ack(uint32 ok, uint32 arg1, uint32 arg2)
     uint8_t ac = lmac_current_ac();
     if (ac >= 4u)
         return -1;
-    struct sk_buff *skb = ah_lmac_tx_orig.pTx_ac_aggr_data[ac].skb_list[0];
+    struct sk_buff *skb = ah_lmac_tx.pTx_ac_aggr_data[ac].skb_list[0];
     if (skb != NULL && skb->head != NULL) {
         lmac_txd_t *txd = (lmac_txd_t *)skb->head;
         txd->tx_flags |= 0x80u;
@@ -627,7 +576,7 @@ int32 lmac_update_tx_state_ba(uint32 start_ssn, uint32 bitmap_lo, uint32 bitmap_
     uint8_t ac = lmac_current_ac();
     if (ac >= 4u)
         return -1;
-    lmac_tx_ctx_buff *aggr = &ah_lmac_tx_orig.pTx_ac_aggr_data[ac];
+    lmac_tx_ctx_buff *aggr = &ah_lmac_tx.pTx_ac_aggr_data[ac];
     for (uint32_t i = 0u; i < aggr->selected_count; i++) {
         struct sk_buff *skb = aggr->skb_list[i];
         if (skb != NULL && skb->head != NULL) {
@@ -663,8 +612,8 @@ void lmac_ant_sel(uint32 ant)
         gpio_set_val(ah_lmac.gpio1_pin_flags & 0x7fu, !(ant != 0));
 
     /* Store antenna bit in TX status area (high byte of tx_last_rate_packed) */
-    ((uint8_t *)&ah_lmac_tx_orig.tx_last_rate_packed)[1] =
-        (((uint8_t *)&ah_lmac_tx_orig.tx_last_rate_packed)[1] & 0xfbu) | (uint8_t)((ant & 1u) << 2u);
+    ((uint8_t *)&ah_lmac_tx.tx_last_rate_packed)[1] =
+        (((uint8_t *)&ah_lmac_tx.tx_last_rate_packed)[1] & 0xfbu) | (uint8_t)((ant & 1u) << 2u);
 }
 
 uint32 lmac_get_ack_policy(void *txi)
@@ -774,7 +723,7 @@ out:
 
 int32 lmac_cfg_txvec_part1(void)
 {
-    uint8_t *txvec = (uint8_t *)ah_lmac_tx_orig.pPv0_txvec;
+    uint8_t *txvec = (uint8_t *)ah_lmac_tx.pPv0_txvec;
     uint32_t pwr_arg;
     static uint32_t ft_att_pre = 0;
 
@@ -821,13 +770,13 @@ int32 lmac_cfg_txvec_part1(void)
             pwr_arg = pwr_fallback;
     }
 done_pwr:
-    ah_lmac.tx_write_only_710 = (uint8_t)pwr_arg;
+    ah_lmac.pwr_sel_result = (uint8_t)pwr_arg;
     ah_rfdigicali_tx_pwr(pwr_arg);
 
     if ((ah_lmac.bo_nav_ctrl & 2u) &&
-        ((ah_lmac.tx_flags_708 & 0x3fu) != ft_att_pre)) {
+        ((ah_lmac.pwr_ft_att_flags & 0x3fu) != ft_att_pre)) {
         config_ft_att_val();
-        ft_att_pre = ah_lmac.tx_flags_708 & 0x3fu;
+        ft_att_pre = ah_lmac.pwr_ft_att_flags & 0x3fu;
     }
 
     return 0;
@@ -835,55 +784,26 @@ done_pwr:
 
 /* BW signal <-> BSS BW lookup tables (from mars_lmac_util.o) */
 extern const uint8_t bw_map_sig2bss[4];
-extern const uint8_t bw_map_bss2sig[4];
-
-/* Retry rate fallback tables (from mars_lmac_tx_origfuncs.o) */
-/* Retry rate fallback tables — 10 MCS × 4 BW entries, each byte: [3:0]=new_mcs, [7:4]=bw_index.
- * Extracted from liblmac binary at 0x2004c32b. */
-static const uint8_t rc_tb1_data[40] = {
-    0x00,0x10,0x20,0x30, 0x01,0x11,0x21,0x31,
-    0x01,0x11,0x21,0x31, 0x02,0x12,0x22,0x32,
-    0x03,0x13,0x23,0x33, 0x04,0x14,0x24,0x34,
-    0x05,0x15,0x25,0x35, 0x06,0x16,0x26,0x36,
-    0x00,0x10,0x10,0x20, 0x00,0x11,0x11,0x21
-};
-static const uint8_t rc_tb3_data[40] = {
-    0x0a,0x10,0x10,0x20, 0x00,0x11,0x11,0x11,
-    0x00,0x11,0x11,0x12, 0x01,0x11,0x12,0x13,
-    0x01,0x11,0x13,0x14, 0x02,0x12,0x14,0x15,
-    0x03,0x13,0x15,0x16, 0x04,0x14,0x16,0x17
-};
-static const uint8_t rc_tb4_data[40] = {
-    0x0a,0x10,0x10,0x10, 0x0a,0x11,0x11,0x11,
-    0x00,0x11,0x11,0x11, 0x00,0x11,0x11,0x12,
-    0x01,0x11,0x12,0x13, 0x01,0x11,0x13,0x14,
-    0x02,0x12,0x14,0x15, 0x03,0x13,0x15,0x16
-};
-static const uint8_t rc_tb5_data[2] = { 0x0a, 0x10 };
-
-extern uint32 ah_get_rate(void *txd);
 
 struct sk_buff *lmac_get_first_skb(uint32 ac)
 {
     if (ac >= 4)
         return NULL;
 
-    uint8_t agg_cnt = ac_tx_ext(ac)->agg_cnt;
+    uint8_t agg_cnt = ac_aggr(ac)->queued_count;
     if (agg_cnt != 0) {
-        return *(struct sk_buff **)(
-            &_LMX[ac * AH_AC_STRIDE + AH_AGGLIST_OFS]);
+        return ah_lmac_tx.pTx_ac_aggr_data[ac].skb_list[0];
     }
 
     return (struct sk_buff *)skb_list_first(
-        &ah_lmac_tx_orig.pTx_ac_queues[ac]);
+        &ah_lmac_tx.pTx_ac_queues[ac]);
 }
 
 int32 lmac_update_tx_rate(uint32 ac, uint8_t *mcs_out, uint8_t *bw_out)
 {
-    uint32_t mcs, bw_hint, floor_mcs, mcs_clamped;
+    uint32_t mcs, bw_hint;
     struct sk_buff *skb;
     lmac_txd_t *txd;
-    void *sta;
 
     if (ac >= 4)
         return -1;
@@ -894,166 +814,33 @@ int32 lmac_update_tx_rate(uint32 ac, uint8_t *mcs_out, uint8_t *bw_out)
 
     txd = (lmac_txd_t *)skb->head;
 
-    /* RTS path */
-    if (ah_lmac.bo_nav_ctrl & 2u) {
-        mcs = txd->tx_rate_mcs;
-        if (mcs > 7u) {
-            mcs = ah_lmac.tx_mcs;
-            if (mcs > 7u && mcs != 10u)
-                mcs = 7u;
-        }
-        if (ah_lmac.qa_freq_hop_flags & 2u) {
-            txd->frame_type_hi = (txd->frame_type_hi & 0xdfu) |
-                ((1u < ah_lmac.bss_bw) << 5u);
-            uint8_t bw_1mhz = 3u;
-            if (!(ah_lmac.beacon_s1g_format_flags & 1u))
-                bw_1mhz = 0u;
-            txd->tx_bw_hint = bw_1mhz;
-        }
-        bw_hint = txd->tx_bw_hint;
-        if (bw_hint == 0xffu)
-            bw_hint = ah_lmac.tx_bw_sig;
-        goto check_mcast;
-    }
-
-    /* Rate control path */
-    if ((uint8_t)ah_lmac.lo_freq_or_channel_bits & 8u) {
-        mcs = ah_get_rate(txd);
-        *(int16_t *)&txd->_reserved_40[2] = (int16_t)mcs;
-        mcs_clamped = (mcs & 7u) | ((int32_t)mcs >> 3 & 8u);
-        if (!(ah_lmac.tx_bw_ctrl_flags & 2u)) {
-            bw_hint = txd->tx_bw_hint;
-            if (bw_hint == 0xffu)
-                bw_hint = ((int32_t)mcs >> 3) + 3u & 3u;
-        } else {
-            bw_hint = ah_lmac.tx_bw_sig;
-        }
-        if (ah_lmac.bss_bw < bw_map_sig2bss[bw_hint]) {
-            bw_hint = 3u;
-            if (!(ah_lmac.beacon_s1g_format_flags & 1u))
-                bw_hint = 0u;
-        }
-        mcs = mcs_clamped;
-        if ((txd->tx_flags & 2u) && (mcs = ah_lmac.tx_mcs, mcs > 7u) &&
-            (mcs != 10u && (mcs = txd->tx_rate_mcs, txd->tx_rate_mcs > 7u))) {
-            mcs = mcs_clamped;
-        }
-        goto check_mcast;
-    }
-
-    /* Normal path */
-    sta = txd->sta;
-    if (sta != NULL && (txd->frame_type_lo & 0x200u) == 0x2000000u &&
-        (txd->frame_type_lo & 3u) != 1u) {
-        mcs = txd->tx_rate_mcs;
-        if (mcs > 7u) {
-            mcs = ah_lmac.tx_mcs;
-            if (mcs > 7u && mcs != 10u)
-                mcs = *(uint8_t *)((uint8_t *)sta + 0xad) >> 4u;
-        }
-        bw_hint = txd->tx_bw_hint;
-        if (bw_hint == 0xffu) {
-            if (((uint8_t *)&ah_lmac.obss_cca_param_bits)[1] & 4u) {
-                bw_hint = *(uint8_t *)((uint8_t *)sta + 0xaf) & 0xfu;
-                uint8_t bss_bw = ah_lmac.bss_bw;
-                if (bw_map_sig2bss[bw_hint] != bss_bw) {
-                    uint8_t fail_cnt = *(uint8_t *)((uint8_t *)sta + 0xb0) + 1u;
-                    *(uint8_t *)((uint8_t *)sta + 0xb0) = fail_cnt;
-                    if (ah_lmac.bw_restore_count_threshold != fail_cnt)
-                        goto check_mcast;
-                    bw_hint = bw_map_bss2sig[bss_bw];
-                }
-                *(uint8_t *)((uint8_t *)sta + 0xb0) = 0;
-            } else {
-                bw_hint = ah_lmac.tx_bw_sig;
-            }
-        }
-    } else {
-        mcs = txd->tx_rate_mcs;
-        if (mcs > 7u) {
-            mcs = ah_lmac.tx_mcs;
-            if (mcs > 7u && mcs != 10u) {
-                if (!(ah_lmac.tx_bw_ctrl_flags & 2u))
-                    mcs = 1u;
-                else
-                    mcs = (ah_lmac.tx_bw_sig != 3u) ? 1u : 0u;
-            }
-        }
-        bw_hint = txd->tx_bw_hint;
-        if (bw_hint == 0xffu) {
-            bw_hint = 3u;
-            if (!(ah_lmac.beacon_s1g_format_flags & 1u))
-                bw_hint = 0u;
-        }
-    }
-
-check_mcast:
-    /* Multicast rate override */
-    if ((*(uint16_t *)&txd->tx_ctrl & 0x280u) == 0x280u) {
-        mcs = ah_lmac.mcast_tx_rate;
-        bw_hint = 1u;
-        uint8_t mcast_bw = ah_lmac.mcast_txbw;
-        if (mcs > 7u)
-            mcs = 1u;
-        if (mcast_bw == 4u) goto apply_limits;
-        if (mcast_bw == 8u) { bw_hint = 2u; goto apply_limits; }
-        if (mcast_bw == 2u) { bw_hint = 0u; goto apply_limits; }
-        bw_hint = ah_lmac.beacon_s1g_format_flags & 1u;
-        if (ah_lmac.beacon_s1g_format_flags & 1u) { bw_hint = 3u; }
-        goto apply_limits;
-    }
-
-    /* Retry rate fallback */
-    if (!((uint8_t)ah_lmac.lo_freq_or_channel_bits & 8u) && !(ah_lmac.tx_rate_ctrl_flags & 0x40u) &&
-        !(ah_lmac.bo_nav_ctrl & 2u) && txd->retry_count != 0) {
-        const uint8_t *tbl;
-        int retry = txd->retry_count;
-        uint32_t bw_idx = (bw_hint + 1u) & 3u;
-        uint32_t tbl_idx = mcs * 4u + bw_idx;
-
-        if (retry == 1)       tbl = rc_tb1_data;
-        else if (retry == 2)  tbl = rc_tb1_data;
-        else if (retry == 3)  tbl = rc_tb3_data;
-        else if (retry == 4)  tbl = rc_tb4_data;
-        else                  tbl = rc_tb5_data;
-
-        mcs = tbl[tbl_idx] & 0xfu;
-        bw_hint = (tbl[tbl_idx] >> 4) + 3u & 3u;
-    }
-
-    if (bw_hint != 3u && mcs == 10u)
+    /* Modem mode: use MCS from TXD directly, fallback to global config */
+    mcs = txd->tx_rate_mcs;
+    if (mcs > 7u && mcs != 10u)
+        mcs = ah_lmac.tx_mcs;
+    if (mcs > 7u && mcs != 10u)
         mcs = 1u;
 
-apply_limits:
-    if (ah_lmac.beacon_s1g_format_flags & 1u) {
-        mcs_clamped = ah_lmac.tx_mcs_max_limit;
-        if (mcs < ah_lmac.tx_mcs_max_limit)
-            mcs_clamped = mcs;
-        floor_mcs = ah_lmac.mcs_floor;
-        mcs = mcs_clamped;
-        if (floor_mcs != 0u && mcs_clamped != 10u && floor_mcs <= mcs_clamped)
-            mcs = mcs_clamped;
-        goto finalize;
-    }
-
-    mcs_clamped = ah_lmac.tx_mcs_max_limit;
-    if (mcs < ah_lmac.tx_mcs_max_limit)
-        mcs_clamped = mcs;
-    mcs = ah_lmac.mcs_floor;
-    if (ah_lmac.mcs_floor < mcs_clamped)
-        mcs = mcs_clamped;
-
-finalize:
-    if (bw_hint != 3u && mcs > 7u)
-        mcs = 1u;
-
-    if (ah_lmac.bss_bw < bw_map_sig2bss[bw_hint]) {
+    /* BW from TXD, fallback to global S1G default */
+    bw_hint = txd->tx_bw_hint;
+    if (bw_hint == 0xffu) {
         bw_hint = 3u;
         if (!(ah_lmac.beacon_s1g_format_flags & 1u))
             bw_hint = 0u;
     }
 
-    if (txd->frame_len < ah_lmac.tx_bw_len_threshold) {
+    /* MCS10 only valid at 1 MHz (bw_hint==3) */
+    if (bw_hint != 3u && mcs == 10u)
+        mcs = 1u;
+
+    /* Clamp to max MCS limit */
+    if (mcs < ah_lmac.tx_mcs_max_limit)
+        ; /* mcs is fine */
+    else
+        mcs = ah_lmac.tx_mcs_max_limit;
+
+    /* BW must not exceed BSS capacity */
+    if (ah_lmac.bss_bw < bw_map_sig2bss[bw_hint]) {
         bw_hint = 3u;
         if (!(ah_lmac.beacon_s1g_format_flags & 1u))
             bw_hint = 0u;
@@ -1061,8 +848,8 @@ finalize:
 
     *mcs_out = (uint8_t)mcs;
     *bw_out = (uint8_t)bw_hint;
-    ah_lmac.tx_success_pkt_count = mcs;
-    ah_lmac.tx_fail_err_count = bw_hint;
+    ah_lmac.diag_last_tx_mcs = mcs;
+    ah_lmac.diag_last_tx_bw_hint = bw_hint;
     return 0;
 }
 
@@ -1076,8 +863,6 @@ finalize:
 /* ------------------------------------------------------------------ */
 int32 lmac_reorder_tx_agglist(void)
 {
-    uint8_t *lm  = _LM;
-    uint8_t *lmx = _LMX;
     struct sk_buff *skb;
     lmac_txd_t *txd;
     uint8_t *skb_bf;
@@ -1087,22 +872,20 @@ int32 lmac_reorder_tx_agglist(void)
     int32_t i, keep;
     int32_t completed = 0;
     uint8_t agg_cnt;
-    uint32_t ac_ofs;
     uint8_t can_complete;
     uint8_t acked;
 
     for (ac = 0; ac < 4; ac++) {
-        ac_ofs = ac * AH_AC_STRIDE;
-        agg_cnt = ac_tx_ext(ac)->agg_cnt;
+        agg_cnt = ac_aggr(ac)->queued_count;
         keep = 0;
 
         for (i = 0; i < (int32_t)agg_cnt; i++) {
-            skb = *(struct sk_buff **)&lmx[ac_ofs + AH_AGGLIST_OFS + i * 4];
+            skb = ac_aggr(ac)->skb_list[i];
             txd = (lmac_txd_t *)skb->head;
             skb_bf = (uint8_t *)skb + 0x2A; /* priority/acked/cloned bitfield byte */
 
             /* Allow immediate completion when RTS needed but no NAV pending */
-            can_complete = ((*(uint16_t *)&lm[AH_LMAC_MISC9E2_OFS] & 0x000Au) == 0x0002u) ? 1u : 0u;
+            can_complete = ((ah_lmac.bo_nav_ctrl & 0x000Au) == 0x0002u) ? 1u : 0u;
 
             if ((int8_t)txd->tx_flags < 0) {
                 /* ---- completed frame (bit 7 set) ---- */
@@ -1113,14 +896,13 @@ int32 lmac_reorder_tx_agglist(void)
 
                 /* PM deadline: if frame is not mcast and deadline is set, write margin */
                 if ((int8_t)txd->tx_ctrl >= 0 &&
-                    (*(uint32_t *)&lm[AH_LMAC_PM_DEADLINE_LO_OFS] != 0 ||
-                     *(uint32_t *)&lm[AH_LMAC_PM_DEADLINE_HI_OFS] != 0))
-                    *(uint16_t *)&lm[AH_LMAC_PM_MARGIN_OFS] = 0x96u;
+                    ah_lmac.bss_rx_activity != 0)
+                    ah_lmac.ap_sleep_timeout_active = 0x96u;
 
                 if (can_complete) goto do_complete;
 
 keep_in_list:
-                *(struct sk_buff **)&lmx[ac_ofs + AH_AGGLIST_OFS + keep * 4] = skb;
+                ac_aggr(ac)->skb_list[keep] = skb;
                 keep++;
                 continue;
             }
@@ -1138,7 +920,7 @@ keep_in_list:
 
             /* Rate exceeded — mark not acked, count failure */
             *skb_bf &= 0xEFu; /* clear acked */
-            ah_lmac.tx_state_75c += 1;
+            ah_lmac.diag_tx_rate_updates += 1;
 
 do_complete:
             acked = *skb_bf & 0x10;
@@ -1177,17 +959,17 @@ do_complete:
             }
 
             /* Queue to completion list */
-            skb_list_queue(&ah_lmac_tx_orig.tx_frames_pending_queue, skb);
-            ac_tx_ext(ac)->agg_cnt -= 1;
-            ah_lmac_tx_orig.pTx_agg_count_per_ac[ac] -= 1;
+            skb_list_queue(&ah_lmac_tx.tx_frames_pending_queue, skb);
+            ac_aggr(ac)->queued_count -= 1;
+            ah_lmac_tx.pTx_agg_count_per_ac[ac] -= 1;
         }
 
         /* Clear aggr flags bit 2 (AGGR_CTRL_START) */
-        ac_tx_ext(ac)->aggr_hdr_ctrl &= ~0x0400u;
+        *(uint16_t *)&ac_aggr(ac)->rate_cfg &= ~0x0400u;
     }
 
     if (completed != 0) {
-        os_sema_up(&ah_lmac_tx_orig.tx_status_sem);
+        os_sema_up(&ah_lmac_tx.tx_status_sem);
         lmac_set_basic_nav(0x64Cu);
     }
 
@@ -1203,13 +985,10 @@ do_complete:
  * -------------------------------------------------------------------------- */
 void *lmac_gen_txvec(uint32_t ac, uint32_t bw_hint, uint32_t mcs)
 {
-    uint8_t  *lmx = _LMX;
-    uint8_t  *lm  = _LM;
-    uint32_t  ac_ofs = ac * AH_AC_STRIDE;
-    lmac_ac_tx_ext_t *ext = ac_tx_ext(ac);
+    lmac_tx_ctx_buff *aggr = ac_aggr(ac);
 
     /* First skb in the aggregation list -> TXD at skb->head */
-    struct sk_buff *skb = *(struct sk_buff **)&lmx[ac_ofs + AH_AGGLIST_OFS];
+    struct sk_buff *skb = ah_lmac_tx.pTx_ac_aggr_data[ac].skb_list[0];
     uint8_t *txi = (uint8_t *)skb->head;
     lmac_txd_t *txd = (lmac_txd_t *)txi;
 
@@ -1217,10 +996,10 @@ void *lmac_gen_txvec(uint32_t ac, uint32_t bw_hint, uint32_t mcs)
     uint8_t pwr = (uint8_t)lmac_tx_pwr_sel(txi, mcs);
 
     /* TXVEC.flags0: power [4:0] | bw_mode [7:6] */
-    ext->txvec.flags0 = (pwr & 0x1F) | (uint8_t)((bw_hint % 3u) << 6);
+    aggr->txvec.flags0 = (pwr & 0x1F) | (uint8_t)((bw_hint % 3u) << 6);
 
     /* TXVEC.bw_fmt bits [1:0] <- bw_cfg bit 3 */
-    ext->txvec.bw_fmt = (ext->txvec.bw_fmt & 0xFC) | ((txd->bw_cfg & 0x0F) >> 3);
+    aggr->txvec.bw_fmt = (aggr->txvec.bw_fmt & 0xFC) | ((txd->bw_cfg & 0x0F) >> 3);
 
     /* --- Preamble mode selection (sets bw_cfg bits [2:1]) --- */
     if (bw_hint == 3) {
@@ -1238,33 +1017,33 @@ void *lmac_gen_txvec(uint32_t ac, uint32_t bw_hint, uint32_t mcs)
 
     /* TXVEC.bw_fmt: preamble [3:2] | MCS [7:4] */
     uint32_t mcs_nib = mcs & 0x0F;
-    ext->txvec.bw_fmt = (ext->txvec.bw_fmt & 0x03) |
+    aggr->txvec.bw_fmt = (aggr->txvec.bw_fmt & 0x03) |
                          (uint8_t)(((txd->bw_cfg & 0x06) >> 1) << 2) |
                          (uint8_t)(mcs_nib << 4);
 
     /* TXVEC.fmt_byte: scramble code [6:0] from hardware RAND_GEN */
     uint32_t rand_val = LMAC_HW->RAND_GEN;
     uint8_t scramble = (uint8_t)((rand_val % 127u) + 1u) & 0x7F;
-    ext->txvec.fmt_byte = (ext->txvec.fmt_byte & 0x80) | scramble;
+    aggr->txvec.fmt_byte = (aggr->txvec.fmt_byte & 0x80) | scramble;
 
     /* Clear LDPC flag when bw > 1 MHz or bss_bw < 2 */
-    if ((ext->txvec.flags0 & 0xC0) != 0 || ah_lmac.bss_bw < 2)
+    if ((aggr->txvec.flags0 & 0xC0) != 0 || ah_lmac.bss_bw < 2)
         txd->frame_type_hi &= 0xDF;
 
     /* TXVEC.fmt_byte bit 7 <- frame_type_hi bit 5 */
-    ext->txvec.fmt_byte = (ext->txvec.fmt_byte & 0x7F) |
+    aggr->txvec.fmt_byte = (aggr->txvec.fmt_byte & 0x7F) |
                            (uint8_t)((txd->frame_type_hi >> 5) << 7);
 
     /* Copy agg symbol length -> TXVEC.tx_symbol_len */
-    uint32_t agg_sym = ext->aggr_sym_len;
-    ext->txvec.tx_symbol_len = agg_sym;
+    uint32_t agg_sym = aggr->symbol_len;
+    aggr->txvec.tx_symbol_len = agg_sym;
 
     /* Zero ctrl words */
-    ext->txvec.ctrl_word_lo = 0;
-    ext->txvec.ctrl_word_hi = 0;
+    aggr->txvec.ctrl_word_lo = 0;
+    aggr->txvec.ctrl_word_hi = 0;
 
     /* GI flag: only for MCS 5/6/7 under certain power or sta conditions */
-    if ((((uint8_t)((ext->txvec.flags0 & 0x1F) - 3) < 2 ||
+    if ((((uint8_t)((aggr->txvec.flags0 & 0x1F) - 3) < 2 ||
           (txd->sta != NULL &&
            *(int8_t *)((uint8_t *)txd->sta + 0xB4) > 0x25)) &&
          ((mcs_nib + 0x0B) & 0x0F) < 3)) {
@@ -1272,23 +1051,23 @@ void *lmac_gen_txvec(uint32_t ac, uint32_t bw_hint, uint32_t mcs)
     }
 
     /* TX vector format type (from preamble bits) */
-    uint32_t txvec_type = (ext->txvec.bw_fmt & 0x0C) >> 2;
-    uint8_t *cw_lo = (uint8_t *)&ext->txvec.ctrl_word_lo;
-    uint8_t *cw_hi = (uint8_t *)&ext->txvec.ctrl_word_hi;
+    uint32_t txvec_type = (aggr->txvec.bw_fmt & 0x0C) >> 2;
+    uint8_t *cw_lo = (uint8_t *)&aggr->txvec.ctrl_word_lo;
+    uint8_t *cw_hi = (uint8_t *)&aggr->txvec.ctrl_word_hi;
 
     /* TXVEC.rsvd03 bits [1:0] <- rts_cfg bit 5 */
-    ext->txvec.rsvd03 = (ext->txvec.rsvd03 & 0xFC) |
+    aggr->txvec.rsvd03 = (aggr->txvec.rsvd03 & 0xFC) |
                          ((txd->rts_cfg & 0x3F) >> 5);
 
     /* ---- Format-specific TXVEC fields ---- */
     if (txvec_type == 1) {
         /* S1G Short format */
         cw_lo[0] |= 0x01;
-        ext->aggr_hdr_ctrl = (ext->aggr_hdr_ctrl & 0xFC3F) | 0x0180;
+        *(uint16_t *)&aggr->rate_cfg = (*(uint16_t *)&aggr->rate_cfg & 0xFC3F) | 0x0180;
 
         cw_lo[0] = (cw_lo[0] & 0xE3) |
                     (uint8_t)((txd->tx_ctrl >> 6) & 1) << 2 |
-                    (uint8_t)((ext->txvec.flags0 >> 6) & 1) << 3;
+                    (uint8_t)((aggr->txvec.flags0 >> 6) & 1) << 3;
 
         uint16_t dur_val = *(uint16_t *)&txi[0x30];
         if ((cw_lo[0] & 0x04) == 0)
@@ -1311,7 +1090,7 @@ void *lmac_gen_txvec(uint32_t ac, uint32_t bw_hint, uint32_t mcs)
         cw_hi[0] = (tmp & 0xDF);
     } else if (txvec_type == 0) {
         /* S1G 1 MHz format */
-        ext->aggr_hdr_ctrl = (ext->aggr_hdr_ctrl & 0xFC3F) | 0x0380;
+        *(uint16_t *)&aggr->rate_cfg = (*(uint16_t *)&aggr->rate_cfg & 0xFC3F) | 0x0380;
 
         cw_lo[0] = (cw_lo[0] & 0xAB) |
                     (uint8_t)((txd->bw_cfg & 0x01) << 2) | 0x50;
@@ -1322,8 +1101,8 @@ void *lmac_gen_txvec(uint32_t ac, uint32_t bw_hint, uint32_t mcs)
 
         cw_lo[1] = (cw_lo[1] & 0xF7) | 0x08;
 
-        ext->txvec.ctrl_word_lo =
-            (ext->txvec.ctrl_word_lo & 0xFFE00FFF) |
+        aggr->txvec.ctrl_word_lo =
+            (aggr->txvec.ctrl_word_lo & 0xFFE00FFF) |
             ((agg_sym & 0x1FF) << 12);
 
         uint32_t resp = lmac_select_resp_ind();
@@ -1333,11 +1112,11 @@ void *lmac_gen_txvec(uint32_t ac, uint32_t bw_hint, uint32_t mcs)
                     (ah_lmac.resp_ind_ctrl & 0x01);
     } else if (txvec_type == 2) {
         /* S1G >=2 MHz format */
-        ext->aggr_hdr_ctrl = (ext->aggr_hdr_ctrl & 0xFC3F) | 0x0200;
+        *(uint16_t *)&aggr->rate_cfg = (*(uint16_t *)&aggr->rate_cfg & 0xFC3F) | 0x0200;
 
         cw_lo[0] = (cw_lo[0] & 0xE3) |
                     (uint8_t)((txd->tx_ctrl >> 6) & 1) << 2 |
-                    (uint8_t)((ext->txvec.flags0 >> 6) & 1) << 3;
+                    (uint8_t)((aggr->txvec.flags0 >> 6) & 1) << 3;
 
         uint16_t dur_val = *(uint16_t *)&txi[0x30];
         if ((cw_lo[0] & 0x04) == 0)
@@ -1363,14 +1142,14 @@ void *lmac_gen_txvec(uint32_t ac, uint32_t bw_hint, uint32_t mcs)
     /* Duration estimate for TIM frames */
     if ((txd->tx_flags & 0x40) != 0) {
         ah_lmac.beacon_airtime = (int16_t)(
-            (ext->txvec.tx_symbol_len +
-             ((ext->aggr_hdr_ctrl & 0x01FF) >> 6)) * 0x28);
+            (aggr->txvec.tx_symbol_len +
+             ((*(uint16_t *)&aggr->rate_cfg & 0x01FF) >> 6)) * 0x28);
     }
 
     /* Mark TXVEC valid (aggr_hdr_ctrl bit 10) */
-    ext->aggr_hdr_ctrl = (ext->aggr_hdr_ctrl & 0xFBFF) | 0x0400;
+    *(uint16_t *)&aggr->rate_cfg = (*(uint16_t *)&aggr->rate_cfg & 0xFBFF) | 0x0400;
 
-    return &ext->txvec;
+    return &aggr->txvec;
 }
 
 /* --------------------------------------------------------------------------
@@ -1381,12 +1160,10 @@ void *lmac_gen_txvec(uint32_t ac, uint32_t bw_hint, uint32_t mcs)
  * -------------------------------------------------------------------------- */
 uint32_t lmac_select_resp_ind(void)
 {
-    uint8_t *lmx = _LMX;
-    uint8_t  ac  = _LM[AH_LMAC_ACLAST_OFS] & 0x0F;
-    uint32_t ac_ofs = (uint32_t)ac * AH_AC_STRIDE;
-    lmac_ac_tx_ext_t *ext = ac_tx_ext(ac);
+    uint8_t  ac  = ah_lmac.current_ac_flags & 0x0F;
+    lmac_tx_ctx_buff *aggr = ac_aggr(ac);
 
-    struct sk_buff *skb = *(struct sk_buff **)&lmx[ac_ofs + AH_AGGLIST_OFS];
+    struct sk_buff *skb = ah_lmac_tx.pTx_ac_aggr_data[ac].skb_list[0];
     lmac_txd_t *txd = (lmac_txd_t *)skb->head;
 
     /* Multicast / broadcast -> no response */
@@ -1394,7 +1171,7 @@ uint32_t lmac_select_resp_ind(void)
         return 0;
 
     /* Frame count in the current aggregation window */
-    uint32_t cnt = ((uint32_t)ext->seq_win_end + 1u - ext->seq_win_start) & 0xFFu;
+    uint32_t cnt = ((uint32_t)(uint8_t)aggr->last_seq + 1u - (uint8_t)aggr->first_seq) & 0xFFu;
 
     if (cnt == 1) {
         /* Single frame: check no-ack bit in frame_type_hi */
@@ -1412,7 +1189,7 @@ uint32_t lmac_select_resp_ind(void)
 
 /* --------------------------------------------------------------------------
  * tx_pwr_adjust_by_mcs  —  power backoff for specific MCS values.
- * When power control flags (lm[0x36D] bits [3:2]) are set and base power is
+ * When power control flags (tx_power_config byte[1] bits [3:2]) are set and base power is
  * 5, reduce power for low-MCS or MCS10 transmissions.
  *
  * Original binary: 0x20036BDC (tx_pwr_adjust_by_mcs_orig)
@@ -1432,7 +1209,7 @@ static int tx_pwr_adjust_by_mcs(int pwr, uint32_t mcs)
  * lmac_tx_pwr_sel  —  select TX power level for the given MCS and TXD.
  * Returns the power level (0–31).  When the frame has already been started
  * and a station is associated, also stores power tracking context at
- * lm[0x83E–0x848].
+ * diag_pwr_sel_* diagnostic fields.
  *
  * Original binary: 0x20037350 (lmac_tx_pwr_sel_orig)
  * -------------------------------------------------------------------------- */
@@ -1466,11 +1243,11 @@ int32_t lmac_tx_pwr_sel(void *txi_ptr, uint32_t mcs)
     }
 
     /* Store power tracking context */
-    ah_lmac.tx_write_word_848 = *(uint16_t *)((uint8_t *)txd->sta + 0x68);
-    ah_lmac.tx_write_byte_841 = ((uint8_t *)&ah_lmac.last_rx_pv0_ctrl_info)[3];
-    ah_lmac.tx_write_byte_83e = (uint8_t)mcs;
-    ah_lmac.tx_byte_840 = (uint8_t)pwr;
-    ah_lmac.tx_state_844 += 1;
+    ah_lmac.diag_pwr_sel_sta_word = *(uint16_t *)((uint8_t *)txd->sta + 0x68);
+    ah_lmac.diag_pwr_sel_rx_ctrl = ((uint8_t *)&ah_lmac.last_rx_pv0_ctrl_info)[3];
+    ah_lmac.diag_pwr_sel_mcs = (uint8_t)mcs;
+    ah_lmac.diag_pwr_sel_power = (uint8_t)pwr;
+    ah_lmac.diag_pwr_sel_count += 1;
 
     return pwr;
 }
@@ -1483,19 +1260,18 @@ int32_t lmac_tx_pwr_sel(void *txi_ptr, uint32_t mcs)
  * -------------------------------------------------------------------------- */
 int32_t lmac_update_frm_tx_vec(void)
 {
-    uint8_t *lm  = _LM;
-    uint32_t ac  = lm[AH_LMAC_ACLAST_OFS] & 0x0F;
+    uint32_t ac  = ah_lmac.current_ac_flags & 0x0F;
 
     if (ac >= 4) {
         log_error("bad ac %u", ac);
         return 0;
     }
 
-    lmac_ac_tx_ext_t *ext = ac_tx_ext(ac);
-    if (!(ext->aggr_hdr_ctrl & 0x0400u))
+    lmac_tx_ctx_buff *aggr = ac_aggr(ac);
+    if (!(*(uint16_t *)&aggr->rate_cfg & 0x0400u))
         log_debug("txvec not valid");
 
-    ah_lmac_tx_orig.pPv0_txvec = (uint8_t *)&ext->txvec;
+    ah_lmac_tx.pPv0_txvec = (uint8_t *)&aggr->txvec;
     lmac_cfg_txvec_part1();
 
     return 0;
@@ -1509,7 +1285,7 @@ int32_t lmac_update_frm_tx_vec(void)
  * -------------------------------------------------------------------------- */
 uint32_t pv0_ctrl_uplink_txpwr_gen(void)
 {
-    uint8_t *tv = (uint8_t *)ah_lmac_tx_orig.pPv0_txvec;
+    uint8_t *tv = (uint8_t *)ah_lmac_tx.pPv0_txvec;
     uint16_t pwr_cfg = ah_lmac.tx_power_config;
     uint8_t fmt = tv[1] & 0x0C;
 
@@ -1542,35 +1318,6 @@ uint32_t pv0_ctrl_uplink_txpwr_gen(void)
 }
 
 /* --------------------------------------------------------------------------
- * lmac_tx_ba  —  build and transmit a Block ACK frame (PV0 response).
- *
- * Original binary: 0x2003A0A8 (lmac_tx_ba_orig)
- * -------------------------------------------------------------------------- */
-int32_t lmac_tx_ba(struct sk_buff *skb)
-{
-    (void)skb;
-
-    if (!(ah_lmac.tx_ac_state_flags & 0x20)) {
-        if (!(ah_lmac.bo_nav_ctrl & 0x02)) {
-            uint16_t dur = lmac_hdr_dur_calc(ah_lmac.tx_time_part2);
-            *(uint16_t *)&ah_lmac.ba_resp_frame[2] = dur;
-        }
-        lhw_cfg_dma_list_cnt(1);
-        lhw_cfg_tx_sub_frm(0, (uint32_t)ah_lmac.ba_resp_frame, 0x22);
-        LMAC_HW->TX_BYTCNT = 0x26;
-        LMAC_HW->AGGR_CTRL &= ~0x01u;
-        LMAC_HW->AGGR_CTRL = LMAC_HW->AGGR_CTRL;
-    }
-
-    void *sta = lmac_sta_search(0xFFFF, &ah_lmac.ba_resp_frame[4]);
-    ah_lmac.pTx_current_sta = sta;
-
-    lmac_cfg_txvec_part2();
-
-    return 0;
-}
-
-/* --------------------------------------------------------------------------
  * lmac_tx_ack  —  build and transmit an ACK frame (PV0 response).
  *
  * Original binary: 0x2003A118 (lmac_tx_ack_orig)
@@ -1597,76 +1344,6 @@ int32_t lmac_tx_ack(struct sk_buff *skb)
     return 0;
 }
 
-/* --------------------------------------------------------------------------
- * lmac_tx_cts  —  build and transmit a CTS frame (PV0 response).
- *
- * Original binary: 0x2003A178 (lmac_tx_cts_orig)
- * -------------------------------------------------------------------------- */
-int32_t lmac_tx_cts(struct sk_buff *skb)
-{
-    (void)skb;
-
-    if (!(ah_lmac.tx_ac_state_flags & 0x10)) {
-        lhw_cfg_dma_list_cnt(1);
-        lhw_cfg_tx_sub_frm(ah_lmac.tx_ac_state_flags & 0x10, (uint32_t)ah_lmac.cts_resp_frame, 0x10);
-        LMAC_HW->TX_BYTCNT = 0x14;
-
-        if (ah_lmac.beacon_pending_state_flags & 0x10) {
-            int16_t remain = (int16_t)lmac_dtim_timer_rem();
-            *(int16_t *)&ah_lmac.cts_resp_frame[2] = remain + 4000;
-            memcpy(&ah_lmac.cts_resp_frame[4], ah_lmac.mac_addr, 6);
-        }
-
-        LMAC_HW->AGGR_CTRL &= ~0x01u;
-        LMAC_HW->AGGR_CTRL = LMAC_HW->AGGR_CTRL;
-    }
-
-    void *sta = lmac_sta_search(0xFFFF, &ah_lmac.cts_resp_frame[4]);
-    ah_lmac.pTx_current_sta = sta;
-
-    lmac_cfg_txvec_part2();
-
-    return 0;
-}
-
-/* --------------------------------------------------------------------------
- * lmac_tx_rts  —  build and transmit an RTS frame, then bump the retry
- * counter for all frames in the current AC's aggregation list.
- *
- * Original binary: 0x2003A320 (lmac_tx_rts_orig)
- * -------------------------------------------------------------------------- */
-int32_t lmac_tx_rts(struct sk_buff *skb)
-{
-    uint8_t *lmx = _LMX;
-    (void)skb;
-
-    lhw_cfg_dma_list_cnt(1);
-    lhw_cfg_tx_sub_frm(0, (uint32_t)ah_lmac.rts_resp_frame, 0x10);
-
-    LMAC_HW->TX_BYTCNT = 0x18;
-    LMAC_HW->AGGR_CTRL = (LMAC_HW->AGGR_CTRL & ~0x03u) | 0x03u;
-
-    void *sta = lmac_sta_search(0xFFFF, &ah_lmac.rts_resp_frame[4]);
-    ah_lmac.pTx_current_sta = sta;
-
-    lmac_cfg_txvec_part2();
-
-    /* Increment _reserved_29 for every frame in the aggr list */
-    uint32_t ac = ah_lmac.tx_ac_state_flags & 0x0F;
-    if (ac < 4) {
-        uint32_t ac_ofs = ac * AH_AC_STRIDE;
-        lmac_ac_tx_ext_t *ext = ac_tx_ext(ac);
-        uint8_t cnt = ext->agg_num;
-        for (uint32_t i = 0; i < cnt; i++) {
-            struct sk_buff *s = *(struct sk_buff **)&lmx[ac_ofs + AH_AGGLIST_OFS + i * 4];
-            lmac_txd_t *t = (lmac_txd_t *)s->head;
-            t->_reserved_29 += 1;
-        }
-    }
-
-    return 0;
-}
-
 /* ======================================================================
  * C re-implementations of _orig functions.
  * Each replaces a WRAP entry in mars_lmac_tx_orig.c (comment it out there).
@@ -1685,117 +1362,6 @@ uint32 lmac_bknoise_get(void)
         return (uint32)(-60);
 
     return (uint32)(noise - ah_lmac.bknoise_base_offset);
-}
-
-/* Forward declaration needed by bgrssi_update */
-static uint32_t bgrssi_init_done;
-
-/* Update background RSSI: accumulate per-channel noise stats and adjust thresholds */
-void lmac_bgrssi_update(void)
-{
-    if (!ah_rfdigicali_bknoise_valid_pd_get())
-        return;
-
-    int32_t noise = (int32_t)lmac_bknoise_get();
-    ah_rfdigicali_bknoise_calc_dis();
-    ah_rfdigicali_bknoise_valid_pd_clr();
-
-    uint8_t ch_idx = ah_lmac.bgrssi_chan_index;
-    uint8_t *lm = _LM;
-    int32_t ch_base = ch_idx * 0x18;
-
-    /* Bounds check: ch_base + max offset (0xCC+3) must fit in ah_lmac (0xBC4) */
-    if (ch_base + 0xCF >= 0xBC4) {
-        ah_lmac.bgrssi_chan_index = 0;
-        return;
-    }
-
-    int32_t noise_sum  = *(int32_t *)&lm[ch_base + 0xC8];
-    int32_t noise_cnt  = *(int32_t *)&lm[ch_base + 0xCC];
-    int32_t new_cnt    = noise_cnt + 1;
-
-    *(int32_t *)&lm[ch_base + 0xC8] = noise_sum + noise;
-    *(int32_t *)&lm[ch_base + 0xCC] = new_cnt;
-
-    if (noise < (int8_t)lm[ch_base + 0xC5])
-        lm[ch_base + 0xC5] = (uint8_t)noise;
-    if ((int8_t)lm[ch_base + 0xC6] < noise)
-        lm[ch_base + 0xC6] = (uint8_t)noise;
-
-    uint32_t budget = (*((uint32_t *)&ah_lmac.cca_ctrl_low_byte) & 0x7ffff) >> 0xc;
-    if ((int32_t)budget <= new_cnt) {
-        int8_t ch_max = (int8_t)lm[ch_base + 0xC6];
-        int8_t ch_min = (int8_t)lm[ch_base + 0xC5];
-        int8_t avg = (int8_t)(((noise_sum + noise - ch_max - ch_min) / (noise_cnt - 1)));
-        lm[ch_base + 0xC7] = (uint8_t)avg;
-
-        uint8_t primary_ch = ah_lmac.lo_table_index;
-        if (primary_ch == ch_idx) {
-            ah_lmac.tx_write_flags_70d = (uint8_t)avg;
-            ah_lmac.tx_write_flags_70c = (uint8_t)ch_min;
-            ah_lmac.tx_write_flags_70e = (uint8_t)ch_max;
-
-            if (!bgrssi_init_done) {
-                ah_lmac.cca_threshold_base = avg;
-                bgrssi_init_done = 1;
-            } else {
-                int8_t cur = ah_lmac.cca_threshold_base;
-                if (avg < cur)
-                    avg = avg / 2 + cur / 2;
-                ah_lmac.cca_threshold_base = avg;
-            }
-
-            if (ah_lmac.cca_agc_ctrl_flags & 0x04)
-                lmac_adjust_cca_threshold((int32_t)ah_lmac.cca_threshold_base);
-            lmac_adjust_agc_threshold((int32_t)ah_lmac.cca_threshold_base);
-
-            if ((ah_lmac.tx_channel_set_824 & 1) && ah_lmac.tx_result_834 > 0x27ff) {
-                uint8_t *tdma_buf = (uint8_t *)ah_lmac.init_param_tdma_buff;
-                for (int16_t *p = (int16_t *)(tdma_buf + 0x1e00);
-                     p != (int16_t *)(tdma_buf + 0x1e80); p++) {
-                    int32_t v = (int32_t)*p;
-                    if (v < 0) v = -v;
-                    ah_lmac.tx_state_7e0 += v;
-                    if ((int16_t)ah_lmac.tx_state_7e4 < v)
-                        ah_lmac.tx_state_7e4 = (uint16_t)v;
-                    if (ah_lmac.bgrssi_spur_threshold < v)
-                        ah_lmac.tx_state_7e6++;
-                }
-                ah_lmac.tx_state_7e8++;
-            }
-        }
-
-        lm[ch_base + 0xC5] = 0;
-        lm[ch_base + 0xC6] = 0x80;
-        *(int32_t *)&lm[ch_base + 0xC8] = 0;
-        *(int32_t *)&lm[ch_base + 0xCC] = 0;
-    }
-
-    /* Channel rotation */
-    if (!(ah_lmac.auto_chan_switch_flags & 1)) {
-        ch_idx = ah_lmac.lo_table_index;
-    } else {
-        uint8_t next = ah_lmac.bgrssi_chan_index + 1;
-        if (next < ah_lmac.chan_list_count)
-            return;
-        ch_idx = 0;
-    }
-    ah_lmac.bgrssi_chan_index = ch_idx;
-}
-
-/* Switch control: backs up and clears sys_con8 bits 30-31 (TX/RX switch) */
-#define SYS_CTRL_REG_BASE  ((volatile uint32_t *)0x40026000u)
-static uint32_t sys_con8_bak;
-
-void switch_ctrl_normal_mode(void)
-{
-    sys_con8_bak = SYS_CTRL_REG_BASE[0x54 / 4];
-    SYS_CTRL_REG_BASE[0x54 / 4] &= ~0xC0000000u;
-}
-
-void switch_ctrl_recover(void)
-{
-    SYS_CTRL_REG_BASE[0x54 / 4] = sys_con8_bak;
 }
 
 /* CCA threshold configuration */
@@ -1889,55 +1455,13 @@ set_gain:
     lmac_rx_gain_cfg((ah_lmac.rx_gain_cfg_bits & 0x7ff) >> 4);
 }
 
-/* --------------------------------------------------------------------------
- * Queue counter functions — thin wrappers around skb_list_count.
- * Original binary: trivial skb_list_count calls with different list offsets.
- * -------------------------------------------------------------------------- */
-uint32 lmac_txsq_count(void)
-{
-    return skb_list_count((struct skb_list *)&_LMX[0x70]);
-}
-
-uint32 lmac_statq_count(void)
-{
-    return skb_list_count((struct skb_list *)&_LMX[0x538]);
-}
-
-uint32 lmac_txq_count(void)
-{
-    return skb_list_count((struct skb_list *)&_LMX[0x64]);
-}
-
-uint32 lmac_acq_count(uint32 ac)
-{
-    return skb_list_count((struct skb_list *)&_LMX[ac * 12 + 0x88]);
-}
-
-uint32 lmac_txagg_count(uint32 ac)
-{
-    if (ac >= 4) return 0;
-    return _LMX[ac * 0x120 + 0x1c5];
-}
-
-/* Sum of all cached TX SKBs across all queues and aggregation counts. */
-int32 tx_skbs_cached(void)
-{
-    uint32_t total = lmac_txsq_count();
-    total += skb_list_count((struct skb_list *)&_LMX[0x88]);
-    total += skb_list_count((struct skb_list *)&_LMX[0x94]);
-    total += skb_list_count((struct skb_list *)&_LMX[0xA0]);
-    total += skb_list_count((struct skb_list *)&_LMX[0xAC]);
-    total += _LMX[0x1c5] + _LMX[0x2e5] + _LMX[0x405] + _LMX[0x525];
-    return total;
-}
-
 /* Check if current AC has prepared data and configure its TX vector.
  * Original binary: 0x2003730C (lmac_tx_date_prepared_orig) */
 int32 lmac_tx_date_prepared(void)
 {
-    uint32_t ac = _LM[0x9dc] & 0xf;
-    if (ac < 4 && (_LMX[ac * 0x120 + 0x1c7] >> 2 & 1)) {
-        *(void **)&_LMX[4] = &_LMX[ac * 0x120 + 0x1c8];
+    uint32_t ac = ah_lmac.current_ac_flags & 0xf;
+    if (ac < 4 && ((ah_lmac_tx.pTx_ac_aggr_data[ac].tx_flags >> 2) & 1)) {
+        ah_lmac_tx.pPv0_txvec = (uint8_t *)&ah_lmac_tx.pTx_ac_aggr_data[ac].txvec;
         lmac_cfg_txvec_part1();
         return 0;
     }
@@ -1950,26 +1474,26 @@ extern void data_scrambler(uint32_t seed);
 
 int32 ndp_ack_rx_hdl(uint32 rx0, uint32 rx1, uint32 ext)
 {
-    if (_LM[0x3e2] & 1)
-        data_scrambler(_LMX[0x55c] & 0x7f);
+    if (ah_lmac.ndp_scramble_enable & 1)
+        data_scrambler(((uint8_t *)&ah_lmac_tx.tx_last_rate_packed)[0] & 0x7f);
 
     uint32_t scrambler, ssn, mask;
     if (ext == 0) {
-        scrambler = (_LMX[0x55c] & 0x7f) | ((*(uint32_t *)&_LMX[0x558] >> 23) & 0x180);
+        scrambler = (((uint8_t *)&ah_lmac_tx.tx_last_rate_packed)[0] & 0x7f) | ((ah_lmac_tx.tx_last_fcs >> 23) & 0x180);
         ssn = rx0 >> 24;
         mask = 0x7ff;
     } else {
-        scrambler = (_LMX[0x55c] & 0x7f) | (*(uint16_t *)&_LMX[0x55a] & 0xffffff80);
+        scrambler = (((uint8_t *)&ah_lmac_tx.tx_last_rate_packed)[0] & 0x7f) | (((uint16_t *)&ah_lmac_tx.tx_last_fcs)[1] & 0xffffff80);
         ssn = rx1 >> 3;
         mask = 0x3ffff;
     }
 
-    if (*(int32_t *)&_LM[0x998] == 1) {
+    if ((int32_t)ah_lmac.bo_tx_substate == 1) {
         if (((ssn & 1) == 0) && (scrambler == (rx0 & mask) >> 3))
             lmac_update_tx_state_ack(1, 0, 0);
         else
             lmac_update_tx_state_ack(0, 0, 0);
-        *(uint32_t *)&_LM[0x998] = 0;
+        ah_lmac.bo_tx_substate = 0;
     }
     return 0;
 }
@@ -1978,26 +1502,26 @@ int32 ndp_ack_rx_hdl(uint32 rx0, uint32 rx1, uint32 ext)
  * Original binary: 0x20039218 (ndp_ba_rx_hdl_orig) */
 int32 ndp_ba_rx_hdl(uint32 rx0, uint32 rx1, uint32 ext)
 {
-    if (_LM[0x3e2] & 1)
-        data_scrambler(_LMX[0x55c] & 0x7f);
+    if (ah_lmac.ndp_scramble_enable & 1)
+        data_scrambler(((uint8_t *)&ah_lmac_tx.tx_last_rate_packed)[0] & 0x7f);
 
     uint32_t ba_ssn, ba_bitmap, ba_scrambler, mask;
     if (ext == 0) {
-        ba_scrambler = _LMX[0x55c] & 3;
+        ba_scrambler = ((uint8_t *)&ah_lmac_tx.tx_last_rate_packed)[0] & 3;
         mask = 0xf;
         ba_ssn = (rx0 & 0xffff) >> 5;
         ba_bitmap = (rx0 & 0xffffff) >> 17;
     } else {
         mask = 0xff;
         ba_ssn = (rx0 & 0xfffff) >> 9;
-        ba_scrambler = _LMX[0x55c] & 0x3f;
+        ba_scrambler = ((uint8_t *)&ah_lmac_tx.tx_last_rate_packed)[0] & 0x3f;
         ba_bitmap = ((rx1 & 0x1f) << 11) | (rx0 >> 21);
     }
 
-    if (*(int32_t *)&_LM[0x998] == 1) {
+    if ((int32_t)ah_lmac.bo_tx_substate == 1) {
         if ((rx0 & mask) >> 3 == ba_scrambler)
             lmac_update_tx_state_ba(ba_ssn, ba_bitmap, 0);
-        *(uint32_t *)&_LM[0x998] = 0;
+        ah_lmac.bo_tx_substate = 0;
     }
     return 0;
 }
@@ -2010,7 +1534,7 @@ extern void ah_ant_status(uint8_t ant_sel, uint32_t ok);
 
 int32 lmac_update_tx_state_cts(uint32 ok)
 {
-    ah_ant_status((_LM[0x55d] >> 2) & 1, ok);
+    ah_ant_status((ah_lmac.tx_antenna_byte >> 2) & 1, ok);
     return 0;
 }
 
@@ -2022,7 +1546,7 @@ int32 lmac_update_tx_state_cts(uint32 ok)
  * -------------------------------------------------------------------------- */
 int32 lmac_update_pv0_wpba_tx_vec(void)
 {
-    *(void **)&_LMX[4] = &_LMX[0x5d4];
+    ah_lmac_tx.pPv0_txvec = (uint8_t *)&ah_lmac_tx.resp_ba_txvec;
     pv0_ctrl_uplink_txpwr_gen();
     lmac_cfg_txvec_part1();
     return 0;
@@ -2030,7 +1554,7 @@ int32 lmac_update_pv0_wpba_tx_vec(void)
 
 int32 lmac_update_pv0_wpack_tx_vec(void)
 {
-    *(void **)&_LMX[4] = &_LMX[0x5e4];
+    ah_lmac_tx.pPv0_txvec = (uint8_t *)&ah_lmac_tx.resp_ack_txvec;
     pv0_ctrl_uplink_txpwr_gen();
     lmac_cfg_txvec_part1();
     return 0;
@@ -2038,10 +1562,10 @@ int32 lmac_update_pv0_wpack_tx_vec(void)
 
 int32 lmac_update_pv0_wpcts_tx_vec(void)
 {
-    _LMX[0x5c6] = (_LMX[0x5c6] & 0x7f) | ((_LM[0x338] >> 2) << 7);
-    *(void **)&_LMX[4] = &_LMX[0x5c4];
+    ((uint8_t *)&ah_lmac_tx.resp_cts_txvec)[2] = (((uint8_t *)&ah_lmac_tx.resp_cts_txvec)[2] & 0x7f) | (((uint8_t)ah_lmac.lo_freq_or_channel_bits >> 2) << 7);
+    ah_lmac_tx.pPv0_txvec = (uint8_t *)&ah_lmac_tx.resp_cts_txvec;
     pv0_ctrl_uplink_txpwr_gen();
-    uint8_t *vec = *(uint8_t **)&_LMX[4];
+    uint8_t *vec = ah_lmac_tx.pPv0_txvec;
     vec[2] &= 0x7f;
     lmac_cfg_txvec_part1();
     return 0;
@@ -2055,189 +1579,90 @@ int32 lmac_update_pv0_wpcts_tx_vec(void)
  * -------------------------------------------------------------------------- */
 int32 lmac_update_ndp_cts_tx_vec(uint32 arg0, uint32 arg1)
 {
-    *(uint32 *)&_LMX[0x56c] = arg0;
-    *(uint32 *)&_LMX[0x570] = arg1;
-    if (!(_LM[0x34a] & 1)) {
-        _LMX[0x565] = (_LMX[0x565] & 0xfc) | (uint8_t)(arg0 >> 30);
-        _LMX[0x570] = (_LMX[0x570] & 0xdf) | 0x20;
+    *(uint32_t *)&ah_lmac_tx.pTx_vector_cache[10] = arg0;
+    *(uint32_t *)&ah_lmac_tx.pTx_vector_cache[14] = arg1;
+    if (!(ah_lmac.beacon_s1g_format_flags & 1)) {
+        ah_lmac_tx.pTx_vector_cache[3] = (ah_lmac_tx.pTx_vector_cache[3] & 0xfc) | (uint8_t)(arg0 >> 30);
+        ah_lmac_tx.pTx_vector_cache[14] = (ah_lmac_tx.pTx_vector_cache[14] & 0xdf) | 0x20;
     } else {
-        _LMX[0x56f] = (_LMX[0x56f] & 0xfd) | 0x02;
+        ah_lmac_tx.pTx_vector_cache[13] = (ah_lmac_tx.pTx_vector_cache[13] & 0xfd) | 0x02;
     }
-    *(void **)&_LMX[4] = &_LMX[0x56c];
+    ah_lmac_tx.pPv0_txvec = &ah_lmac_tx.pTx_vector_cache[10];
     lmac_cfg_txvec_part1();
     return 0;
 }
 
 int32 lmac_update_ndp_ack_tx_vec(uint32 arg0, uint32 arg1)
 {
-    *(uint32 *)&_LMX[0x57c] = arg0;
-    *(uint32 *)&_LMX[0x580] = arg1;
-    if (!(_LM[0x34a] & 1)) {
-        _LMX[0x580] = (_LMX[0x580] & 0xdf) | 0x20;
+    *(uint32_t *)&ah_lmac_tx.pTx_vector_cache[26] = arg0;
+    *(uint32_t *)&ah_lmac_tx.pTx_vector_cache[30] = arg1;
+    if (!(ah_lmac.beacon_s1g_format_flags & 1)) {
+        ah_lmac_tx.pTx_vector_cache[30] = (ah_lmac_tx.pTx_vector_cache[30] & 0xdf) | 0x20;
     } else {
-        _LMX[0x57f] = (_LMX[0x57f] & 0xfd) | 0x02;
+        ah_lmac_tx.pTx_vector_cache[29] = (ah_lmac_tx.pTx_vector_cache[29] & 0xfd) | 0x02;
     }
-    *(void **)&_LMX[4] = &_LMX[0x57c];
+    ah_lmac_tx.pPv0_txvec = &ah_lmac_tx.pTx_vector_cache[26];
     lmac_cfg_txvec_part1();
     return 0;
 }
 
 int32 lmac_update_ndp_ba_tx_vec(uint32 arg0, uint32 arg1)
 {
-    *(uint32 *)&_LMX[0x58c] = arg0;
-    *(uint32 *)&_LMX[0x590] = arg1;
-    if (!(_LM[0x34a] & 1)) {
-        _LMX[0x590] = (_LMX[0x590] & 0xdf) | 0x20;
+    *(uint32_t *)&ah_lmac_tx.pTx_vector_cache[42] = arg0;
+    *(uint32_t *)&ah_lmac_tx.pTx_vector_cache[46] = arg1;
+    if (!(ah_lmac.beacon_s1g_format_flags & 1)) {
+        ah_lmac_tx.pTx_vector_cache[46] = (ah_lmac_tx.pTx_vector_cache[46] & 0xdf) | 0x20;
     } else {
-        _LMX[0x58f] = (_LMX[0x58f] & 0xfd) | 0x02;
+        ah_lmac_tx.pTx_vector_cache[45] = (ah_lmac_tx.pTx_vector_cache[45] & 0xfd) | 0x02;
     }
-    *(void **)&_LMX[4] = &_LMX[0x58c];
+    ah_lmac_tx.pPv0_txvec = &ah_lmac_tx.pTx_vector_cache[42];
     lmac_cfg_txvec_part1();
     return 0;
 }
 
 /* ======================================================================
- * Stubs for functions not needed in modem-only mode.
- * Beacons, management frames, PS/CF-poll, STA/AP — none of these exist
- * in a data-modem configuration.  Original WRAPs are commented out in
- * mars_lmac_tx_orig.c so callers reach these stubs instead of _orig.
+ * Functions called from mars_lmac_tx.c or other files.
  * ====================================================================== */
 
-/* Beacon */
-int32_t lmac_beacon_add_s1g_beacon_compatibility(struct sk_buff *skb) { (void)skb; return 0; }
-int32_t lmac_beacon_build_s1gbeacon(struct sk_buff *skb)              { (void)skb; return 0; }
-int32_t lmac_tx_beacon(struct sk_buff *skb)                           { (void)skb; return 0; }
-
-/* PV0 PS / CF frames */
-int32_t lmac_tx_pv0_null(struct sk_buff *skb)   { (void)skb; return 0; }
-int32_t lmac_tx_pv0_pspoll(struct sk_buff *skb) { (void)skb; return 0; }
-int32_t lmac_tx_pv0_cfpoll(struct sk_buff *skb) { (void)skb; return 0; }
-int32_t lmac_tx_pv0_cfend(struct sk_buff *skb)  { (void)skb; return 0; }
-
-/* PV0 inits for unused frame types */
-void lmac_pv0_pspoll_init(void)  {}
-void lmac_pv0_cfpoll_init(void)  {}
-void lmac_pv0_cfend_init(void)   {}
-void lmac_pv0_qos_null_init(void){}
-
-/* PV0 CF-end TX vector */
-int32_t lmac_update_pv0_cfend_tx_vec(void) { return 0; }
-
-/* NDP PS-Poll RX handler */
-int32_t ndp_pspoll_ack_rx_hdl(void) { return 0; }
-
-/* Management frames */
-int32_t lmac_send_mgmt_meas_req(void)    { return 0; }
-int32_t lmac_send_mgmt_meas_report(void) { return 0; }
-int32_t lmac_send_bss_announcement(void)  { return 0; }
-int32_t lmac_send_scan_probe(void)       { return 0; }
-int32_t lmac_send_ant_pkt(void)          { return 0; }
-int32_t lmac_send_probe_resp(void)       { return 0; }
-
-/* STA / AP — never used in modem mode */
-int32_t lmac_tx_to_pm_ap(void)  { return 0; }
-void   *get_worst_node(void)    { return NULL; }
-int32_t lmac_auto_channel_select(void) { return 0; }
-
-/* NDP PS-Poll TX vector generators */
-uint64_t lmac_gen_pspack_ndp2m(void)      { return 0; }
-uint64_t lmac_gen_pspoll_ndp2m(void)      { return 0; }
-uint64_t lmac_gen_pspoll_ack_ndp2m(void)  { return 0; }
-
-/* DTIM — no beacons, no DTIM */
-uint32_t lmac_dtim_timer_rem(void) { return 0; }
-
-/* VHT info — not applicable to S1G */
-uint32_t lmac_vht_info_get(uint32_t info) { (void)info; return 0; }
-
-/* Test TX — production modem doesn't need it */
-int32_t lmac_ah_test_tx(struct lmac_ops *ops, struct sk_buff *skb)
-{ (void)ops; (void)skb; return 0; }
-
-/* ======================================================================
- * Functions that were previously WRAP'd to _orig.
- * Now have full C or stub implementations.
- * ====================================================================== */
-
-/* lmac_check_tx_queue_empty — clear AC_PD bits for queues with no data.
- * AC→bit mapping: [1,0,2,3] for AC[0,1,2,3] (EDCA priority ordering). */
 void lmac_check_tx_queue_empty(void)
 {
     static const uint8_t ac_bit[4] = {1, 0, 2, 3};
-    uint8_t *lmx = _LMX;
 
     for (uint32_t ac = 0; ac < 4; ac++) {
-        uint32_t q_cnt = skb_list_count((struct skb_list *)&lmx[ac * 12 + 0x88]);
-        uint32_t a_cnt = lmx[ac * 0x120 + 0x1c5];
+        uint32_t q_cnt = skb_list_count(&ah_lmac_tx.pTx_ac_queues[ac]);
+        uint32_t a_cnt = ah_lmac_tx.pTx_ac_aggr_data[ac].queued_count;
         if (q_cnt + a_cnt == 0)
             LMAC_HW->AC_PD &= ~(1u << ac_bit[ac]);
     }
 }
 
-/* ndp_tx_vec_init_one — initialize one NDP TX vector cache entry.
- * Ported from Ghidra decompilation of ndp_tx_vec_init_orig. */
 void ndp_tx_vec_init_one(uint8_t *tv)
 {
-    /* Minimal init: zero the TX vector, set S1G format defaults.
-     * The _LM offsets from Ghidra decompilation (0xc20, 0xd28, 0xdb0, 0x19a0)
-     * exceed ah_lmac's ~0xBB4-byte boundary — they referred to the unified
-     * lmac+tx context block in the original binary. NDP vectors are only used
-     * for ACK/BA/CTS response frames which are rebuilt per-TX anyway. */
     for (int i = 0; i < 8; i++) tv[i] = 0;
     tv[2] = 0x0f;
     tv[1] = 0x10;
 }
 
-/* lmac_irq_tx_tmo — TX timeout interrupt handler.
- * Simplified for modem mode: abort FSM and re-enable AC interrupts. */
-void lmac_irq_tx_tmo(void)
-{
-    lmac_cancle_tx_tmo();
-
-    uint32_t tx_state = *(uint32_t *)&_LM[AH_LMAC_TXSTART_OFS];
-    if (tx_state >= 1u && tx_state <= 6u) {
-        /* Substate handlers — for modem mode, just abort */
-        lhw_abort_fsm();
-    }
-
-    if ((int8_t)_LM[AH_LMAC_ACLAST_OFS + 1] < 0)
-        ah_tdma_abort();
-
-    *(uint32_t *)&_LM[AH_LMAC_TXSTART_OFS] = 0;
-
-    if ((_LM[AH_LMAC_MISC9E0_OFS] & 1) == 0)
-        lhw_enable_irq_ac();
-}
-
-/* lmac_attempt_tx_obss — attempt TX on overlapping BSS channel.
- * In modem mode, fall through to normal attempt_tx. */
-int32 lmac_attempt_tx_obss(uint32 ch)
-{
-    (void)ch;
-    uint32_t ac = lmac_current_ac();
-    return lmac_attempt_tx(ac);
-}
-
-/* PV0 response frame init functions — stubs for modem mode */
-void lmac_pv0_rts_init(void)   {}
-void lmac_pv0_wpack_init(void) {}
-void lmac_pv0_wpcts_init(void) {}
-void lmac_pv0_wpba_init(void)  {}
-
-/* lmac_tx_queue_agglist_init — already handled by lmac_tx_init's memset */
-void lmac_tx_queue_agglist_init(void) {}
-
-/* lmac_tx_vec_init — init all NDP TX vectors */
 void lmac_tx_vec_init(void)
 {
     for (uint32_t i = 0; i < 5; i++)
-        ndp_tx_vec_init_one((uint8_t *)&ah_lmac_tx_orig.pTx_vector_cache[i]);
+        ndp_tx_vec_init_one(&ah_lmac_tx.pTx_vector_cache[i * 16]);
 }
 
-/* lmac_tx_frame_regen — regenerate TX frame with new rate parameters */
-int32_t lmac_tx_frame_regen(uint32_t ac, uint32_t ac_hint, uint32_t mcs, void *arg)
-{
-    (void)ac; (void)ac_hint; (void)mcs; (void)arg;
-    return 0;
-}
+/* ======================================================================
+ * Stubs required by precompiled mars_lmac.o (liblmac.a).
+ * These are called from the binary library but unused in modem mode.
+ * ====================================================================== */
+int32_t lmac_update_pv0_cfend_tx_vec(void) { return 0; }
+int32_t ndp_pspoll_ack_rx_hdl(void) { return 0; }
+int32_t lmac_send_mgmt_meas_req(void)    { return 0; }
+int32_t lmac_send_mgmt_meas_report(void) { return 0; }
+int32_t lmac_send_scan_probe(void)       { return 0; }
+int32_t lmac_send_ant_pkt(void)          { return 0; }
+int32_t lmac_send_probe_resp(void)       { return 0; }
+int32_t lmac_auto_channel_select(void) { return 0; }
+uint32_t lmac_vht_info_get(uint32_t info) { (void)info; return 0; }
+int32_t lmac_ah_test_tx(struct lmac_ops *ops, struct sk_buff *skb)
+{ (void)ops; (void)skb; return 0; }
+void lmac_irq_tx_tmo(void) { lhw_abort_fsm(); }
 

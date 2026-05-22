@@ -105,12 +105,12 @@ static void halow_runtime_reconfig_barrier(void)
     lhw_abort_fsm();
 
     for (uint32_t ac = 0; ac < 4u; ac++) {
-        lmac_tx_ctx_buff *aggr = &ah_lmac_tx_orig.pTx_ac_aggr_data[ac];
+        lmac_tx_ctx_buff *aggr = &ah_lmac_tx.pTx_ac_aggr_data[ac];
 
         for (int32_t i = (int32_t)aggr->selected_count - 1; i >= 0; i--) {
             struct sk_buff *skb = aggr->skb_list[i];
             if (skb != NULL) {
-                skb_list_queue_head(&ah_lmac_tx_orig.pTx_ac_queues[ac], skb);
+                skb_list_queue_head(&ah_lmac_tx.pTx_ac_queues[ac], skb);
                 aggr->skb_list[i] = NULL;
             }
         }
@@ -121,14 +121,14 @@ static void halow_runtime_reconfig_barrier(void)
         aggr->last_seq = -1;
         aggr->selected_count = 0u;
         aggr->queued_count = 0u;
-        aggr->reserved_10f &= (uint8_t)~0x04u;
+        aggr->tx_flags &= (uint8_t)~0x04u;
     }
 
     ah_lmac.bo_frame_type = 0u;
     ah_lmac.bo_tx_substate = 0u;
-    ah_lmac_tx_orig.pPv0_txvec = NULL;
-    ah_lmac_tx_orig.tx_pending_nav_dur = 0u;
-    ah_lmac_tx_orig.tx_cca_slot_count = 0u;
+    ah_lmac_tx.pPv0_txvec = NULL;
+    ah_lmac_tx.tx_pending_nav_dur = 0u;
+    ah_lmac_tx.tx_cca_slot_count = 0u;
 
     LMAC_HW->BO_CNT0 = 0u;
     LMAC_HW->CCA_STAT = 0x0ff0u;
@@ -137,7 +137,7 @@ static void halow_runtime_reconfig_barrier(void)
 
     lmac_custom_cfg.defer_ac_pd = 0;
     for (uint32_t ac = 0; ac < 4u; ac++) {
-        if (skb_list_count(&ah_lmac_tx_orig.pTx_ac_queues[ac]) != 0u) {
+        if (skb_list_count(&ah_lmac_tx.pTx_ac_queues[ac]) != 0u) {
             LMAC_HW->AC_PD = 0u;
             LMAC_HW->AC_PD = 0xFu;
             break;
@@ -292,24 +292,9 @@ void halow_config_set_mcs(uint8_t mcs){
 
 static void halow_config_set_bandwidth_raw(uint8_t bw)
 {
-    uint8_t tx_bw_sig;
-
-    if (bw == 1u) {
-        tx_bw_sig = 3u;
-    } else if (bw == 2u) {
-        tx_bw_sig = 0u;
-    } else if (bw == 4u) {
-        tx_bw_sig = 1u;
-    } else if (bw == 8u) {
-        tx_bw_sig = 2u;
-    } else {
-        tx_bw_sig = 3u;
-    }
-
     lmac_set_bss_bw(g_ops, bw);
     lmac_set_mcast_txbw(g_ops, bw);
-    lmac_set_tx_bw(g_ops, tx_bw_sig);
-    halow_debug("GET BW: %d", lmac_get_tx_bw(g_ops));
+    lmac_set_tx_bw(g_ops, bw);
 }
 
 void halow_config_set_bandwidth(uint8_t bw){
@@ -473,7 +458,7 @@ void halow_get_tx_vacanted_bytes(uint32_t bytes){
     }
 }
 
-int32_t halow_tx(const uint8_t *data, uint32_t len, const uint8_t destination_mac[6]) {
+int32_t halow_tx(const uint8_t *data, uint32_t len, const uint8_t destination_mac[6], uint8_t mcs) {
     if(g_ops == NULL){
         return -1;
     }
@@ -518,7 +503,7 @@ int32_t halow_tx(const uint8_t *data, uint32_t len, const uint8_t destination_ma
 
     int32_t res;
     if (lmac_custom_cfg.fast_tx) {
-        res = lmac_fast_tx(skb);
+        res = lmac_fast_tx(skb, mcs);
     } else {
         res = lmac_tx(g_ops, skb);
         lmac_kick_tx_task();
@@ -528,7 +513,7 @@ int32_t halow_tx(const uint8_t *data, uint32_t len, const uint8_t destination_ma
     return res;
 }
 
-int32_t halow_tx_batch(const uint8_t *data, uint32_t len, const uint8_t destination_mac[6], uint32_t count) {
+int32_t halow_tx_batch(const uint8_t *data, uint32_t len, const uint8_t destination_mac[6], uint32_t count, uint8_t mcs) {
     if (g_ops == NULL || data == NULL || len == 0 || count == 0)
         return -1;
 
@@ -560,7 +545,7 @@ int32_t halow_tx_batch(const uint8_t *data, uint32_t len, const uint8_t destinat
 
         halow_get_tx_vacanted_bytes(skb->len);
 
-        if (lmac_fast_tx(skb) != 0) {
+        if (lmac_fast_tx(skb, mcs) != 0) {
             g_tx_vacated_bytes += skb->len;
             kfree_skb(skb);
             break;
