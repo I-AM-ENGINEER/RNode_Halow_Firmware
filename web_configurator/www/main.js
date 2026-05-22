@@ -26,7 +26,7 @@
     };
     const nearbyState = {
         auto: true,
-        periodMs: 5000,
+        periodMs: 1000,
         timer: null,
         loading: false,
         active: false,
@@ -665,6 +665,7 @@
                 setText('stat_flashs', d.flashs);
 				setText('stat_cpu', d.cpu);
 				setText('stat_heap', d.heap);
+				setText('stat_chip_temp', d.chip_temp);
             }
         } catch (err) {
             // ignore periodic fetch errors

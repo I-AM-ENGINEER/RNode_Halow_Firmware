@@ -29,6 +29,7 @@
 #include "lib/logc/log.h"
 #include "uart_slip.h"
 #include "net_log.h"
+#include "chip/txw4002ack803/sysctrl.h"
 
 /* -------------------------------------------------------------------------- */
 /* Change version                                                             */
@@ -757,6 +758,10 @@ int32_t web_api_dev_stat_get( const cJSON *in, cJSON *out ){
 
     statistics_heap_usage_get(s, sizeof(s));
     (void)cJSON_AddStringToObject(out, "heap", s);
+
+    snprintf(s, sizeof(s), "%d C", (int)tsensor_meas(0));
+    (void)cJSON_AddStringToObject(out, "chip_temp", s);
+
     return WEB_API_RC_OK;
 }
 
@@ -1107,6 +1112,8 @@ int32_t web_api_nearby_modems_get( const cJSON *in, cJSON *out ){
     if (arr == NULL) {
         return WEB_API_RC_INTERNAL;
     }
+
+    (void)cJSON_AddNumberToObject(out, "n", (double)halow_lbt_background_short_dbm_get());
 
     for (i = 0; i < nearby_modem_count_get(); i++) {
         m = nearby_modem_get_by_index(i);
