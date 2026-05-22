@@ -91,6 +91,7 @@ static void halow_rx_handler(struct hgic_rx_info *info,
         .len = len,
         .mcs = info->mcs,
         .rssi = info->signal,
+        .snr = info->signal - halow_lbt_background_short_dbm_get(),
         .timestamp_s = (uint32_t)time(NULL)
     };
     memcpy(modem_pkg_info.mac, hdr->addr2, 6);
@@ -281,7 +282,7 @@ __init int main(void) {
     extern uint32 __sinit, __einit;
     os_sleep_ms(5000);
     log_debug("mcu_watchdog_timeout");
-    mcu_watchdog_timeout(0);
+    mcu_watchdog_timeout(3);
     log_debug("sys_event_init");
     sys_event_init(32);
     log_debug("sys_event_take");

@@ -25,8 +25,6 @@
         loading: false
     };
     const nearbyState = {
-        auto: true,
-        periodMs: 1000,
         timer: null,
         loading: false,
         active: false,
@@ -53,7 +51,6 @@
         setupDirtyTracking();
         fwUpdateState.betaEnabled = document.getElementById('fw_beta_toggle').checked;
         loadAll();
-        updateNearbyUi();
         updateReticulumUi();
         handleTabActivated('dashboard');
         startLiveAgeTicker();
@@ -510,10 +507,6 @@
 
         document.getElementById('stat_reset_btn').addEventListener('click', resetStats);
 
-        document.getElementById('nearby_auto').addEventListener('change', handleNearbyAutoChange);
-        document.getElementById('nearby_period').addEventListener('change', handleNearbyPeriodChange);
-        document.getElementById('nearby_refresh').addEventListener('click', () => refreshNearby(true));
-
         document.getElementById('reticulum_auto').addEventListener('change', handleReticulumAutoChange);
         document.getElementById('reticulum_period').addEventListener('change', handleReticulumPeriodChange);
         document.getElementById('reticulum_refresh').addEventListener('click', () => refreshReticulum(true));
@@ -743,50 +736,12 @@
 
     function scheduleNearbyRefresh() {
         stopNearbyTimer();
-        if (!nearbyState.active || !nearbyState.auto) {
+        if (!nearbyState.active) {
             return;
         }
         nearbyState.timer = setTimeout(() => {
             refreshNearby(false);
-        }, nearbyState.periodMs);
-    }
-
-    function updateNearbyUi() {
-        const autoEl = document.getElementById('nearby_auto');
-        const periodEl = document.getElementById('nearby_period');
-
-        if (autoEl) {
-            autoEl.checked = nearbyState.auto;
-        }
-
-        if (periodEl) {
-            periodEl.value = String(Math.max(1, Math.round(nearbyState.periodMs / 1000)));
-            periodEl.disabled = !nearbyState.auto;
-        }
-    }
-
-    function normalizeNearbyPeriodMs(raw) {
-        const sec = parseInt(raw, 10);
-        if (!Number.isFinite(sec) || sec < 1) {
-            return 5000;
-        }
-        return sec * 1000;
-    }
-
-    function handleNearbyAutoChange() {
-        nearbyState.auto = document.getElementById('nearby_auto').checked;
-        updateNearbyUi();
-        if (nearbyState.auto) {
-            scheduleNearbyRefresh();
-        } else {
-            stopNearbyTimer();
-        }
-    }
-
-    function handleNearbyPeriodChange() {
-        nearbyState.periodMs = normalizeNearbyPeriodMs(document.getElementById('nearby_period').value);
-        updateNearbyUi();
-        scheduleNearbyRefresh();
+        }, 1000);
     }
 
 
@@ -839,11 +794,20 @@
     }
 
     function formatNearbyBitrate(bitsPerSecond) {
-        if (!Number.isFinite(bitsPerSecond) || bitsPerSecond < 0) {
-            return '--';
+        if (!Number.isFinite(bitsPerSecond) || bitsPerSecond <= 0) {
+            return '0 kbit/s';
         }
 
-        return String(Math.round(bitsPerSecond));
+        if (bitsPerSecond >= 1e6) return (bitsPerSecond / 1e6).toFixed(1) + ' Mbit/s';
+        if (bitsPerSecond >= 1e3) return (bitsPerSecond / 1e3).toFixed(1) + ' kbit/s';
+        return Math.round(bitsPerSecond) + ' bit/s';
+    }
+
+    function formatBytes(n) {
+        if (!Number.isFinite(n) || n < 0) return '--';
+        if (n >= 1048576) return (n / 1048576).toFixed(3) + ' MiB';
+        if (n >= 1024) return (n / 1024).toFixed(3) + ' KiB';
+        return n + ' B';
     }
 
     function formatNearbyLastSeen(seconds) {
@@ -855,16 +819,18 @@
             return {
                 mac: row[0],
                 rssi: row[1],
-                mcs: row[2],
-                packets: row[3],
-                bytes: row[4],
-                lastSeen: row[5]
+                snr: row[2],
+                mcs: row[3],
+                packets: row[4],
+                bytes: row[5],
+                lastSeen: row[6]
             };
         }
 
         return {
             mac: row?.m ?? row?.mac,
             rssi: row?.r ?? row?.rssi,
+            snr: row?.snr,
             mcs: row?.s ?? row?.mcs,
             packets: row?.p ?? row?.rx_packets,
             bytes: row?.b ?? row?.rx_bytes,
@@ -918,10 +884,11 @@
             const tr = document.createElement('tr');
             const values = [
                 formatMac(row.mac),
-                row.rssi,
+                row.rssi + ' dBm',
+                row.snr + ' dB',
                 normalizeNearbyMcs(row.mcs),
-                row.packets,
-                row.bytes,
+                Number(row.packets).toLocaleString('ru-RU'),
+                formatBytes(row.bytes),
                 calcNearbyBitrate(row.mac, row.bytes)
             ];
 
@@ -934,7 +901,6 @@
             const ageTd = document.createElement('td');
             const age = Number(row.lastSeen);
             if (Number.isFinite(age) && age >= 0) {
-                ageTd.dataset.ageSeconds = String(Math.floor(age));
                 ageTd.textContent = formatNearbyLastSeen(age);
             } else {
                 ageTd.textContent = '--';
@@ -956,7 +922,6 @@
 
         stopNearbyTimer();
         nearbyState.loading = true;
-        updateNearbyUi();
 
         try {
             const res = await fetch('/api/get_nearby_modems', { cache: 'no-store' });
@@ -975,7 +940,6 @@
             // ignore nearby fetch errors
         } finally {
             nearbyState.loading = false;
-            updateNearbyUi();
             scheduleNearbyRefresh();
         }
     }

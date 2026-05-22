@@ -11,6 +11,7 @@ typedef struct {
     uint8_t mac[6];
     uint8_t mcs;
     int8_t last_rssi;
+    int8_t last_snr;
     int32_t lastrx_timestamp_s;
     int32_t rx_bytes;
     int32_t rx_packets;
@@ -22,6 +23,7 @@ typedef struct {
     uint16_t len;
     uint8_t mcs;
     int8_t rssi;
+    int8_t snr;
     uint32_t timestamp_s;
 } nearby_modem_package_info_t;
 

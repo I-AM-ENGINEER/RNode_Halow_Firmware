@@ -112,7 +112,7 @@ class TestGetStat(unittest.TestCase):
 
     def test_device_fields(self):
         dev = get("/api/get_stat")["device"]
-        for f in ("uptime", "hostname", "ip", "ver", "mac", "flashs", "cpu", "heap"):
+        for f in ("uptime", "hostname", "ip", "ver", "mac", "flashs", "cpu", "heap", "chip_temp"):
             self.assertIn(f, dev, f"missing device field: {f}")
 
     def test_radio_fields(self):
@@ -260,16 +260,22 @@ class TestNearbyModems(unittest.TestCase):
         self.assertIn("d", r)
         self.assertIsInstance(r["d"], list)
 
-    def test_each_row_has_6_fields(self):
+    def test_each_row_has_7_fields(self):
         rows = get("/api/get_nearby_modems")["d"]
         for row in rows:
-            self.assertEqual(len(row), 6, f"bad row length: {row}")
+            self.assertEqual(len(row), 7, f"bad row length: {row}")
 
     def test_rssi_is_negative(self):
         rows = get("/api/get_nearby_modems")["d"]
         for row in rows:
             # row[1] is RSSI in dBm — should be negative for real signals
             self.assertLess(row[1], 0)
+
+    def test_snr_is_positive(self):
+        rows = get("/api/get_nearby_modems")["d"]
+        for row in rows:
+            # row[2] is SNR in dB — should be positive for real signals
+            self.assertGreater(row[2], 0)
 
 
 class TestReticulumLinks(unittest.TestCase):

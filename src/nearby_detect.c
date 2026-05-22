@@ -42,6 +42,7 @@ void nearby_modem_package_register( const nearby_modem_package_info_t *pkg ){
     if( modem != NULL ){
         modem->mcs = pkg->mcs;
         modem->last_rssi = pkg->rssi;
+        modem->last_snr = pkg->snr;
         modem->lastrx_timestamp_s = (int32_t)pkg->timestamp_s;
         modem->rx_bytes += (int32_t)pkg->len;
         modem->rx_packets += 1;
@@ -60,6 +61,7 @@ void nearby_modem_package_register( const nearby_modem_package_info_t *pkg ){
     memcpy(g_nearby_db.modems[index].mac, pkg->mac, 6);
     g_nearby_db.modems[index].mcs = pkg->mcs;
     g_nearby_db.modems[index].last_rssi = pkg->rssi;
+    g_nearby_db.modems[index].last_snr = pkg->snr;
     g_nearby_db.modems[index].lastrx_timestamp_s = (int32_t)pkg->timestamp_s;
     g_nearby_db.modems[index].rx_bytes = (int32_t)pkg->len;
     g_nearby_db.modems[index].rx_packets = 1;

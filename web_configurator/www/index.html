@@ -380,20 +380,6 @@
             <div class="panel">
                 <h3>Nearby modems</h3>
 
-                <div class="nearby-toolbar">
-                    <label class="toggle-label nearby-auto-label">
-                        <span>Auto refresh</span>
-                        <input type="checkbox" id="nearby_auto" checked>
-                    </label>
-                    <label class="nearby-period-label">
-                        <span>Period (s)</span>
-                        <input type="number" id="nearby_period" min="1" step="1" value="5">
-                    </label>
-                    <div class="panel-actions nearby-actions">
-                        <button type="button" id="nearby_refresh" class="secondary">Refresh now</button>
-                    </div>
-                </div>
-
                 <table class="stats-table nearby-summary-table">
                     <tbody>
                     <tr><th>Device MAC</th><td id="nearby_self_mac">--</td></tr>
@@ -406,12 +392,12 @@
                         <thead>
                             <tr>
                                 <th>MAC</th>
-                                <th>Last RX RSSI</th>
-                                <th>SNR</th>
+                                <th>Last RSSI</th>
+                                <th>Last SNR</th>
                                 <th>MCS</th>
-                                <th>RX Packets</th>
-                                <th>RX Bytes</th>
-                                <th>RX bit/s</th>
+                                <th>Packets</th>
+                                <th>RX Data</th>
+                                <th>RX Rate</th>
                                 <th>Last seen</th>
                             </tr>
                         </thead>

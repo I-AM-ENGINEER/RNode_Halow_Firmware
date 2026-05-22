@@ -102,6 +102,7 @@ _state = {
         "flashs": "128 Mbit",
         "cpu": "12.5%",
         "heap": "210.3 KiB / 256 KiB",
+        "chip_temp": "36 C",
     },
 
     "radio_stat": {
@@ -118,8 +119,8 @@ _state = {
     },
 
     "nearby_modems": [
-        ["AABBCCDDEEFF", -72, 5, 1234, 56789, 3],
-        ["112233445566", -85, 3, 420,  12345, 11],
+        ["AABBCCDDEEFF", -72, 23, 5, 1234, 4532, 3],
+        ["112233445566", -85, 10, 3, 420,  1265535, 11],
     ],
 
     "reticulum_links": [],
@@ -311,8 +312,8 @@ def api_default_rst_post(_body):
 
 def api_get_nearby_modems_get(_body):
     rows = [
-        [mac, rssi, mcs, rxp, rxb, age]
-        for mac, rssi, mcs, rxp, rxb, age in _state["nearby_modems"]
+        [mac, rssi, snr, mcs, rxp, rxb, age]
+        for mac, rssi, snr, mcs, rxp, rxb, age in _state["nearby_modems"]
     ]
     return {"d": rows}
 

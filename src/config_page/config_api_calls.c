@@ -1113,8 +1113,6 @@ int32_t web_api_nearby_modems_get( const cJSON *in, cJSON *out ){
         return WEB_API_RC_INTERNAL;
     }
 
-    (void)cJSON_AddNumberToObject(out, "n", (double)halow_lbt_background_short_dbm_get());
-
     for (i = 0; i < nearby_modem_count_get(); i++) {
         m = nearby_modem_get_by_index(i);
         if (m == NULL) {
@@ -1141,6 +1139,7 @@ int32_t web_api_nearby_modems_get( const cJSON *in, cJSON *out ){
 
         cJSON_AddItemToArray(row, cJSON_CreateString(mac));
         cJSON_AddItemToArray(row, cJSON_CreateNumber((double)m->last_rssi));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)m->last_snr));
         cJSON_AddItemToArray(row, cJSON_CreateNumber((double)m->mcs));
         cJSON_AddItemToArray(row, cJSON_CreateNumber((double)m->rx_packets));
         cJSON_AddItemToArray(row, cJSON_CreateNumber((double)m->rx_bytes));
