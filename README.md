@@ -120,6 +120,17 @@ Logs are output via UART (IO12, IO13) at **2,000,000 baud** (blocking logs).
 
 For full debugging, use a Blue Pill flashed as CKLink. The chip **must** be STM32F103C8 — C6 will not work, and Chinese suppliers often ship rejected/cloned chips with broken USB.
 
+#### Flashing via CKLink (EIDE / CLI)
+
+Requirements: DebugServer + GDB, CKLink debugger connected.
+
+```bash
+python flash.py                        # flash firmware
+python flashlog.py --port COM3 -n 500  # flash + capture boot logs
+```
+
+Tool paths are read from env vars `CSKY_DEBUGSERVER`, `CSKY_GDB` (and `CSKY_MINGW_BIN` on Windows). Defaults are in `utils/flash_env.sh`.
+
 OTA firmware is generated automatically at `project/out/XXX.tar` after building the project.
 
 ---
@@ -245,9 +256,18 @@ IP адресс можно узнать через DHCP сервер на роу
 
 Для полноценной отладки используется Blue Pill прошитая в CKLink. Чип обязательно должен быть STM32F103C8, C6 не подойдет + китайцы любят пихать отбраковку/клоны с неработающим USB.
 
-Прошивка для OTA генерируется автоматически project/out/XXX.tar после сборки проекта.
+### Прошивка через CKLink (EIDE / CLI)
 
-автоматически `project/out/XXX.tar` после сборки проекта.
+Требования: DebugServer + GDB, подключенный CKLink.
+
+```bash
+python flash.py                        # прошить прошивку
+python flashlog.py --port COM3 -n 500  # прошить + захватить логи загрузки
+```
+
+Пути к инструментам берутся из переменных окружения `CSKY_DEBUGSERVER`, `CSKY_GDB` (и `CSKY_MINGW_BIN` на Windows). По умолчанию — из `utils/flash_env.sh`.
+
+Прошивка для OTA генерируется автоматически `project/out/XXX.tar` после сборки проекта.
 
 ## Support
 

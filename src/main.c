@@ -1,4 +1,4 @@
-#define LOG_LOCAL_LEVEL LOG_TRACE
+#define LOG_LOCAL_LEVEL LOG_DEBUG
 #include "lib/logc/log.h"
 #include "basic_include.h"
 #include "lib/lmac/lmac.h"
@@ -50,6 +50,7 @@
 #include "lib/common/dsleepdata.h"
 #endif
 #include "rns/stream_parser.h"
+#include "test.h"
 #include "nearby_detect.h"
 #include "uart_slip.h"
 #include "net_log.h"
@@ -273,16 +274,12 @@ bool boot_recovery_check( void ){
     return false;
 }
 
-static int32 sys_blink_work(struct os_work *work) {
-    static bool active = 0;
-    active = !active;
-    indication_led_main_set(active);
-    os_run_work_delay(work, active ? 20 : 4980);
-    return 0;
-}
+static struct os_work blink_wk;
+static struct os_work stats_wk;
 
 __init int main(void) {
     extern uint32 __sinit, __einit;
+    os_sleep_ms(5000);
     log_debug("mcu_watchdog_timeout");
     mcu_watchdog_timeout(0);
     log_debug("sys_event_init");
@@ -346,15 +343,19 @@ __init int main(void) {
     telemetry_init();
     log_debug("rns_stream_decoder_init");
     rns_stream_decoder_init(&tcp_rns_decoder, rns_tcp_rx_handler);
-    log_debug("OS_WORK_INIT blink");
-    OS_WORK_INIT(&blink_wk, sys_blink_work,0);
-    log_debug("OS_WORK_INIT stats");
-    OS_WORK_INIT(&stats_wk, sys_stats_work,0);
-    log_debug("os_run_work_delay blink");
-    os_run_work_delay(&blink_wk, 1000);
+    /* periodic stats disabled — too noisy during test */
+    {
+        static struct os_task test_task;
+        os_task_init((const uint8 *)"test", &test_task, (void (*)(void *))test_run_all, 0);
+        os_task_set_stacksize(&test_task, 2048);
+        extern int32_t _os_task_set_priority(struct os_task *task, uint8_t priority);
+        _os_task_set_priority(&test_task, OS_TASK_PRIORITY_ABOVE_NORMAL + 1);
+        os_task_run(&test_task);
+    }
     log_debug("sysheap_collect_init");
     sysheap_collect_init(&sram_heap, (uint32)&__sinit, (uint32)&__einit);
     log_info("Init done");
+    log_debug("!!!!!");
     return 0;
 }
 

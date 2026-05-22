@@ -53,7 +53,7 @@
 #define SKB_POOL_ADDR     (WIFI_RX_BUFF_ADDR + WIFI_RX_BUFF_SIZE)
 #define SKB_POOL_SIZE     (SRAM_POOL_START + SRAM_POOL_SIZE - SKB_POOL_ADDR)
 
-#define DEFAULT_SYS_CLK   (128000000UL) // options: 32M/48M/72M/144M, and 16*N from 64M to 128M
+#define DEFAULT_SYS_CLK   (192000000UL) // options: 32M/48M/72M/144M, and 16*N from 64M to 128M
 
 #define AUTO_ETHERNET_PHY
 
@@ -105,6 +105,7 @@
 #define HALOW_CONFIG_BANDWIDTH_DEF              (1)
 #define HALOW_CONFIG_MCS_DEF                    (0)
 #define HALOW_CONFIG_SPOWER_EN_DEF              (false)
+#define HALOW_LBT_IGNORE_CCA_DEF                (true)
 
 #define HALOW_LBT_CONFIG_EN_DEF                 (true)
 #define HALOW_LBT_CONFIG_NSWS_DEF               (256)
@@ -171,7 +172,7 @@
 #define LOG_LEVEL_UART_SLIP                     (LOG_NONE)
 #define LOG_LEVEL_HALOW_PKG_HANDLER             (LOG_NONE)
 #define LOG_LEVEL_MARS_LMAC_HW                  (LOG_NONE)
-#define LOG_LEVEL_MARS_LMAC_TX                  (LOG_DEBUG)
+#define LOG_LEVEL_MARS_LMAC_TX                  (LOG_WARN)
 #define LOG_LEVEL_MARS_RFSPI                    (LOG_NONE)
 #define LOG_LEVEL_MARS_TDMA                     (LOG_NONE)
 #define LOG_LEVEL_LMAC_RXQ                      (LOG_NONE)

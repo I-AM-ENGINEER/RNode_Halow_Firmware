@@ -5,7 +5,7 @@
 #include "osal/mutex.h"
 #include "osal/semaphore.h"
 #include "lib/lmac/lmac_ctx.h"
-#include "lib/lmac/lmac_globals.h"
+//#include "lib/lmac/lmac_globals.h"
 
 extern void hgprintf(const char *fmt, ...);
 

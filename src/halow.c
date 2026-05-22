@@ -7,13 +7,17 @@
 #include "lib/lmac/hgic.h"
 #include "lib/skb/skb.h"
 #include "lib/skb/skbuff.h"
+#include "lib/skb/skb_list.h"
 #include "osal/semaphore.h"
 #include "osal/string.h"
 #include "osal/work.h"
 #include "halow_lbt.h"
+#include "lib/lmac/lmac_ctx.h"
+#include "lib/lmac/lmac_regmap.h"
+#include "lib/lmac/mars_lmac_tx.h"
 #include "configdb.h"
 #include "sys_config.h"
-#include "lmac_ctx.h"
+//#include "lmac_ctx.h"
 #include "utils.h"
 
 #define HALOW_CONFIG_PREFIX             CONFIGDB_ADD_MODULE("halow")
@@ -37,7 +41,7 @@
 #define HALOW_ANT_SEL           0
 
 /* Aggregation */
-#define HALOW_TX_AGGCNT         1
+#define HALOW_TX_AGGCNT         16
 #define HALOW_RX_AGGCNT         1
 
 /* Power save / sleep */
@@ -47,7 +51,7 @@
 
 /* Standby */
 #define HALOW_STANDBY_CH        1           /* channel index starts from 1 */
-#define HALOW_STANDBY_PERIOD_MS 5000
+#define HALOW_STANDBY_PERIOD_MS 0
 
 /* ACK / retry */
 #define HALOW_ACK_TMO_EXTRA     0
@@ -65,7 +69,7 @@
 
 /* Debug */
 #define HALOW_DBG_LEVEL         0
-#define TX_BUFFER_SIZE          (1460*2)
+#define TX_BUFFER_SIZE          (1460*20)
 
 //#define HALOW_DEBUG
 #ifdef HALOW_DEBUG
@@ -86,6 +90,60 @@ static uint32_t g_tx_vacated_bytes = TX_BUFFER_SIZE;
 static struct os_semaphore g_tx_vacated_sem;
 
 extern void lmac_kick_tx_task( void );
+extern void lhw_abort_fsm(void);
+extern void update_rx_buff_addr(void);
+extern void lhw_start_rx(uint32 flags);
+
+static void halow_runtime_reconfig_barrier(void)
+{
+    if (g_ops == NULL) {
+        return;
+    }
+
+    lmac_custom_cfg.defer_ac_pd = 1;
+    LMAC_HW->AC_PD = 0u;
+    lhw_abort_fsm();
+
+    for (uint32_t ac = 0; ac < 4u; ac++) {
+        lmac_tx_ctx_buff *aggr = &ah_lmac_tx.pTx_ac_aggr_data[ac];
+
+        for (int32_t i = (int32_t)aggr->selected_count - 1; i >= 0; i--) {
+            struct sk_buff *skb = aggr->skb_list[i];
+            if (skb != NULL) {
+                skb_list_queue_head(&ah_lmac_tx.pTx_ac_queues[ac], skb);
+                aggr->skb_list[i] = NULL;
+            }
+        }
+
+        aggr->total_len_bytes = 0u;
+        aggr->symbol_len = 0u;
+        aggr->first_seq = -1;
+        aggr->last_seq = -1;
+        aggr->selected_count = 0u;
+        aggr->queued_count = 0u;
+        aggr->tx_flags &= (uint8_t)~0x04u;
+    }
+
+    ah_lmac.bo_frame_type = 0u;
+    ah_lmac.bo_tx_substate = 0u;
+    ah_lmac_tx.pPv0_txvec = NULL;
+    ah_lmac_tx.tx_pending_nav_dur = 0u;
+    ah_lmac_tx.tx_cca_slot_count = 0u;
+
+    LMAC_HW->BO_CNT0 = 0u;
+    LMAC_HW->CCA_STAT = 0x0ff0u;
+    update_rx_buff_addr();
+    lhw_start_rx(0u);
+
+    lmac_custom_cfg.defer_ac_pd = 0;
+    for (uint32_t ac = 0; ac < 4u; ac++) {
+        if (skb_list_count(&ah_lmac_tx.pTx_ac_queues[ac]) != 0u) {
+            LMAC_HW->AC_PD = 0u;
+            LMAC_HW->AC_PD = 0xFu;
+            break;
+        }
+    }
+}
 
 
 // Disable broadcast
@@ -218,7 +276,8 @@ void halow_config_load(halow_config_t *cfg){
     configdb_get_i16(HALOW_CONFIG_CENTRAL_FREQ_NAME, (int16_t*)&cfg->central_freq);
 }
 
-void halow_config_set_mcs(uint8_t mcs){
+static void halow_config_set_mcs_raw(uint8_t mcs)
+{
 	lmac_set_fix_tx_rate(g_ops, mcs);
     lmac_set_tx_mcs(g_ops, mcs);
     lmac_set_fallback_mcs(g_ops, mcs);
@@ -226,11 +285,32 @@ void halow_config_set_mcs(uint8_t mcs){
     halow_debug("GET MCS: %d", lmac_get_tx_mcs(g_ops));
 }
 
-void halow_config_set_bandwidth(uint8_t bw){
+void halow_config_set_mcs(uint8_t mcs){
+    halow_runtime_reconfig_barrier();
+    halow_config_set_mcs_raw(mcs);
+}
+
+static void halow_config_set_bandwidth_raw(uint8_t bw)
+{
     lmac_set_bss_bw(g_ops, bw);
     lmac_set_mcast_txbw(g_ops, bw);
     lmac_set_tx_bw(g_ops, bw);
-    halow_debug("GET BW: %d", lmac_get_tx_bw(g_ops));
+}
+
+void halow_config_set_bandwidth(uint8_t bw){
+    halow_runtime_reconfig_barrier();
+    halow_config_set_bandwidth_raw(bw);
+}
+
+static void halow_config_set_freq_raw(uint16_t freq)
+{
+    lmac_set_freq(g_ops, freq);
+}
+
+static void halow_config_set_freq_live(uint16_t freq)
+{
+    halow_runtime_reconfig_barrier();
+    halow_config_set_freq_raw(freq);
 }
 
 void halow_config_apply(const halow_config_t *cfg){
@@ -244,11 +324,12 @@ void halow_config_apply(const halow_config_t *cfg){
     
     halow_cfg = *cfg;
     halow_cfg_sanitize(&halow_cfg);
-    lmac_set_freq(g_ops, halow_cfg.central_freq);
+    halow_runtime_reconfig_barrier();
+    halow_config_set_freq_raw(halow_cfg.central_freq);
 
     /* ---- PHY rate control ---- */
-    halow_config_set_mcs(halow_cfg.mcs);
-    halow_config_set_bandwidth(halow_cfg.bandwidth);
+    halow_config_set_mcs_raw(halow_cfg.mcs);
+    halow_config_set_bandwidth_raw(halow_cfg.bandwidth);
 	
     /* ---- power ---- */
     lmac_set_txpower(g_ops, halow_cfg.rf_power);
@@ -266,11 +347,12 @@ static void halow_modem_set_default(void){
     lmac_set_mac_addr(g_ops, 0, g_mac);
 
     /* ---- RF / channel ---- */
-    lmac_set_freq(g_ops, HALOW_CONFIG_CENTRAL_FREQ_DEF);
+    halow_runtime_reconfig_barrier();
+    halow_config_set_freq_raw(HALOW_CONFIG_CENTRAL_FREQ_DEF);
 
     /* ---- PHY rate control ---- */
-    halow_config_set_mcs(HALOW_CONFIG_MCS_DEF);
-    halow_config_set_bandwidth(HALOW_CONFIG_BANDWIDTH_DEF);
+    halow_config_set_mcs_raw(HALOW_CONFIG_MCS_DEF);
+    halow_config_set_bandwidth_raw(HALOW_CONFIG_BANDWIDTH_DEF);
 	
     /* ---- power ---- */
     lmac_set_txpower(g_ops, HALOW_CONFIG_POWER_DEF);
@@ -295,9 +377,11 @@ static void halow_modem_set_default(void){
     lmac_set_ap_psmode_en(g_ops, 0);
 
     /* ---- standby ---- */
-    lmac_set_standby(g_ops,
-                     HALOW_STANDBY_CH - 1,
-                     HALOW_STANDBY_PERIOD_MS * 1000);
+    if (HALOW_STANDBY_PERIOD_MS != 0) {
+        lmac_set_standby(g_ops,
+                         HALOW_STANDBY_CH - 1,
+                         HALOW_STANDBY_PERIOD_MS * 1000);
+    }
 
     /* ---- CCA / retry / RTS ---- */
     lmac_set_cca_for_ce(g_ops, HALOW_CCA_FOR_CE);
@@ -313,7 +397,7 @@ static void halow_modem_set_default(void){
 }
 
 static int32_t lmac_watchdog_feed_work( struct os_work *work ){
-    ah_lmac.phy_watchdog_flags &= ~0x01;
+    //ah_lmac.phy_watchdog_flags &= ~0x01;
     os_run_work_delay(&lmac_wdt_wk, 100);
     return 0;
 }
@@ -374,7 +458,7 @@ void halow_get_tx_vacanted_bytes(uint32_t bytes){
     }
 }
 
-int32_t halow_tx(const uint8_t *data, uint32_t len, const uint8_t destination_mac[6]) {
+int32_t halow_tx(const uint8_t *data, uint32_t len, const uint8_t destination_mac[6], uint8_t mcs) {
     if(g_ops == NULL){
         return -1;
     }
@@ -416,8 +500,69 @@ int32_t halow_tx(const uint8_t *data, uint32_t len, const uint8_t destination_ma
     skb->tx       = 1;
     //halow_lbt_wait_tx_allowed();
     halow_get_tx_vacanted_bytes(skb->len);
-    int32_t res = lmac_tx(g_ops, skb);
-	lmac_kick_tx_task();
+
+    int32_t res;
+    if (lmac_custom_cfg.fast_tx) {
+        res = lmac_fast_tx(skb, mcs);
+    } else {
+        res = lmac_tx(g_ops, skb);
+        lmac_kick_tx_task();
+    }
+
     halow_lbt_set_tx_as_active();
     return res;
+}
+
+int32_t halow_tx_batch(const uint8_t *data, uint32_t len, const uint8_t destination_mac[6], uint32_t count, uint8_t mcs) {
+    if (g_ops == NULL || data == NULL || len == 0 || count == 0)
+        return -1;
+
+    /* MCS10 (OFDMA 26-tone): symbol limit ~685 → ~680 bytes max payload */
+    if (mcs == 10 && len > 680)
+        return -3;
+
+    lmac_custom_cfg.defer_ac_pd = 1;
+
+    uint32_t sent = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        struct ieee80211_hdr hdr;
+        memset(&hdr, 0, sizeof(hdr));
+        hdr.frame_control = (uint16_t)(WLAN_FTYPE_DATA | WLAN_STYPE_DATA);
+        mac_bcast(hdr.addr1);
+        get_mac(hdr.addr2);
+        memcpy(hdr.addr3, destination_mac, 6);
+        g_seq++;
+        hdr.seq_ctrl = (uint16_t)((g_seq & 0x0fff) << 4);
+
+        uint32_t hr   = (uint32_t)g_ops->headroom;
+        uint32_t tr   = (uint32_t)g_ops->tailroom;
+        uint32_t need = hr + sizeof(hdr) + len + tr;
+
+        struct sk_buff *skb = alloc_tx_skb(need);
+        if (!skb) break;
+
+        skb_reserve(skb, (int)hr);
+        memcpy(skb_put(skb, sizeof(hdr)), &hdr, sizeof(hdr));
+        memcpy(skb_put(skb, len), data, (size_t)len);
+        skb->priority = 0;
+        skb->tx = 1;
+
+        halow_get_tx_vacanted_bytes(skb->len);
+
+        if (lmac_fast_tx(skb, mcs) != 0) {
+            g_tx_vacated_bytes += skb->len;
+            kfree_skb(skb);
+            break;
+        }
+        sent++;
+    }
+
+    lmac_custom_cfg.defer_ac_pd = 0;
+    if (sent != 0u) {
+        LMAC_HW->AC_PD = 0;
+        LMAC_HW->AC_PD = 0xF;
+    }
+
+    halow_lbt_set_tx_as_active();
+    return (int32_t)sent;
 }

@@ -89,6 +89,9 @@ targets:
       - sdk/lib/crypto/mbedtls
       - sdk/lib/crypto/openssl
       - sdk/lib/lmac/__edited
+      - sdk/lib/lmac/mars_lmac_cipher.c
+      - sdk/lib/lmac/mars_lmac_hw.c
+      - sdk/lib/lmac/mars_rfdigicali.c
     settings:
       debugger: cortex-debug
     toolchain: ANY_GCC
@@ -133,8 +136,8 @@ targets:
           linker:
             $disableOutputTask: true
             LD_FLAGS: -mcpu=ck803 -nostartfiles -Wl,--gc-sections -Wl,-zmax-page-size=1024 -Wl,-Map=project.map -Wl,--ckmap=txw4002a.map -Wl,--wrap=lwip_netif_hook_inputdata -Wl,--wrap=lmac_send_bss_announcement -Wl,--wrap=ah_rfspi_write -Wl,--wrap=ah_rfspi_read
-            LIB_FLAGS: libs/obj/libcommon/common_c_misc.o libs/obj/libcommon/common_sleepcb.o libs/obj/libcommon/common_sysevt.o libs/obj/libcommon/heap_mmpool.o libs/obj/libcommon/heap_sysheap.o libs/obj/libcommon/ota_eth_ota.o libs/obj/libcommon/ota_fw.o libs/obj/libcommon/ota_fwinfo.o libs/obj/libcommon/skb_skb_list.o libs/obj/libcommon/skb_skb_pool.o libs/obj/libcommon/syscfg_syscfg.o libs/obj/libcommon/xmodem_xmodem.o libs/obj/libcommon/xmodem_xmodem_fw.o libs/obj/libcore/emac_hg_gmac_eva.o libs/obj/libcore/slave_hgsdio20_slave.o libs/obj/libcore/txw4002ack803_startup.o libs/obj/libcore/txw4002ack803_sysctrl.o libs/obj/libcore/usb11_hgusb11_base.o libs/obj/libcore/usb11_hgusb11_dev_api.o libs/obj/libcore/usb11_hgusb11_dev_ep0.o libs/obj/libcore/usb11_hgusb11_dev_tbl.o libs/obj/liblmac/mars_ah_dsleep.o libs/obj/liblmac/mars_ah_wphy.o libs/obj/liblmac/mars_ahrf.o libs/obj/liblmac/mars_lmac.o libs/obj/liblmac/mars_lmac_cfg.o libs/obj/liblmac/mars_lmac_tx_origfuncs.o libs/obj/liblmac/mars_lmac_rc.o
-              libs/obj/liblmac/mars_lmac_rx.o libs/obj/liblmac/mars_lmac_test.o libs/obj/liblmac/mars_lmac_util.o libs/obj/libnetutils/dhcpd_dhcpd.o libs/obj/libnetutils/utils_chksum.o libs/obj/libnetutils/utils_dnsred.o libs/obj/libnetutils/utils_netat.o libs/obj/libnetutils/utils_netlog.o libs/obj/libnetutils/utils_sntp.o libs/obj/libnetutils/utils_udp.o libs/obj/libnetutils/utils_wnbota.o libs/obj/libosal/csky_condv.o libs/obj/libosal/csky_msgqueue.o libs/obj/libosal/csky_mutex.o libs/obj/libosal/csky_semaphore.o libs/obj/libosal/csky_sleep.o libs/obj/libosal/csky_task.o libs/obj/libosal/csky_time.o libs/obj/libosal/csky_timer.o libs/obj/libosal/osal_work.o -lm
+            LIB_FLAGS: libs/obj/libcommon/common_c_misc.o libs/obj/libcommon/common_sleepcb.o libs/obj/libcommon/common_sysevt.o libs/obj/libcommon/heap_mmpool.o libs/obj/libcommon/heap_sysheap.o libs/obj/libcommon/ota_eth_ota.o libs/obj/libcommon/ota_fw.o libs/obj/libcommon/ota_fwinfo.o libs/obj/libcommon/skb_skb_list.o libs/obj/libcommon/skb_skb_pool.o libs/obj/libcommon/syscfg_syscfg.o libs/obj/libcommon/xmodem_xmodem.o libs/obj/libcommon/xmodem_xmodem_fw.o libs/obj/libcore/emac_hg_gmac_eva.o libs/obj/libcore/slave_hgsdio20_slave.o libs/obj/libcore/txw4002ack803_startup.o libs/obj/libcore/txw4002ack803_sysctrl.o libs/obj/libcore/usb11_hgusb11_base.o libs/obj/libcore/usb11_hgusb11_dev_api.o libs/obj/libcore/usb11_hgusb11_dev_ep0.o libs/obj/libcore/usb11_hgusb11_dev_tbl.o libs/obj/liblmac/mars_ah_dsleep.o libs/obj/liblmac/mars_ah_wphy.o libs/obj/liblmac/mars_ahrf.o libs/obj/liblmac/mars_lmac.o libs/obj/liblmac/mars_lmac_cfg.o libs/obj/liblmac/mars_lmac_rc.o libs/obj/liblmac/mars_lmac_rx.o
+              libs/obj/liblmac/mars_lmac_test.o libs/obj/liblmac/mars_lmac_tx_origfuncs.o libs/obj/liblmac/mars_lmac_util.o libs/obj/libnetutils/dhcpd_dhcpd.o libs/obj/libnetutils/utils_chksum.o libs/obj/libnetutils/utils_dnsred.o libs/obj/libnetutils/utils_netat.o libs/obj/libnetutils/utils_netlog.o libs/obj/libnetutils/utils_sntp.o libs/obj/libnetutils/utils_udp.o libs/obj/libnetutils/utils_wnbota.o libs/obj/libosal/csky_condv.o libs/obj/libosal/csky_msgqueue.o libs/obj/libosal/csky_mutex.o libs/obj/libosal/csky_semaphore.o libs/obj/libosal/csky_sleep.o libs/obj/libosal/csky_task.o libs/obj/libosal/csky_time.o libs/obj/libosal/csky_timer.o libs/obj/libosal/osal_work.o libs/obj/liblmac/mars_lmac_hw.o libs/obj/liblmac/mars_rfdigicali.o libs/obj/liblmac/mars_lmac_cipher.o -lm
             linker-type: gcc
             output-format: elf
             print-mem-usage: true
@@ -142,7 +145,7 @@ targets:
     uploadConfigMap:
       Custom:
         bin: ""
-        commandLine: python ${workspaceFolder}/flasher/cklnk-flasher.py ${OutDir}/${ProjectName}.elf --reset
+        commandLine: python ${workspaceFolder}/flash.py --elf ${OutDir}/${ProjectName}.elf
         eraseChipCommand: ""
       JLink:
         baseAddr: ""

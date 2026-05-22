@@ -11,6 +11,29 @@ extern "C" {
 #endif
 
 /*
+ * Point-to-point TX timing overrides.
+ *
+ * bypass_backoff = 1  →  writes CW_min=CW_max=1 for all ACs before each
+ *                         lmac_irq_ac_pd_orig dispatch, so the random backoff
+ *                         computed in lmac_attempt_tx_orig is always rand()%1=0.
+ *                         This saves ~390 µs/frame at 1 MHz CWmin=15.
+ *                         Unlike FSM_BO_BYPASS, this does not corrupt the FSM.
+ *
+ * Future knob (not yet implemented — needs SIFS_INIT bit-layout study):
+ *   zero_slot_time   →  write 0 to the slot-time field of SIFS_INIT, collapsing
+ *                        DIFS from 264 µs to SIFS (160 µs).
+ */
+typedef struct {
+    uint8_t bypass_backoff;   /* 0 = standard CSMA/CA;  1 = CW=1, zero backoff */
+    uint8_t ignore_cca;       /* 0 = wait for CCA/BO path; 1 = force immediate BO-done */
+    uint8_t fast_tx;          /* 0 = normal path through tx_task;  1 = direct AC queue injection */
+    uint8_t defer_ac_pd;      /* 1 = lmac_fast_tx queues but does NOT trigger AC_PD; caller must kick */
+} lmac_custom_cfg_t;
+
+extern lmac_custom_cfg_t lmac_custom_cfg;
+
+
+/*
  * TX Queue Management Functions
  */
 
@@ -83,6 +106,16 @@ struct sk_buff *lmac_get_first_skb(uint32 ac);
 int32 lmac_ah_tx(struct lmac_ops *ops, struct sk_buff *skb);
 
 /**
+ * @brief Fast TX: fill TXD and inject directly into AC0 queue.
+ * Bypasses tx_task, tx_pending_queue and tx_data_reload.
+ * The skb must have >= 0x48 bytes headroom (as set by lmac_ah_init).
+ * Caller constructs the S1G frame at skb->data (same as halow_tx does).
+ * @param skb  Socket buffer with S1G frame at data pointer
+ * @return 0 on success, negative on error (skb is freed on error)
+ */
+int32 lmac_fast_tx(struct sk_buff *skb, uint8_t mcs);
+
+/**
  * @brief Test TX function (bypasses radio check)
  * @param ops LMAC operations structure
  * @param skb Socket buffer to transmit
@@ -105,9 +138,8 @@ int32 lmac_send_mgmt_skb(struct sk_buff *skb);
 int32 lmac_tx_beacon(struct sk_buff *skb);
 
 /**
- * @brief Transmit data frame
- * @param skb Data frame to transmit
- * @return 0 on success, negative on error
+ * @brief Submit prepared AC frame to PHY and re-arm TX vector.
+ * skb is accepted for API compatibility but ignored; AC is read from hardware state.
  */
 int32 lmac_tx_frm(struct sk_buff *skb);
 
@@ -1118,56 +1150,13 @@ extern void lmac_notify_channel_switch(uint8 chan);
 extern void lmac_beacon_timer_start(uint32 us);
 
 
-/*
- * Constants and Macros
- */
-
-/* TX Queue Offsets */
-#define AH_TXQ_OFS           0x064U
-#define AH_TXSQ_OFS          0x070U
-#define AH_CUR_TXVEC_OFS     0x004U
-#define AH_BEACON_SKB_OFS    0x008U
-#define AH_ACQ_OFS           0x088U
-#define AH_STATQ_OFS         0x538U
-#define AH_AC_STRIDE         0x120U
-#define AH_AGGLIST_OFS       0x0B8U
-#define AH_AGGBYTES_OFS      0x1B8U
-#define AH_AGGSYM_OFS        0x1BCU
-#define AH_AGGNUM_OFS        0x1C4U
-#define AH_AGGCNT_OFS        0x1C5U
-#define AH_AGGHDR_OFS        0x1C6U
-#define AH_DURCACHE_OFS      0x55EU
-#define AH_LMAC_TXCNT_OFS    0xA78U
-#define AH_LMAC_TXERR_OFS    0xA7AU
-#define AH_LMAC_TXMAX_OFS    0x760U
-#define AH_LMAC_TXSUM_OFS    0x764U
-#define AH_LMAC_BEACON_CUR_OFS 0xA54U
-#define AH_LMAC_FLAG_A4F_OFS 0xA4FU
-#define AH_LMAC_BCNCTL_OFS   0x3B8U
-#define AH_LMAC_TXSTATE_OFS  0x9B4U
-#define AH_LMAC_ACSEL0_OFS   0x30CU
-#define AH_LMAC_ACSEL1_OFS   0x30DU
-#define AH_LMAC_ACSEL2_OFS   0x30EU
-#define AH_LMAC_ACLAST_OFS   0x9DCU
-#define AH_LMAC_MISC9E2_OFS  0x9E2U
-#define AH_LMAC_MISC9E0_OFS  0x9E0U
-#define AH_LMAC_STA_HEAD_OFS 0x9F8U
-#define AH_LMAC_PM_FLAG_OFS  0xA08U
-#define AH_LMAC_PM_FLAG2_OFS 0xA0AU
-#define AH_LMAC_PM_MODE_OFS  0x0BCU
-#define AH_LMAC_PM_DEADLINE_LO_OFS 0x3CCU
-#define AH_LMAC_PM_DEADLINE_HI_OFS 0x3D0U
-#define AH_LMAC_PM_MARGIN_OFS 0x3C8U
-#define AH_LMAC_DTIM_COUNT_OFS 0x555U
-#define AH_LMAC_DTIM_PERIOD_OFS 0x556U
-#define AH_LMAC_DTIM_TU_OFS  0x658U
-#define AH_LMAC_RF_PD_FLAGS_OFS 0x878U
-#define AH_LMAC_PSPOLL_ACK_OFS 0x994U
-#define AH_LMAC_TXSTART_OFS  0x670U
-
 /* Return codes */
+#ifndef RET_OK
 #define RET_OK      0
+#endif
+#ifndef RET_ERR
 #define RET_ERR     (-1)
+#endif
 
 #ifdef __cplusplus
 }
