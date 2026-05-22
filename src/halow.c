@@ -517,6 +517,11 @@ int32_t halow_tx_batch(const uint8_t *data, uint32_t len, const uint8_t destinat
     if (g_ops == NULL || data == NULL || len == 0 || count == 0)
         return -1;
 
+    /* MCS10 (OFDMA 26-tone) at 1 MHz PHY hangs for payloads > ~400 bytes
+     * due to symbol count exceeding hardware TX duration limit. */
+    if (mcs == 10 && len > 400)
+        return -3;
+
     lmac_custom_cfg.defer_ac_pd = 1;
 
     uint32_t sent = 0;

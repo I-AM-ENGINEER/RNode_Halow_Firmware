@@ -6,45 +6,28 @@
 #include "osal/sleep.h"
 #include <string.h>
 
-#define TEST_BATCH      4
-#define TEST_DURATION_S 3
-#define MCS10_PKT_LEN   450
-
-static void test_mcs10_quick(void)
+static void test_mcs_burst(uint8_t mcs, uint32_t count, uint16_t pkt_len)
 {
-    static uint8_t pkt[MCS10_PKT_LEN];
-    for (uint32_t i = 0; i < MCS10_PKT_LEN; i++) pkt[i] = i;
+    static uint8_t pkt[512];
+    for (uint32_t i = 0; i < pkt_len && i < 512; i++) pkt[i] = i;
 
-    halow_config_set_bandwidth(1);
-
-    log_info("=== MCS10 BW1 TEST len=%u ===", MCS10_PKT_LEN);
-
-    uint32_t n = 0;
-    int64_t t0 = get_time_ms();
-
-    while (1) {
-        int64_t now = get_time_ms();
-        if (now - t0 >= TEST_DURATION_S * 1000) break;
-
-        int32_t ret = halow_tx_batch(pkt, MCS10_PKT_LEN, mac_broadcast, TEST_BATCH, 10);
-        if (ret > 0) {
-            n += (uint32_t)ret;
-            log_info("  MCS10 tx_batch ret=%d total=%u", ret, n);
-        } else {
-            log_warn("  MCS10 tx_batch ret=%d total=%u", ret, n);
-        }
-    }
-
-    os_sleep_ms(500);
-
-    uint32_t pps = n / TEST_DURATION_S;
-    uint32_t kbps = (uint32_t)(((uint64_t)n * MCS10_PKT_LEN * 8) / (TEST_DURATION_S * 1024));
-    log_info("=== MCS10 BW1 DONE: %u pkt, %u pkt/s, %u Kbit/s ===", n, pps, kbps);
+    log_info("=== MCS%u burst: %u pkts len=%u ===", mcs, count, pkt_len);
+    int32_t ret = halow_tx_batch(pkt, pkt_len, mac_broadcast, count, mcs);
+    log_info("  MCS%u ret=%d", mcs, ret);
+    os_sleep_ms(3000);
 }
 
 void test_run_all(void)
 {
     os_sleep_ms(2000);
-    test_mcs10_quick();
-    log_info("MCS10 test complete");
+
+    /* MCS10: verify up to 400B works, 450B rejected */
+    test_mcs_burst(10, 2, 200);
+    test_mcs_burst(10, 2, 400);
+    test_mcs_burst(10, 2, 450);
+
+    /* MCS0: verify still works at 450B */
+    test_mcs_burst(0,  2, 450);
+
+    log_info("MCS10 limit + MCS0 verification complete");
 }

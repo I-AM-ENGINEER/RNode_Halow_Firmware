@@ -277,20 +277,12 @@ void lmac_irq_ac_pd(void)
     if (lmac_update_tx_rate(ac, &mcs, &bw_hint) != 0)
         return;
 
-    /* 10. Generate aggregation list.
-     * For MCS10 the symbol count overflows the 9-bit ctrl_word_lo field.
-     * Compute symbol_len with MCS=0 (fits in 9 bits). Then patch rate_cfg
-     * to store actual MCS=10 — the PHY may use rate_cfg for MCS selection. */
-    uint8_t agg_mcs = (mcs == 10u) ? 0u : mcs;
-    struct sk_buff *first_skb = lmac_gen_tx_agglist(ac, bw_hint, agg_mcs, 0x1ffu);
+    /* 10. Generate aggregation list with real MCS.
+     * Original code also passes actual MCS directly (MCS10 max 685 symbols
+     * vs MCS0-7 max 512). Only truncates if > 9-bit field. */
+    struct sk_buff *first_skb = lmac_gen_tx_agglist(ac, bw_hint, mcs, 0x1ffu);
     if (first_skb == NULL)
         return;
-
-    /* Patch rate_cfg bits [5:2] to the real MCS for MCS10 */
-    if (mcs == 10u) {
-        lmac_tx_ctx_buff *aggr = ac_aggr(ac);
-        aggr->rate_cfg = (aggr->rate_cfg & 0xC3u) | (uint8_t)((mcs & 0xFu) << 2u);
-    }
 
     /* 11. Generate TX vector (uses actual MCS for modulation fields) */
     lmac_gen_txvec(ac, bw_hint, mcs);
@@ -493,6 +485,22 @@ void lmac_irq_tx_end(void)
     LMAC_HW->IRQ_PD = LMAC_IRQ_CLR_TX_END;
     lhw_abort_fsm();
     ah_tdma_abort();
+
+    /* Debug: log TX_STAT + full TXVEC for MCS investigation */
+    {
+        static uint8_t tx_stat_cnt = 0;
+        if (++tx_stat_cnt <= 60) {
+            uint32_t ts = LMAC_HW->TX_STAT;
+            uint32_t tv1 = LMAC_HW->TXVEC1;
+            uint32_t tv3 = LMAC_HW->TXVEC3;
+            uint8_t bw_mcs = (tv1 >> 12) & 0xF;
+            uint8_t cw_mcs = (tv3 >> 7) & 0xF;
+            uint16_t cw_sym = (tv3 >> 12) & 0x1FF;
+            log_info("tx_end[%u]: stat=0x%x ok=%c bw_mcs=%u cw_mcs=%u sym=%u tv1=0x%x tv3=0x%x",
+                     tx_stat_cnt, ts, (ts & 3) ? 'N' : 'Y',
+                     bw_mcs, cw_mcs, cw_sym, tv1, tv3);
+        }
+    }
 
     if ((LMAC_HW->TX_STAT & 3u) == 0u) {
         uint32_t sub_state = ah_lmac.bo_tx_substate;
