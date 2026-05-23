@@ -134,7 +134,7 @@
 
     function readPrivacyForm() {
         return {
-            rotation: document.getElementById('privacy_mac_rotation').value,
+            rotation: parseInt(document.getElementById('privacy_mac_rotation').value, 10) || 0,
             broadcast: document.getElementById('privacy_mac_broadcast').checked
         };
     }
