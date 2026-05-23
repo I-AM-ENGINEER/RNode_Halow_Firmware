@@ -99,6 +99,7 @@ _state = {
         "ip": "192.168.1.100",
         "ver": "0.6.0-dev",
         "mac": "AA:BB:CC:DD:EE:FF",
+        "wmac": "96:A1:3E:99:63:B0",
         "flashs": "128 Mbit",
         "cpu": "12.5%",
         "heap": "210.3 KiB / 256 KiB",
@@ -124,6 +125,11 @@ _state = {
     ],
 
     "reticulum_links": [],
+
+    "privacy": {
+        "rotation": 0,
+        "broadcast": False,
+    },
 
     "ota": {
         "fw_version": None,
@@ -315,7 +321,21 @@ def api_get_nearby_modems_get(_body):
         [mac, rssi, snr, mcs, rxp, rxb, age]
         for mac, rssi, snr, mcs, rxp, rxb, age in _state["nearby_modems"]
     ]
-    return {"d": rows}
+    return {"d": rows, "m": "96:A1:3E:99:63:B0"}
+
+
+def api_privacy_cfg_get(_body):
+    return copy.deepcopy(_state["privacy"])
+
+
+def api_privacy_cfg_post(body):
+    cfg = _state["privacy"]
+    if "rotation" in body:
+        cfg["rotation"] = int(body["rotation"])
+    if "broadcast" in body:
+        cfg["broadcast"] = bool(body["broadcast"])
+    _bump_version()
+    return copy.deepcopy(cfg)
 
 
 def api_get_reticulum_links_get(_body):
@@ -383,6 +403,7 @@ ROUTES = {
     "default_rst":        (None,                        api_default_rst_post),
     "get_nearby_modems":  (api_get_nearby_modems_get,   None),
     "get_reticulum_links":(api_get_reticulum_links_get, None),
+    "privacy_cfg":        (api_privacy_cfg_get,         api_privacy_cfg_post),
     "ota_wipe_lfs":       (None,                        api_ota_wipe_lfs_post),
     "ota_file_begin":     (None,                        api_ota_file_begin_post),
     "ota_file_chunk":     (None,                        api_ota_file_chunk_post),
@@ -447,7 +468,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def _dispatch_api(self, method):
         # path: /api/<endpoint>
-        endpoint = self.path.lstrip("/api/").split("?")[0]
+        path = self.path.split("?")[0]
+        prefix = "/api/"
+        if path.startswith(prefix):
+            endpoint = path[len(prefix):]
+        else:
+            endpoint = path
         if endpoint.startswith("api/"):
             endpoint = endpoint[len("api/"):]
 

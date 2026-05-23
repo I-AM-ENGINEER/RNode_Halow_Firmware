@@ -117,16 +117,6 @@ int64_t get_time_us( void ){
            (int64_t)(sub / 192U);
 }
 
-void get_mac(uint8_t mac[6]){
-    static uint8_t smac[6];
-    static bool intitialized = false;
-    if(!intitialized){
-        sysctrl_efuse_mac_addr_calc(smac);
-        intitialized = true;
-    }
-    memcpy(mac, smac, sizeof(smac));
-}
-
 void bin16_to_hex32( const uint8_t *in, char *out ){
     static const char hex[] = "0123456789abcdef";
 

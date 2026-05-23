@@ -16,7 +16,8 @@
         slip: '',
         log: '',
         tcp: '',
-        telemetry: ''
+        telemetry: '',
+        privacy: ''
     };
     const DASHBOARD_REFRESH_MS = 1000;
     const dashboardState = {
@@ -134,6 +135,13 @@
         };
     }
 
+    function readPrivacyForm() {
+        return {
+            rotation: document.getElementById('privacy_mac_rotation').value,
+            broadcast: document.getElementById('privacy_mac_broadcast').checked
+        };
+    }
+
     function updateSaveButton(group) {
         let current = '';
         let btn = null;
@@ -174,6 +182,10 @@
             btn = document.getElementById('save_telemetry');
             isValid = validateTelemetryForm({ silent: true });
         }
+        if (group === 'privacy') {
+            current = jsonSnapshot(readPrivacyForm());
+            btn = document.getElementById('save_privacy');
+        }
 
         if (!btn) { return; }
 
@@ -188,6 +200,7 @@
         if (group === 'log') { baselines.log = jsonSnapshot(readLogForm()); }
         if (group === 'tcp') { baselines.tcp = jsonSnapshot(readTcpForm()); }
         if (group === 'telemetry') { baselines.telemetry = jsonSnapshot(readTelemetryForm()); }
+        if (group === 'privacy') { baselines.privacy = jsonSnapshot(readPrivacyForm()); }
         updateSaveButton(group);
     }
 
@@ -199,6 +212,7 @@
         snapshotGroup('log');
         snapshotGroup('tcp');
         snapshotGroup('telemetry');
+        snapshotGroup('privacy');
     }
 
     function setupDirtyTracking() {
@@ -217,7 +231,8 @@
                     'telemetry_lat', 'telemetry_lon', 'telemetry_dir_en', 'telemetry_dir',
                     'telemetry_usr', 'telemetry_pwd', 'telemetry_top', 'telemetry_name', 'telemetry_lxmf'
                 ]
-            }
+            },
+            { group: 'privacy', btn: 'save_privacy', ids: ['privacy_mac_rotation', 'privacy_mac_broadcast'] }
         ];
 
         map.forEach(m => {
@@ -506,6 +521,21 @@
         document.getElementById('telemetry_lon').addEventListener('change', () => validateTelemetryForm({ silent: true }));
 
         document.getElementById('stat_reset_btn').addEventListener('click', resetStats);
+
+        document.getElementById('save_privacy').addEventListener('click', savePrivacy);
+
+        document.getElementById('privacy_mac_rotation').addEventListener('change', () => {
+            if (document.getElementById('privacy_mac_rotation').value !== '0') {
+                document.getElementById('privacy_mac_broadcast').checked = false;
+            }
+            updateSaveButton('privacy');
+        });
+        document.getElementById('privacy_mac_broadcast').addEventListener('change', () => {
+            if (document.getElementById('privacy_mac_broadcast').checked) {
+                document.getElementById('privacy_mac_rotation').value = '0';
+            }
+            updateSaveButton('privacy');
+        });
 
         document.getElementById('reticulum_auto').addEventListener('change', handleReticulumAutoChange);
         document.getElementById('reticulum_period').addEventListener('change', handleReticulumPeriodChange);
@@ -933,7 +963,7 @@
             const rows = Array.isArray(data?.d) ? data.d : (Array.isArray(data?.devices) ? data.devices : []);
             const total = Number(data?.c ?? data?.count ?? data?.total ?? rows.length ?? 0);
 
-            setText('nearby_self_mac', formatMac(data?.m ?? data?.mac ?? data?.self_mac ?? document.getElementById('stat_mac')?.textContent));
+            setText('nearby_self_mac', formatMac(data?.m ?? '--'));
             setText('nearby_count', total);
             renderNearbyRows(rows);
         } catch (err) {
@@ -1271,6 +1301,10 @@
             {};
 
         setText('fw_current', devStat.ver);
+
+        const privacy = pick(state?.privacy, state?.api_privacy_cfg, state?.privacy_cfg);
+        setSelect('privacy_mac_rotation', String(privacy.rotation ?? 0));
+        setCheckbox('privacy_mac_broadcast', privacy.broadcast);
     }
 
     function setInput(id, value) {
@@ -1358,6 +1392,16 @@
             await postJson('/api/tcp_server_cfg', payload);
         } catch (err) {
             console.error('saveTcp error', err);
+        }
+        loadAll();
+    }
+
+    async function savePrivacy() {
+        const payload = readPrivacyForm();
+        try {
+            await postJson('/api/privacy_cfg', payload);
+        } catch (err) {
+            console.error('savePrivacy error', err);
         }
         loadAll();
     }

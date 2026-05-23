@@ -52,6 +52,7 @@
 #include "rns/stream_parser.h"
 #include "test.h"
 #include "nearby_detect.h"
+#include "mac_generator.h"
 #include "uart_slip.h"
 #include "net_log.h"
 #include "halow_pkg_handler.h"
@@ -317,6 +318,8 @@ __init int main(void) {
     halow_pkg_handler_init();
     log_debug("skbpool_init");
     skbpool_init(SKB_POOL_ADDR, (uint32)SKB_POOL_SIZE, 90, 0);
+    log_debug("mac_generator_init");
+    mac_generator_init();
     log_debug("halow_init");
     halow_init(WIFI_RX_BUFF_ADDR, WIFI_RX_BUFF_SIZE, TDMA_BUFF_ADDR, TDMA_BUFF_SIZE);
 

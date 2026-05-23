@@ -112,7 +112,7 @@ class TestGetStat(unittest.TestCase):
 
     def test_device_fields(self):
         dev = get("/api/get_stat")["device"]
-        for f in ("uptime", "hostname", "ip", "ver", "mac", "flashs", "cpu", "heap", "chip_temp"):
+        for f in ("uptime", "hostname", "ip", "ver", "mac", "wmac", "flashs", "cpu", "heap", "chip_temp"):
             self.assertIn(f, dev, f"missing device field: {f}")
 
     def test_radio_fields(self):
@@ -313,6 +313,22 @@ class TestOtaStubs(unittest.TestCase):
     def test_fw_end(self):
         r = post("/api/ota_fw_end", {"crc": "12345678"})
         self.assertIsInstance(r, dict)
+
+
+class TestPrivacyCfg(unittest.TestCase):
+    def test_get_fields(self):
+        r = get("/api/privacy_cfg")
+        self.assertIn("rotation", r)
+        self.assertIn("broadcast", r)
+
+    def test_post_updates(self):
+        r = post("/api/privacy_cfg", {"rotation": 60, "broadcast": False})
+        self.assertEqual(r["rotation"], 60)
+        self.assertFalse(r["broadcast"])
+
+    def test_post_broadcast(self):
+        r = post("/api/privacy_cfg", {"broadcast": True})
+        self.assertTrue(r["broadcast"])
 
 
 class TestUnknownEndpoint(unittest.TestCase):

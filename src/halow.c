@@ -19,6 +19,7 @@
 #include "sys_config.h"
 //#include "lmac_ctx.h"
 #include "utils.h"
+#include "mac_generator.h"
 
 #define HALOW_CONFIG_PREFIX             CONFIGDB_ADD_MODULE("halow")
 #define HALOW_CONFIG_ADD_CONFIG(name)   HALOW_CONFIG_PREFIX "." name
@@ -477,7 +478,7 @@ int32_t halow_tx(const uint8_t *data, uint32_t len, const uint8_t destination_ma
 
     hdr.frame_control = (uint16_t)(WLAN_FTYPE_DATA | WLAN_STYPE_DATA);
     mac_bcast(hdr.addr1);
-    get_mac(hdr.addr2);
+    mac_generator_get(hdr.addr2);
     memcpy(hdr.addr3, destination_mac, 6);
 
     g_seq++;
@@ -529,7 +530,7 @@ int32_t halow_tx_batch(const uint8_t *data, uint32_t len, const uint8_t destinat
         memset(&hdr, 0, sizeof(hdr));
         hdr.frame_control = (uint16_t)(WLAN_FTYPE_DATA | WLAN_STYPE_DATA);
         mac_bcast(hdr.addr1);
-        get_mac(hdr.addr2);
+        mac_generator_get(hdr.addr2);
         memcpy(hdr.addr3, destination_mac, 6);
         g_seq++;
         hdr.seq_ctrl = (uint16_t)((g_seq & 0x0fff) << 4);

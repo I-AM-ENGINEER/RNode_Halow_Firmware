@@ -47,7 +47,7 @@
 				<tr><th>Heap</th><td id="stat_heap">--</td></tr>
                 <tr><th>Hostname</th><td id="stat_hostname">--</td></tr>
                 <tr><th>IP address</th><td id="stat_ip">--</td></tr>
-                <tr><th>MAC address</th><td id="stat_mac">--</td></tr>
+                <tr><th>MAC Ethernet</th><td id="stat_mac">--</td></tr>
                 <tr><th>Firmware version</th><td id="stat_fwver">--</td></tr>
                 <tr><th>Flash size</th><td id="stat_flashs">--</td></tr>
                 </tbody>
@@ -378,11 +378,37 @@
 
         <section id="nearby" class="tab-content">
             <div class="panel">
+                <h3>Privacy</h3>
+                <label>
+                    <span>MAC rotation interval</span>
+                    <select id="privacy_mac_rotation">
+                        <option value="0">Disabled</option>
+                        <option value="30">30 minutes</option>
+                        <option value="60">1 hour</option>
+                        <option value="120">2 hours</option>
+                        <option value="360">6 hours</option>
+                        <option value="720">12 hours</option>
+                        <option value="1440">24 hours</option>
+                        <option value="4320">3 days</option>
+                    </select>
+                </label>
+                <label class="toggle-label">
+                    <span>Anonymous source MAC (FF:FF:FF:FF:FF:FF)</span>
+                    <input type="checkbox" id="privacy_mac_broadcast">
+                </label>
+                <p class="note">MAC rotation periodically generates a new random source address, making your device harder to track across sessions. The anonymous source MAC sets all transmitted frames to FF:FF:FF:FF:FF:FF. These two options are mutually exclusive — enabling one will disable the other.</p>
+                <p class="note"><strong>Important:</strong> MAC rotation is not recommended for stationary nodes. Changing your address may break delivery confirmations for established links. The anonymous MAC (FF:FF:FF:FF:FF:FF) disables delivery confirmations entirely, which may reduce link reliability. MAC rotation is primarily useful for portable nodes. Neither random MAC nor rotation makes you invisible on the radio channel — with an SDR and a directional antenna, there is no difference in time to detect the signal source.</p>
+                <div class="panel-actions">
+                    <button type="button" id="save_privacy" disabled>Save</button>
+                </div>
+            </div>
+
+            <div class="panel">
                 <h3>Nearby modems</h3>
 
                 <table class="stats-table nearby-summary-table">
                     <tbody>
-                    <tr><th>Device MAC</th><td id="nearby_self_mac">--</td></tr>
+                    <tr><th>WiFi MAC</th><td id="nearby_self_mac">--</td></tr>
                     <tr><th>Heard devices</th><td id="nearby_count">--</td></tr>
                     </tbody>
                 </table>
@@ -408,7 +434,6 @@
                 </div>
             </div>
         </section>
-
 
         <section id="reticulum" class="tab-content">
             <div class="panel">

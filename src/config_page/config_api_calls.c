@@ -26,6 +26,7 @@
 #include "hal/spi_nor.h"
 #include "ota.h"
 #include "nearby_detect.h"
+#include "mac_generator.h"
 #include "lib/logc/log.h"
 #include "uart_slip.h"
 #include "net_log.h"
@@ -750,6 +751,17 @@ int32_t web_api_dev_stat_get( const cJSON *in, cJSON *out ){
     }
 
     (void)cJSON_AddStringToObject(out, "mac", s);
+
+    {
+        uint8_t wmac[6];
+        get_mac(wmac);
+        snprintf(s, sizeof(s),
+                 "%02X:%02X:%02X:%02X:%02X:%02X",
+                 wmac[0], wmac[1], wmac[2],
+                 wmac[3], wmac[4], wmac[5]);
+    }
+    (void)cJSON_AddStringToObject(out, "wmac", s);
+
     snprintf(s, sizeof(s), "%d Mbit", flash0.size * 8 / 1024 / 1024);
     (void)cJSON_AddStringToObject(out, "flashs", s);
     
@@ -1148,6 +1160,40 @@ int32_t web_api_nearby_modems_get( const cJSON *in, cJSON *out ){
         cJSON_AddItemToArray(arr, row);
     }
 
+    uint8_t wifi_mac[6];
+    char s[18];
+    mac_generator_get(wifi_mac);
+    snprintf(s, sizeof(s), "%02X:%02X:%02X:%02X:%02X:%02X",
+                wifi_mac[0], wifi_mac[1], wifi_mac[2],
+                wifi_mac[3], wifi_mac[4], wifi_mac[5]);
+    cJSON_AddStringToObject(out, "m", s);
+
+    return WEB_API_RC_OK;
+}
+
+int32_t web_api_privacy_cfg_get( const cJSON *in, cJSON *out ){
+    mac_generator_config_t cfg;
+    (void)in;
+    if (out == NULL) return WEB_API_RC_BAD_REQUEST;
+    mac_generator_config_load(&cfg);
+    cJSON_AddNumberToObject(out, "rotation", (double)cfg.rotation_minutes);
+    cJSON_AddBoolToObject(out, "broadcast", cfg.broadcast_mac);
+    return WEB_API_RC_OK;
+}
+
+int32_t web_api_privacy_cfg_post( const cJSON *in, cJSON *out ){
+    mac_generator_config_t cfg;
+    (void)out;
+    if (in == NULL) return WEB_API_RC_BAD_REQUEST;
+    mac_generator_config_load(&cfg);
+    const cJSON *j;
+    j = cJSON_GetObjectItem(in, "rotation");
+    if (j && cJSON_IsNumber(j)) cfg.rotation_minutes = (uint16_t)j->valuedouble;
+    j = cJSON_GetObjectItem(in, "broadcast");
+    if (j && cJSON_IsBool(j)) cfg.broadcast_mac = (uint8_t)cJSON_IsTrue(j);
+    mac_generator_config_save(&cfg);
+    mac_generator_config_apply(&cfg);
+    web_api_notify_change();
     return WEB_API_RC_OK;
 }
 
