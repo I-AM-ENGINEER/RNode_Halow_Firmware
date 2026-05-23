@@ -8,7 +8,7 @@
 </head>
 <body>
     <nav class="tabs">
-        <button type="button" data-tab="dashboard" class="active">Dashboard</button>
+        <button type="button" data-tab="dashboard">Dashboard</button>
         <button type="button" data-tab="settings">Device Settings</button>
         <button type="button" data-tab="telemetry">Telemetry</button>
         <button type="button" data-tab="nearby">Nearby modems</button>
@@ -17,8 +17,9 @@
     </nav>
 
     <main>
-        <section id="dashboard" class="tab-content active">
-            <h2>Radio Statistics</h2>
+        <section id="dashboard" class="tab-content">
+            <div class="panel">
+                <h3>Radio Statistics</h3>
             <table class="stats-table">
                 <tbody>
                 <tr><th>RX bytes</th><td id="stat_rx_bytes">--</td></tr>
@@ -37,8 +38,10 @@
             <div class="panel-actions">
                 <button type="button" id="stat_reset_btn">Reset statistics</button>
             </div>
+            </div>
 
-            <h2>Device Statistics</h2>
+            <div class="panel">
+                <h3>Device Statistics</h3>
             <table class="stats-table">
                 <tbody>
                 <tr><th>Chip temperature</th><td id="stat_chip_temp">--</td></tr>
@@ -52,6 +55,7 @@
                 <tr><th>Flash size</th><td id="stat_flashs">--</td></tr>
                 </tbody>
             </table>
+            </div>
         </section>
 
         <section id="settings" class="tab-content">
@@ -428,7 +432,7 @@
                             </tr>
                         </thead>
                         <tbody id="nearby_table_body">
-                            <tr><td colspan="8">--</td></tr>
+                            <tr><td colspan="13">--</td></tr>
                         </tbody>
                     </table>
                 </div>
@@ -438,20 +442,6 @@
         <section id="reticulum" class="tab-content">
             <div class="panel">
                 <h3>Reticulum</h3>
-
-                <div class="nearby-toolbar">
-                    <label class="toggle-label nearby-auto-label">
-                        <span>Auto refresh</span>
-                        <input type="checkbox" id="reticulum_auto" checked>
-                    </label>
-                    <label class="nearby-period-label">
-                        <span>Period (s)</span>
-                        <input type="number" id="reticulum_period" min="1" step="1" value="5">
-                    </label>
-                    <div class="panel-actions nearby-actions">
-                        <button type="button" id="reticulum_refresh" class="secondary">Refresh now</button>
-                    </div>
-                </div>
 
                 <table class="stats-table nearby-summary-table">
                     <tbody>
@@ -467,14 +457,14 @@
                                 <th>Remote MAC</th>
                                 <th>Destination</th>
                                 <th>State</th>
-                                <th>RX bytes</th>
-                                <th>TX bytes</th>
-                                <th>RX packets</th>
-                                <th>TX packets</th>
+                                <th>RX Data</th>
+                                <th>TX Data</th>
+                                <th>RX Packets</th>
+                                <th>TX Packets</th>
                                 <th>Last RX</th>
                                 <th>Last TX</th>
-                                <th>RX bit/s</th>
-                                <th>TX bit/s</th>
+                                <th>RX Rate</th>
+                                <th>TX Rate</th>
                                 <th>MTU</th>
                             </tr>
                         </thead>
@@ -488,13 +478,8 @@
 
         <section id="firmware" class="tab-content">
 
-            <div class="panel warning-panel">
-                <h4 class="warning-title">⚠ Warning</h4>
-                <p class="warning-text">Do not reload or close this page, or power off the device during OTA update. Interrupting the process may damage the device.</p>
-            </div>
-
             <div class="panel">
-                <h3>Firmware Update</h3>
+                <h3>Check for Update</h3>
 
                 <label>
                     <span>Current firmware version</span>
@@ -525,12 +510,18 @@
                     <div id="fw_check_status" class="status-message" aria-live="polite"></div>
                 </div>
 
-                <hr style="margin: 1rem 0; border: none; border-top: 1px solid #ddd;">
+            </div>
 
-                <h3>Manual OTA Update</h3>
+            <div class="panel">
+                <h3>Firmware Update</h3>
+
+                <div class="panel warning-panel" style="margin-bottom: 0.75rem;">
+                    <h4 class="warning-title" style="margin: 0 0 0.3rem;">⚠ Warning</h4>
+                    <p class="warning-text" style="margin: 0;">Do not reload or close this page, or power off the device during firmware flash. Interrupting the process may damage the device.</p>
+                </div>
 
                 <label>
-                    <span>Update archive</span>
+                    <span>Firmware archive</span>
                     <input id="webota_file" type="file" accept=".tar,application/x-tar">
                 </label>
 
@@ -540,13 +531,12 @@
                 <div id="webota_console" class="fw-console"></div>
 
                 <div class="panel-actions panel-actions-wrap">
-                    <button type="button" id="webota_flash" disabled>Flash OTA Update</button>
+                    <button type="button" id="webota_flash" disabled>Flash Firmware</button>
                     <button type="button" id="fw_reboot" class="secondary">Reboot device</button>
                     <button type="button" id="fw_factory_reset" class="danger">Factory reset</button>
                 </div>
                 <div id="webota_status" class="status-message" aria-live="polite"></div>
             </div>
-
 
         </section>
     </main>

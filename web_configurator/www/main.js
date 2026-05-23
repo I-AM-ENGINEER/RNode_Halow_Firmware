@@ -32,8 +32,6 @@
         speedCache: new Map()
     };
     const reticulumState = {
-        auto: true,
-        periodMs: 5000,
         timer: null,
         loading: false,
         active: false,
@@ -46,14 +44,13 @@
         betaEnabled: false
     };
 
+    setupTabs();
+
     document.addEventListener('DOMContentLoaded', () => {
-        setupTabs();
         setupHandlers();
         setupDirtyTracking();
         fwUpdateState.betaEnabled = document.getElementById('fw_beta_toggle').checked;
         loadAll();
-        updateReticulumUi();
-        handleTabActivated('dashboard');
         startLiveAgeTicker();
     });
 
@@ -250,23 +247,26 @@
         });
     }
 
-    function setupTabs() {
+    function switchTab(tabName) {
         const buttons = document.querySelectorAll('.tabs button');
-        buttons.forEach(btn => {
+        buttons.forEach(b => b.classList.toggle('active', b.dataset.tab === tabName));
+        document.querySelectorAll('.tab-content').forEach(sec => sec.classList.remove('active'));
+        const sec = document.getElementById(tabName);
+        if (sec) { sec.classList.add('active'); }
+        history.replaceState(null, '', '#' + tabName);
+        handleTabActivated(tabName);
+    }
+
+    function setupTabs() {
+        document.querySelectorAll('.tabs button').forEach(btn => {
             btn.addEventListener('click', () => {
                 if (btn.classList.contains('active')) { return; }
-
-                const current = document.querySelector('.tabs button.active');
-                if (current) { current.classList.remove('active'); }
-                btn.classList.add('active');
-
-                const tabName = btn.dataset.tab;
-                document.querySelectorAll('.tab-content').forEach(sec => sec.classList.remove('active'));
-                const activeSec = document.getElementById(tabName);
-                if (activeSec) { activeSec.classList.add('active'); }
-                handleTabActivated(tabName);
+                switchTab(btn.dataset.tab);
             });
         });
+
+        const hash = location.hash.slice(1);
+        switchTab((hash && document.getElementById(hash)) ? hash : 'dashboard');
     }
 
     function validateHalowFields() {
@@ -536,10 +536,6 @@
             }
             updateSaveButton('privacy');
         });
-
-        document.getElementById('reticulum_auto').addEventListener('change', handleReticulumAutoChange);
-        document.getElementById('reticulum_period').addEventListener('change', handleReticulumPeriodChange);
-        document.getElementById('reticulum_refresh').addEventListener('click', () => refreshReticulum(true));
 
         document.getElementById('webota_file').addEventListener('change', updateWebOtaDisabled);
         document.getElementById('webota_flash').addEventListener('click', fwWebOtaFlash);
@@ -983,50 +979,10 @@
 
     function scheduleReticulumRefresh() {
         stopReticulumTimer();
-        if (!reticulumState.active || !reticulumState.auto) {
-            return;
-        }
+        if (!reticulumState.active) return;
         reticulumState.timer = setTimeout(() => {
             refreshReticulum(false);
-        }, reticulumState.periodMs);
-    }
-
-    function updateReticulumUi() {
-        const autoEl = document.getElementById('reticulum_auto');
-        const periodEl = document.getElementById('reticulum_period');
-
-        if (autoEl) {
-            autoEl.checked = reticulumState.auto;
-        }
-
-        if (periodEl) {
-            periodEl.value = String(Math.max(1, Math.round(reticulumState.periodMs / 1000)));
-            periodEl.disabled = !reticulumState.auto;
-        }
-    }
-
-    function normalizeReticulumPeriodMs(raw) {
-        const sec = parseInt(raw, 10);
-        if (!Number.isFinite(sec) || sec < 1) {
-            return 5000;
-        }
-        return sec * 1000;
-    }
-
-    function handleReticulumAutoChange() {
-        reticulumState.auto = document.getElementById('reticulum_auto').checked;
-        updateReticulumUi();
-        if (reticulumState.auto) {
-            scheduleReticulumRefresh();
-        } else {
-            stopReticulumTimer();
-        }
-    }
-
-    function handleReticulumPeriodChange() {
-        reticulumState.periodMs = normalizeReticulumPeriodMs(document.getElementById('reticulum_period').value);
-        updateReticulumUi();
-        scheduleReticulumRefresh();
+        }, 1000);
     }
 
 
@@ -1128,50 +1084,32 @@
 
         rows.forEach(srcRow => {
             const row = parseReticulumRow(srcRow);
-            const idKey = String(row.id ?? row.remoteMac ?? row.destination ?? '');
+            const idKey = String(row.id ?? row.remoteMac ?? '');
             const rxRate = calcReticulumBitrate('rx:' + idKey, row.rxBytes);
             const txRate = calcReticulumBitrate('tx:' + idKey, row.txBytes);
             const tr = document.createElement('tr');
+            const fmt = v => (v !== undefined && v !== null && v !== '') ? v : '--';
+            const lastRx = Number(row.lastRx);
+            const lastTx = Number(row.lastTx);
             const values = [
-                row.id,
-                row.remoteMac,
-                row.destination,
-                row.state,
-                row.rxBytes,
-                row.txBytes,
-                row.rxPackets,
-                row.txPackets
+                fmt(row.id),
+                fmt(row.remoteMac),
+                fmt(row.destination),
+                fmt(row.state),
+                formatBytes(row.rxBytes),
+                formatBytes(row.txBytes),
+                fmt(row.rxPackets),
+                fmt(row.txPackets),
+                (Number.isFinite(lastRx) && lastRx >= 0) ? formatDurationCompact(lastRx) : '--',
+                (Number.isFinite(lastTx) && lastTx >= 0) ? formatDurationCompact(lastTx) : '--',
+                rxRate !== '--' ? rxRate + ' kbit/s' : '0 kbit/s',
+                txRate !== '--' ? txRate + ' kbit/s' : '0 kbit/s',
+                fmt(row.mtu)
             ];
 
             values.forEach(value => {
                 const td = document.createElement('td');
-                td.textContent = (value !== undefined && value !== null && value !== '') ? value : '--';
-                tr.appendChild(td);
-            });
-
-            const lastRxTd = document.createElement('td');
-            const lastRx = Number(row.lastRx);
-            if (Number.isFinite(lastRx) && lastRx >= 0) {
-                lastRxTd.dataset.ageSeconds = String(Math.floor(lastRx));
-                lastRxTd.textContent = formatDurationCompact(lastRx);
-            } else {
-                lastRxTd.textContent = '--';
-            }
-            tr.appendChild(lastRxTd);
-
-            const lastTxTd = document.createElement('td');
-            const lastTx = Number(row.lastTx);
-            if (Number.isFinite(lastTx) && lastTx >= 0) {
-                lastTxTd.dataset.ageSeconds = String(Math.floor(lastTx));
-                lastTxTd.textContent = formatDurationCompact(lastTx);
-            } else {
-                lastTxTd.textContent = '--';
-            }
-            tr.appendChild(lastTxTd);
-
-            [rxRate, txRate, row.mtu].forEach(value => {
-                const td = document.createElement('td');
-                td.textContent = (value !== undefined && value !== null && value !== '') ? value : '--';
+                td.textContent = value;
                 tr.appendChild(td);
             });
 
@@ -1190,7 +1128,6 @@
 
         stopReticulumTimer();
         reticulumState.loading = true;
-        updateReticulumUi();
 
         try {
             const res = await fetch('/api/get_reticulum_links', { cache: 'no-store' });
@@ -1208,7 +1145,6 @@
             // ignore reticulum fetch errors
         } finally {
             reticulumState.loading = false;
-            updateReticulumUi();
             scheduleReticulumRefresh();
         }
     }
