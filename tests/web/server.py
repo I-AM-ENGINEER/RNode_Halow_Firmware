@@ -9,7 +9,9 @@ import argparse
 import copy
 import json
 import os
+import random
 import sys
+import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -121,10 +123,22 @@ _state = {
 
     "nearby_modems": [
         ["AABBCCDDEEFF", -72, 23, 5, 1234, 4532, 3],
-        ["112233445566", -85, 10, 3, 420,  1265535, 11],
+        ["112233445566", -85, 10, 3, 420, 1265535, 11],
+        ["665544332211", -55, 30, 7, 8901, 2345678, 1],
+        ["FFEEBBAA9988", -90, 5, 1, 50, 12345, 45],
+        ["CAFEBABE0001", -63, 18, 4, 5678, 890123, 5],
+        ["DEADBEEF0246", -78, 14, 3, 2345, 567890, 8],
+        ["010203040506", -68, 22, 6, 3456, 1234567, 2],
+        ["ABCDEF012345", -95, 3, 0, 10, 500, 120],
     ],
 
-    "reticulum_links": [],
+    "reticulum_links": [
+        ["a4b2c1d3e5", "AABBCCDDEEFF", "broadcast", "active", 145234, 89234, 1203, 876, 12, 5, 45, 38, 500],
+        ["f7e6d5c4b3", "665544332211", "broadcast", "active", 2345678, 1567890, 4521, 2345, 2, 8, 120, 95, 500],
+        ["0a1b2c3d4e", "CAFEBABE0001", "abc123", "connected", 56780, 23456, 456, 234, 30, 15, 22, 18, 500],
+        ["5f6e7d8c9b", "DEADBEEF0246", "test_dest", "pending", 0, 0, 0, 0, 60, 60, 0, 0, 500],
+        ["112233445566", "010203040506", "", "disconnected", 890123, 567890, 890, 567, 120, 45, 55, 42, 500],
+    ],
 
     "privacy": {
         "rotation": 0,
@@ -322,6 +336,35 @@ def api_get_nearby_modems_get(_body):
         for mac, rssi, snr, mcs, rxp, rxb, age in _state["nearby_modems"]
     ]
     return {"d": rows, "m": "96:A1:3E:99:63:B0"}
+
+
+def _simulate_updates():
+    import time
+    while True:
+        time.sleep(2)
+        # Nearby: grow packets/bytes, fluctuate RSSI/SNR, age resets for active devices
+        for row in _state["nearby_modems"]:
+            row[1] += random.randint(-3, 3)          # rssi
+            row[1] = max(-100, min(-30, row[1]))
+            row[2] += random.randint(-2, 2)          # snr
+            row[2] = max(0, min(35, row[2]))
+            row[4] += random.randint(0, 20)          # packets
+            row[5] += random.randint(0, 500)         # bytes
+            row[6] += random.randint(0, 1)           # age
+
+        # Reticulum: grow traffic, fluctuate rates
+        for row in _state["reticulum_links"]:
+            row[4] += random.randint(0, 2000)        # rxBytes
+            row[5] += random.randint(0, 1500)        # txBytes
+            row[6] += random.randint(0, 5)           # rxPackets
+            row[7] += random.randint(0, 3)           # txPackets
+            row[8] = random.randint(0, 10)           # lastRx
+            row[9] = random.randint(0, 15)           # lastTx
+
+
+def _start_simulator():
+    t = threading.Thread(target=_simulate_updates, daemon=True)
+    t.start()
 
 
 def api_privacy_cfg_get(_body):
@@ -535,6 +578,7 @@ def main():
         sys.exit(1)
 
     server = HTTPServer((args.host, args.port), Handler)
+    _start_simulator()
     print(f"Mock server running at http://{args.host}:{args.port}/")
     print(f"Serving static files from: {WWW_DIR}")
     print("Press Ctrl+C to stop.\n")

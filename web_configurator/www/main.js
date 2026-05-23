@@ -29,13 +29,19 @@
         timer: null,
         loading: false,
         active: false,
-        speedCache: new Map()
+        speedCache: new Map(),
+        rows: [],
+        sortKey: null,
+        sortDesc: false
     };
     const reticulumState = {
         timer: null,
         loading: false,
         active: false,
-        speedCache: new Map()
+        speedCache: new Map(),
+        rows: [],
+        sortKey: null,
+        sortDesc: false
     };
     const fwUpdateState = {
         releases: [],
@@ -472,6 +478,9 @@
     }
 
     function setupHandlers() {
+        setupTableSort('.nearby-table', nearbyState, parseNearbyRow, renderNearby);
+        setupTableSort('.reticulum-table', reticulumState, parseReticulumRow, renderReticulum);
+
         const powerField = document.getElementById('halow_power_dbm');
         const freqField = document.getElementById('halow_central_freq');
 
@@ -889,6 +898,90 @@
         return formatNearbyBitrate((deltaBytes * 8000) / deltaMs);
     }
 
+    function peekBitrate(cache, key, bytes) {
+        const prev = cache.get(key);
+        if (!prev) return -1;
+        const numBytes = Number(bytes);
+        if (!Number.isFinite(numBytes) || numBytes < 0) return -1;
+        const deltaBytes = numBytes - prev.bytes;
+        const deltaMs = Date.now() - prev.tsMs;
+        if (deltaBytes < 0 || deltaMs <= 0) return -1;
+        return Math.round((deltaBytes * 8000) / deltaMs);
+    }
+
+    function sortRows(rows, parseFn, key, desc, rateCache) {
+        if (!key) return rows;
+        const sorted = rows.slice();
+        const numericKeys = new Set(['rssi', 'snr', 'mcs', 'packets', 'bytes', 'lastSeen',
+            'rxBytes', 'txBytes', 'rxPackets', 'txPackets', 'lastRx', 'lastTx', 'mtu']);
+        sorted.sort((a, b) => {
+            const pa = parseFn(a);
+            const pb = parseFn(b);
+            let va, vb;
+
+            if (key === 'rate') {
+                va = peekBitrate(rateCache, pa.mac, pa.bytes);
+                vb = peekBitrate(rateCache, pb.mac, pb.bytes);
+            } else if (key === 'rxRate' || key === 'txRate') {
+                const ka = String(pa.id ?? pa.remoteMac ?? '');
+                const kb = String(pb.id ?? pb.remoteMac ?? '');
+                const rKeyA = (key === 'rxRate' ? 'rx:' : 'tx:') + ka;
+                const rKeyB = (key === 'rxRate' ? 'rx:' : 'tx:') + kb;
+                va = peekBitrate(rateCache, rKeyA, key === 'rxRate' ? pa.rxBytes : pa.txBytes);
+                vb = peekBitrate(rateCache, rKeyB, key === 'rxRate' ? pb.rxBytes : pb.txBytes);
+            } else if (numericKeys.has(key)) {
+                va = Number(pa[key]) || 0;
+                vb = Number(pb[key]) || 0;
+            } else {
+                va = String(pa[key] ?? '');
+                vb = String(pb[key] ?? '');
+                return desc ? vb.localeCompare(va) : va.localeCompare(vb);
+            }
+
+            return desc ? vb - va : va - vb;
+        });
+        return sorted;
+    }
+
+    function applyHeaderSort(tableSel, sortKey, sortDesc) {
+        const ths = document.querySelectorAll(tableSel + ' thead th');
+        ths.forEach(th => {
+            th.classList.remove('sort-asc', 'sort-desc');
+            if (th.dataset.key === sortKey) {
+                th.classList.add(sortDesc ? 'sort-desc' : 'sort-asc');
+            }
+        });
+    }
+
+    function setupTableSort(tableSel, stateObj, parseFn, renderFn) {
+        const ths = document.querySelectorAll(tableSel + ' thead th');
+        ths.forEach(th => {
+            th.addEventListener('click', () => {
+                const key = th.dataset.key;
+                if (!key) return;
+                if (stateObj.sortKey === key) {
+                    stateObj.sortDesc = !stateObj.sortDesc;
+                } else {
+                    stateObj.sortKey = key;
+                    stateObj.sortDesc = false;
+                }
+                renderFn();
+            });
+        });
+    }
+
+    function renderNearby() {
+        applyHeaderSort('.nearby-table', nearbyState.sortKey, nearbyState.sortDesc);
+        const sorted = sortRows(nearbyState.rows, parseNearbyRow, nearbyState.sortKey, nearbyState.sortDesc, nearbyState.speedCache);
+        renderNearbyRows(sorted);
+    }
+
+    function renderReticulum() {
+        applyHeaderSort('.reticulum-table', reticulumState.sortKey, reticulumState.sortDesc);
+        const sorted = sortRows(reticulumState.rows, parseReticulumRow, reticulumState.sortKey, reticulumState.sortDesc, reticulumState.speedCache);
+        renderReticulumRows(sorted);
+    }
+
     function renderNearbyRows(rows) {
         const body = document.getElementById('nearby_table_body');
         if (!body) { return; }
@@ -961,7 +1054,8 @@
 
             setText('nearby_self_mac', formatMac(data?.m ?? '--'));
             setText('nearby_count', total);
-            renderNearbyRows(rows);
+            nearbyState.rows = rows;
+            renderNearby();
         } catch (err) {
             // ignore nearby fetch errors
         } finally {
@@ -1140,7 +1234,8 @@
             const total = Number(data?.c ?? data?.count ?? data?.total ?? rows.length ?? 0);
 
             setText('reticulum_count', total);
-            renderReticulumRows(rows);
+            reticulumState.rows = rows;
+            renderReticulum();
         } catch (err) {
             // ignore reticulum fetch errors
         } finally {

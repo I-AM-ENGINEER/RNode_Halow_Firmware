@@ -420,6 +420,22 @@ fieldset:disabled textarea {
     width: auto;
     border-bottom: 1px solid #ddd;
     color: #333;
+    cursor: pointer;
+    user-select: none;
+}
+
+.nearby-table thead th:hover {
+    background: #e5e7eb;
+}
+
+.nearby-table thead th.sort-asc::after {
+    content: " ▲";
+    font-size: 0.7em;
+}
+
+.nearby-table thead th.sort-desc::after {
+    content: " ▼";
+    font-size: 0.7em;
 }
 
 .nearby-table thead th:first-child,
@@ -457,6 +473,22 @@ fieldset:disabled textarea {
     width: auto;
     border-bottom: 1px solid #ddd;
     color: #333;
+    cursor: pointer;
+    user-select: none;
+}
+
+.reticulum-table thead th:hover {
+    background: #e5e7eb;
+}
+
+.reticulum-table thead th.sort-asc::after {
+    content: " ▲";
+    font-size: 0.7em;
+}
+
+.reticulum-table thead th.sort-desc::after {
+    content: " ▼";
+    font-size: 0.7em;
 }
 
 .reticulum-table thead th:first-child,
