@@ -291,18 +291,6 @@ void lmac_irq_ac_pd(void)
     /* 12. Update frame TX vector pointer */
     lmac_update_frm_tx_vec();
 
-    /* Debug: one-line MCS10 verification (only first call per burst) */
-    {
-        static uint8_t dbg_cnt = 0;
-        if (++dbg_cnt <= 3) {
-            lmac_tx_ctx_buff *dbg_aggr = ac_aggr(ac);
-            log_info("txvec: mcs=%u sym_len=%u sym_cw=%u rate=0x%04x",
-                     mcs, dbg_aggr->txvec.tx_symbol_len,
-                     (dbg_aggr->txvec.ctrl_word_lo >> 12) & 0x1FF,
-                     *(uint16_t *)&dbg_aggr->rate_cfg);
-        }
-    }
-
     /* 13. Adjust END_TO_LIMIT for MCS10 (OFDMA 26-tone needs longer TX window) */
     if (mcs == 10u)
         lmac_cfg_end_to_limit(65000u);
