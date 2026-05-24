@@ -341,17 +341,35 @@ struct sk_buff *lmac_gen_tx_agglist(uint32_t ac, uint32_t rate,
 
     aggr = &ah_lmac_tx.pTx_ac_aggr_data[ac];
 
+    /* rate_cfg: bits [1:0] = bw_hint, bits [5:2] = mcs */
+    aggr->rate_cfg = (uint8_t)(rate & 3u);
+    if ((bw <= 7u) || (bw == 10u))
+        aggr->rate_cfg = (aggr->rate_cfg & 0xc3u) | (uint8_t)((bw & 0xfu) << 2u);
+
+    /* If aggr already has a queued skb from a previous failed CCA attempt
+     * (kept by lmac_reorder_tx_agglist), re-use it.  The memset below
+     * would zero skb_list[0] and leak the skb — after ~90 abort cycles
+     * the pool is exhausted and the device freezes. */
+    if (aggr->queued_count > 0 && aggr->skb_list[0] != NULL) {
+        skb = aggr->skb_list[0];
+        txd = (lmac_txd_t *)skb->head;
+        if (txd != NULL) {
+            next_bytes = (uint32_t)txd->aligned_len;
+            next_sym = calc_symbol_len(next_bytes + 4u, rate, bw);
+            aggr->total_len_bytes = next_bytes;
+            aggr->symbol_len = (uint16_t)next_sym;
+            aggr->selected_count = 1u;
+            aggr->tx_flags &= ~0x04u;
+            return skb;
+        }
+    }
+
     memset(aggr->skb_list, 0, sizeof(aggr->skb_list));
     aggr->total_len_bytes = 0u;
     aggr->symbol_len      = 0u;
     aggr->selected_count   = 0u;
     aggr->first_seq        = -1;
     aggr->last_seq         = -1;
-
-    /* rate_cfg: bits [1:0] = bw_hint, bits [5:2] = mcs */
-    aggr->rate_cfg = (uint8_t)(rate & 3u);
-    if ((bw <= 7u) || (bw == 10u))
-        aggr->rate_cfg = (aggr->rate_cfg & 0xc3u) | (uint8_t)((bw & 0xfu) << 2u);
 
     skb = skb_list_dequeue(&ah_lmac_tx.pTx_ac_queues[ac]);
     if (skb == NULL)
@@ -394,6 +412,21 @@ int32 lmac_attempt_tx(uint32_t ac)
     if (ah_lmac_tx.pTx_ac_aggr_data[ac].queued_count == 0u)
         return -1;
 
+    /* FSM idle check — exact match with original lmac_attempt_tx_orig.
+     * Bits [9:8] of FSM_STAT must be zero (FSM sub-state idle).
+     * Bits [25:24] of FSM_STAT must be 0b01 (FSM in RX idle mode).
+     * Without this check, CCA is started on a non-idle FSM after
+     * interference aborts the previous TX, causing a hardware freeze. */
+    {
+        uint32_t fsm = LMAC_HW->FSM_STAT;
+        if (((fsm >> 8) & 3u) != 0u || ((fsm >> 24) & 3u) != 1u)
+            return -1;
+    }
+
+    /* NAV timer check — original also gates on HF_TIMER3/4 inside attempt_tx */
+    if (LMAC_HW->HF_TIMER3 != 0 || LMAC_HW->HF_TIMER4 != 0)
+        return -1;
+
     cw_min = ah_lmac.ce_ctx.cw_min[ac];
     cw_max = ah_lmac.ce_ctx.cw_max[ac];
 
@@ -401,7 +434,14 @@ int32 lmac_attempt_tx(uint32_t ac)
     if (lmac_custom_cfg.ignore_cca) {
         backoff = 0u;
     } else if (lmac_custom_cfg.bypass_backoff) {
-        backoff = 0u;
+        /*
+         * CW=1 is fine for latency, but backoff=0 with a busy channel
+         * makes the hardware CCA loop forever (BO IRQ never fires,
+         * END_TO_LIMIT timer doesn't tick during CCA wait).
+         * Use a small non-zero backoff so the FSM can complete
+         * its slot count and fire BO IRQ even when CCA stays busy.
+         */
+        backoff = 1u;
     } else if (cca_dur == 0u) {
         txd = (lmac_txd_t *)ah_lmac_tx.pTx_ac_aggr_data[ac].skb_list[0]->head;
         uint32_t retry_exp = (uint32_t)txd->retry_count + (uint32_t)txd->_reserved_29;
@@ -564,8 +604,6 @@ void lmac_irq_tx_end(void)
         LMAC_HW->AC_PD = 0u;
         LMAC_HW->AC_PD = 0xfu;
     }
-
-    /* Re-kick AC_PD if AC queue has more packets — keeps the pipeline full. */
 }
 
 /* Mark the first frame in the current AC aggregate as done.
@@ -1637,8 +1675,8 @@ int32 lmac_update_ndp_ack_tx_vec(uint32 arg0, uint32 arg1)
 
 int32 lmac_update_ndp_ba_tx_vec(uint32 arg0, uint32 arg1)
 {
-    *(uint32_t *)&ah_lmac_tx.pTx_vector_cache[42] = arg0;
-    *(uint32_t *)&ah_lmac_tx.pTx_vector_cache[46] = arg1;
+    memcpy(&ah_lmac_tx.pTx_vector_cache[42], &arg0, 4);
+    memcpy(&ah_lmac_tx.pTx_vector_cache[46], &arg1, 4);
     if (!(ah_lmac.beacon_s1g_format_flags & 1)) {
         ah_lmac_tx.pTx_vector_cache[46] = (ah_lmac_tx.pTx_vector_cache[46] & 0xdf) | 0x20;
     } else {
@@ -1693,5 +1731,13 @@ int32_t lmac_auto_channel_select(void) { return 0; }
 uint32_t lmac_vht_info_get(uint32_t info) { (void)info; return 0; }
 int32_t lmac_ah_test_tx(struct lmac_ops *ops, struct sk_buff *skb)
 { (void)ops; (void)skb; return 0; }
-void lmac_irq_tx_tmo(void) { lhw_abort_fsm(); }
+void lmac_irq_tx_tmo(void)
+{
+    //hgprintf("\n\nTIMEOUT!!!\n\n");
+    lmac_cancle_tx_tmo();
+    ah_lmac.bo_frame_type = 0u;
+    ah_lmac.bo_tx_substate = 0u;
+    lhw_abort_fsm();
+    lhw_enable_irq_ac();
+}
 
