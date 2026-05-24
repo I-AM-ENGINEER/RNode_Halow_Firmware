@@ -153,13 +153,6 @@ int32 lmac_fast_tx(struct sk_buff *skb, uint8_t mcs)
 
     txd->aligned_len = lmac_tx_align_len_min(skb->len);
 
-    if (((ah_lmac.beacon_s1g_format_flags & 1) == 0) &&
-        (txd->aligned_len > 0x067B)) {
-        log_warn("fast_tx: skb=%p too large aligned=%u", skb, txd->aligned_len);
-        kfree_skb(skb);
-        return -4;
-    }
-
     lmac_partial_aid_update(txd);
 
     *(uint16_t *)skb->data &= ~0x1000;
@@ -356,14 +349,6 @@ static void lmac_tx_task(void *_arg) {
             lmac_tx_pv0_data(skb);
 
             txd->aligned_len = lmac_tx_align_len_min(skb->len);
-
-            if (((ah_lmac.beacon_s1g_format_flags & 1) == 0) &&
-                (txd->aligned_len > 0x067B)) {
-                log_warn("tx_task: drop skb=%p frame too large aligned_len=%u",
-                         skb, txd->aligned_len);
-                lmac_tx_drop_min(skb);
-                continue;
-            }
 
             lmac_partial_aid_update(txd);
 
