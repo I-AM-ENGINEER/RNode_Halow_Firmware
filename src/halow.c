@@ -567,3 +567,7 @@ int32_t halow_tx_batch(const uint8_t *data, uint32_t len, const uint8_t destinat
     halow_lbt_set_tx_as_active();
     return (int32_t)sent;
 }
+
+void halow_set_cca_enabled(uint8_t enabled) {
+    lmac_custom_cfg.ignore_cca = (enabled == 0) ? 1u : 0u;
+}

@@ -656,6 +656,8 @@ int32_t web_api_lbt_cfg_get( const cJSON *in, cJSON *out ){
     (void)cJSON_AddNumberToObject(out, "bmin",  (double)cfg.backoff_random_min_us);
     (void)cJSON_AddNumberToObject(out, "bmax",  (double)cfg.backoff_random_max_us);
 
+    (void)cJSON_AddBoolToObject(out,   "cca_en",(cfg.cca_enabled != 0) ? 1 : 0);
+
     (void)cJSON_AddBoolToObject(out,   "uen",   (cfg.util_enabled != 0) ? 1 : 0);
     (void)cJSON_AddNumberToObject(out, "umax",  (double)cfg.util_max_percent);
     (void)cJSON_AddNumberToObject(out, "uwin",  (double)cfg.util_refill_window_ms);
@@ -690,6 +692,8 @@ int32_t web_api_lbt_cfg_post( const cJSON *in, cJSON *out ){
 
     if (json_get_int(in, "bmin", &v))  { if (v >= 0 && v <= 65535) cfg.backoff_random_min_us       = (uint16_t)v; }
     if (json_get_int(in, "bmax", &v))  { if (v >= 0 && v <= 65535) cfg.backoff_random_max_us       = (uint16_t)v; }
+
+    if (json_get_bool(in, "cca_en", &b))  { cfg.cca_enabled = b ? 1 : 0; }
 
     if (json_get_bool(in, "uen", &b))  { cfg.util_enabled = b ? 1 : 0; }
     if (json_get_int(in, "umax", &v))  { if (v >= 0 && v <= 100)   cfg.util_max_percent           = (uint8_t)v;  }

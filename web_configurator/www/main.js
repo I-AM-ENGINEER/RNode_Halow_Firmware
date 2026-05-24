@@ -75,8 +75,7 @@
 
     function readLbtForm() {
         return {
-            uen: document.getElementById('lbt_uen').checked,
-            umax: parseInt(document.getElementById('lbt_umax').value, 10)
+            cca_en: document.getElementById('lbt_cca_en').checked
         };
     }
 
@@ -221,7 +220,7 @@
     function setupDirtyTracking() {
         const map = [
             { group: 'halow', btn: 'save_halow', ids: ['halow_power_dbm', 'halow_central_freq', 'halow_mcs_index', 'halow_bandwidth'] },
-            { group: 'lbt', btn: 'save_lbt', ids: ['lbt_uen', 'lbt_umax'] },
+            { group: 'lbt', btn: 'save_lbt', ids: ['lbt_cca_en'] },
             { group: 'net', btn: 'save_net', ids: ['net_dhcp', 'net_ip_address', 'net_gw_address', 'net_netmask'] },
             { group: 'slip', btn: 'save_slip', ids: ['slip_enable', 'slip_baud', 'slip_ip_address', 'slip_gw_address'] },
             { group: 'log', btn: 'save_log', ids: ['log_udp_enable', 'log_udp_host', 'log_udp_port'] },
@@ -296,10 +295,7 @@
     }
 
     function isLbtFormValid() {
-        const enabled = document.getElementById('lbt_uen').checked;
-        if (!enabled) return true;
-        const umax = parseInt(document.getElementById('lbt_umax').value, 10);
-        return !isNaN(umax) && umax >= 0 && umax <= 100;
+        return true;
     }
 
     function isValidIp(ip) {
@@ -490,8 +486,6 @@
         document.getElementById('halow_mcs_index').addEventListener('change', updateBandwidthDisabled);
         document.getElementById('save_halow').addEventListener('click', saveHalow);
 
-        document.getElementById('lbt_uen').addEventListener('change', () => { updateLbtUtilDisabled(); updateSaveButton('lbt'); });
-        document.getElementById('lbt_umax').addEventListener('input', () => updateSaveButton('lbt'));
         document.getElementById('save_lbt').addEventListener('click', saveLbt);
 
         document.getElementById('net_dhcp').addEventListener('change', () => { updateNetDisabled(); validateNetFields(); });
@@ -1270,9 +1264,7 @@
         updateBandwidthDisabled();
 
         const lbt = pick(state?.lbt, state?.api_lbt_cfg, state?.lbt_cfg);
-        setCheckbox('lbt_uen', lbt.uen);
-        setInput('lbt_umax', lbt.umax);
-        updateLbtUtilDisabled();
+        setCheckbox('lbt_cca_en', lbt.cca_en);
 
         const net = pick(state?.net, state?.api_net_cfg, state?.net_cfg);
         setCheckbox('net_dhcp', net.dhcp);

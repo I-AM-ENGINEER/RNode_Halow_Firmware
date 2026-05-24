@@ -24,6 +24,9 @@ typedef struct {
     uint16_t backoff_random_min_us;       // Minimum random delay before re-check
     uint16_t backoff_random_max_us;       // Maximum random delay before re-check
 
+    // CCA (Clear Channel Assessment)
+    uint8_t  cca_enabled;                 // 0 = ignore CCA, 1 = use CCA before TX
+
     // Channel utilization limiter (token bucket)
     uint8_t  util_enabled;                // 0 = disabled, 1 = enabled
     uint8_t  util_max_percent;            // Maximum average channel utilization (%)

@@ -533,22 +533,6 @@ void lmac_irq_tx_end(void)
     lhw_abort_fsm();
     ah_tdma_abort();
 
-    /* Debug: log TX_STAT + full TXVEC for MCS investigation */
-    {
-        static uint8_t tx_stat_cnt = 0;
-        if (++tx_stat_cnt <= 60) {
-            uint32_t ts = LMAC_HW->TX_STAT;
-            uint32_t tv1 = LMAC_HW->TXVEC1;
-            uint32_t tv3 = LMAC_HW->TXVEC3;
-            uint8_t bw_mcs = (tv1 >> 12) & 0xF;
-            uint8_t cw_mcs = (tv3 >> 7) & 0xF;
-            uint16_t cw_sym = (tv3 >> 12) & 0x1FF;
-            log_info("tx_end[%u]: stat=0x%x ok=%c bw_mcs=%u cw_mcs=%u sym=%u tv1=0x%x tv3=0x%x",
-                     tx_stat_cnt, ts, (ts & 3) ? 'N' : 'Y',
-                     bw_mcs, cw_mcs, cw_sym, tv1, tv3);
-        }
-    }
-
     if ((LMAC_HW->TX_STAT & 3u) == 0u) {
         uint32_t sub_state = ah_lmac.bo_tx_substate;
         if (sub_state < 7u && ((1u << sub_state) & 0x6eu)) {
