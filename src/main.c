@@ -347,15 +347,7 @@ __init int main(void) {
     telemetry_init();
     log_debug("rns_stream_decoder_init");
     rns_stream_decoder_init(&tcp_rns_decoder, rns_tcp_rx_handler);
-    // /* periodic stats disabled — too noisy during test */
-    // {
-    //     static struct os_task test_task;
-    //     os_task_init((const uint8 *)"test", &test_task, (void (*)(void *))test_run_all, 0);
-    //     os_task_set_stacksize(&test_task, 2048);
-    //     extern int32_t _os_task_set_priority(struct os_task *task, uint8_t priority);
-    //     _os_task_set_priority(&test_task, OS_TASK_PRIORITY_ABOVE_NORMAL + 1);
-    //     os_task_run(&test_task);
-    // }
+    //test_start();
     log_debug("sysheap_collect_init");
     sysheap_collect_init(&sram_heap, (uint32)&__sinit, (uint32)&__einit);
     log_info("Init done");
