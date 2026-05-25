@@ -2,7 +2,7 @@
 #define __SYS_CONFIG_H__
 
 #define PROJECT_TYPE           PRO_TYPE_WNB
-#define FW_VERSION              "2.0.1b"
+#define FW_VERSION              "2.1.0b"
 #define FW_FULL_VERSION         FW_VERSION " (" __DATE__ " " __TIME__ ")"
 
 #define IP_SOF_BROADCAST       1
@@ -14,7 +14,7 @@
 //#define TCPIP_MBOX_SIZE              32
 //#define DEFAULT_TCP_RECVMBOX_SIZE    32
 //#define DEFAULT_ACCEPTMBOX_SIZE      8
-#define TCP_WND                     (TCP_MSS*3)
+#define TCP_WND                     (TCP_MSS*10)
 #define MEMP_NUM_TCP_PCB            8
 #define MEMP_NUM_TCP_PCB_LISTEN     8
 #define PBUF_POOL_SIZE              32

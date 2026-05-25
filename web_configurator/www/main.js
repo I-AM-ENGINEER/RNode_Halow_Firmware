@@ -26,6 +26,28 @@
         timer: null,
         loading: false
     };
+
+    const MAX_MSDU = [
+        /* 1MHz */ [ 700, 1450, 2200, 3000, 4500, 6050, 6800, 7600 ],
+        /* 2MHz */ [1600, 3200, 4900, 6500, 8192, 8192, 8192, 8192 ],
+        /* 4MHz */ [3400, 6800, 8192, 8192, 8192, 8192, 8192, 8192 ],
+        /* 8MHz */ [7400, 8192, 8192, 8192, 8192, 8192, 8192, 8192 ]
+    ];
+    const MCS10_MAX = 500;
+
+    function computeMtuMax(mcs, bandwidth) {
+        if (mcs === 10) return MCS10_MAX;
+        const bwRow = { '1 MHz': 0, '2 MHz': 1, '4 MHz': 2, '8 MHz': 3 }[bandwidth];
+        if (bwRow === undefined || mcs < 0 || mcs > 7) return '--';
+        return MAX_MSDU[bwRow][mcs];
+    }
+
+    function updateMtuMaxDisplay() {
+        const mcs = parseInt((document.getElementById('halow_mcs_index').value || '0').replace('MCS', ''), 10);
+        const bw = document.getElementById('halow_bandwidth').value;
+        setText('reticulum_mtu_max', computeMtuMax(mcs, bw));
+    }
+
     const nearbyState = {
         timer: null,
         loading: false,
@@ -154,7 +176,10 @@
     function validateRnsMtuField() {
         const el = document.getElementById('reticulum_link_mtu');
         const v = parseInt(el.value, 10);
-        const invalid = isNaN(v) || v < 500 || v > 29200;
+        const mcs = parseInt((document.getElementById('halow_mcs_index').value || '0').replace('MCS', ''), 10);
+        const bw = document.getElementById('halow_bandwidth').value;
+        const hwMax = computeMtuMax(mcs, bw);
+        const invalid = isNaN(v) || v < 500 || v > 29200 || (hwMax !== '--' && v > hwMax);
         el.classList.toggle('error', invalid);
         updateSaveButton('rns_mtu');
     }
@@ -162,6 +187,10 @@
     function isRnsMtuFormValid() {
         const v = parseInt(document.getElementById('reticulum_link_mtu').value, 10);
         if (isNaN(v) || v < 500 || v > 29200) return false;
+        const mcs = parseInt((document.getElementById('halow_mcs_index').value || '0').replace('MCS', ''), 10);
+        const bw = document.getElementById('halow_bandwidth').value;
+        const hwMax = computeMtuMax(mcs, bw);
+        if (hwMax !== '--' && v > hwMax) return false;
         return true;
     }
 
@@ -513,6 +542,10 @@
         freqField.addEventListener('input', validateHalowFields);
 
         document.getElementById('halow_mcs_index').addEventListener('change', updateBandwidthDisabled);
+        document.getElementById('halow_mcs_index').addEventListener('change', updateMtuMaxDisplay);
+        document.getElementById('halow_mcs_index').addEventListener('change', validateRnsMtuField);
+        document.getElementById('halow_bandwidth').addEventListener('change', updateMtuMaxDisplay);
+        document.getElementById('halow_bandwidth').addEventListener('change', validateRnsMtuField);
         document.getElementById('save_halow').addEventListener('click', saveHalow);
 
         document.getElementById('save_lbt').addEventListener('click', saveLbt);
@@ -1310,6 +1343,7 @@
         setSelect('halow_mcs_index', halow.mcs_index);
         setSelect('halow_bandwidth', halow.bandwidth);
         updateBandwidthDisabled();
+        updateMtuMaxDisplay();
 
         const lbt = pick(state?.lbt, state?.api_lbt_cfg, state?.lbt_cfg);
         setCheckbox('lbt_cca_en', lbt.cca_en);
