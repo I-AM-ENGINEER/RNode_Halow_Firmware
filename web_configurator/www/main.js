@@ -588,11 +588,14 @@
     function updateBandwidthDisabled() {
         const mcs = document.getElementById('halow_mcs_index').value;
         const bw = document.getElementById('halow_bandwidth');
+        const note = document.getElementById('halow_mcs10_note');
         if (mcs === 'MCS10') {
             bw.value = '1 MHz';
             bw.disabled = true;
+            note.style.display = '';
         } else {
             bw.disabled = false;
+            note.style.display = 'none';
         }
     }
 

@@ -85,6 +85,7 @@
                         <option value="MCS7">MCS7</option>
                     </select>
                 </label>
+                <p class="note" id="halow_mcs10_note" style="display:none">MCS10 has a ~470 byte payload limit. Packets are fragmented into 2 parts, which may reduce delivery reliability.</p>
                 <label>
                     <span>Bandwidth</span>
                     <select id="halow_bandwidth">
@@ -119,56 +120,56 @@
                             <tbody>
                                 <tr>
                                     <th>1 MHz</th>
-                                    <td>0.5</td>
-                                    <td>0.5</td>
-                                    <td>0.7</td>
-                                    <td>0.9</td>
-                                    <td>1.3</td>
-                                    <td>1.6</td>
+                                    <td>0.27</td>
+                                    <td>0.55</td>
+                                    <td>0.83</td>
+                                    <td>1.1</td>
                                     <td>1.7</td>
-                                    <td>1.8</td>
-                                    <td>N/A</td>
+                                    <td>2.2</td>
+                                    <td>2.5</td>
+                                    <td>2.8</td>
+                                    <td>0.12</td>
                                 </tr>
                                 <tr>
                                     <th>2 MHz</th>
-                                    <td>0.6</td>
-                                    <td>1.0</td>
-                                    <td>1.5</td>
-                                    <td>1.7</td>
-                                    <td>2.3</td>
-                                    <td>2.7</td>
-                                    <td>2.9</td>
-                                    <td>2.9</td>
+                                    <td>0.53</td>
+                                    <td>1.2</td>
+                                    <td>1.8</td>
+                                    <td>2.5</td>
+                                    <td>3.7</td>
+                                    <td>4.8</td>
+                                    <td>5.3</td>
+                                    <td>5.9</td>
                                     <td>—</td>
                                 </tr>
                                 <tr>
                                     <th>4 MHz</th>
-                                    <td>1.1</td>
-                                    <td>1.8</td>
-                                    <td>2.4</td>
-                                    <td>2.8</td>
-                                    <td>3.4</td>
-                                    <td>3.9</td>
-                                    <td>4.0</td>
-                                    <td>4.0</td>
+                                    <td>1.3</td>
+                                    <td>2.6</td>
+                                    <td>3.8</td>
+                                    <td>5.0</td>
+                                    <td>7.2</td>
+                                    <td>9.3</td>
+                                    <td>10.2</td>
+                                    <td>11.2</td>
                                     <td>—</td>
                                 </tr>
                                 <tr>
                                     <th>8 MHz</th>
-                                    <td>1.9</td>
-                                    <td>2.9</td>
-                                    <td>3.4</td>
-                                    <td>4.0</td>
-                                    <td>4.1</td>
-                                    <td>4.6</td>
-                                    <td>4.7</td>
-                                    <td>4.8</td>
+                                    <td>2.8</td>
+                                    <td>5.3</td>
+                                    <td>7.7</td>
+                                    <td>9.9</td>
+                                    <td>13.8</td>
+                                    <td>17.1</td>
+                                    <td>18.7</td>
+                                    <td>20.0</td>
                                     <td>—</td>
                                 </tr>
                             </tbody>
                         </table>
                     </div>
-                    <p class="throughput-note">Devices using different MCS values can still see each other and communicate. MCS affects throughput and radio robustness, not interoperability.</p>
+                    <p class="throughput-note">Measured with max MTU for each mode. Smaller payload sizes give significantly lower throughput due to per-frame overhead.</p>
                 </div>
 
             </div>
