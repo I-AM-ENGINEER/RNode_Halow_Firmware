@@ -438,6 +438,16 @@
             <div class="panel">
                 <h3>Reticulum</h3>
 
+                <label>
+                    <span>Link MTU (bytes)</span>
+                    <input type="number" id="reticulum_link_mtu" min="500" max="29200" step="1" value="500">
+                </label>
+                <p class="note">Max 802.11 payload size. Valid values: 500-<span id="reticulum_mtu_max">--</span> bytes.</p>
+
+                <div class="panel-actions">
+                    <button type="button" id="save_rns_mtu" disabled>Save</button>
+                </div>
+
                 <table class="stats-table nearby-summary-table">
                     <tbody>
                     <tr><th>Links</th><td id="reticulum_count">--</td></tr>

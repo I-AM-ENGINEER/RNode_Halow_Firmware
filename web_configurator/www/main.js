@@ -17,7 +17,8 @@
         log: '',
         tcp: '',
         telemetry: '',
-        privacy: ''
+        privacy: '',
+        rns_mtu: ''
     };
     const DASHBOARD_REFRESH_MS = 1000;
     const dashboardState = {
@@ -144,6 +145,26 @@
         };
     }
 
+    function readRnsMtuForm() {
+        return {
+            mtu: parseInt(document.getElementById('reticulum_link_mtu').value, 10) || 0
+        };
+    }
+
+    function validateRnsMtuField() {
+        const el = document.getElementById('reticulum_link_mtu');
+        const v = parseInt(el.value, 10);
+        const invalid = isNaN(v) || v < 500 || v > 29200;
+        el.classList.toggle('error', invalid);
+        updateSaveButton('rns_mtu');
+    }
+
+    function isRnsMtuFormValid() {
+        const v = parseInt(document.getElementById('reticulum_link_mtu').value, 10);
+        if (isNaN(v) || v < 500 || v > 29200) return false;
+        return true;
+    }
+
     function updateSaveButton(group) {
         let current = '';
         let btn = null;
@@ -188,6 +209,11 @@
             current = jsonSnapshot(readPrivacyForm());
             btn = document.getElementById('save_privacy');
         }
+        if (group === 'rns_mtu') {
+            current = jsonSnapshot(readRnsMtuForm());
+            btn = document.getElementById('save_rns_mtu');
+            isValid = isRnsMtuFormValid();
+        }
 
         if (!btn) { return; }
 
@@ -203,6 +229,7 @@
         if (group === 'tcp') { baselines.tcp = jsonSnapshot(readTcpForm()); }
         if (group === 'telemetry') { baselines.telemetry = jsonSnapshot(readTelemetryForm()); }
         if (group === 'privacy') { baselines.privacy = jsonSnapshot(readPrivacyForm()); }
+        if (group === 'rns_mtu') { baselines.rns_mtu = jsonSnapshot(readRnsMtuForm()); }
         updateSaveButton(group);
     }
 
@@ -215,6 +242,7 @@
         snapshotGroup('tcp');
         snapshotGroup('telemetry');
         snapshotGroup('privacy');
+        snapshotGroup('rns_mtu');
     }
 
     function setupDirtyTracking() {
@@ -234,7 +262,8 @@
                     'telemetry_usr', 'telemetry_pwd', 'telemetry_top', 'telemetry_name', 'telemetry_lxmf'
                 ]
             },
-            { group: 'privacy', btn: 'save_privacy', ids: ['privacy_mac_rotation', 'privacy_mac_broadcast'] }
+            { group: 'privacy', btn: 'save_privacy', ids: ['privacy_mac_rotation', 'privacy_mac_broadcast'] },
+            { group: 'rns_mtu', btn: 'save_rns_mtu', ids: ['reticulum_link_mtu'] }
         ];
 
         map.forEach(m => {
@@ -526,6 +555,9 @@
         document.getElementById('stat_reset_btn').addEventListener('click', resetStats);
 
         document.getElementById('save_privacy').addEventListener('click', savePrivacy);
+        document.getElementById('save_rns_mtu').addEventListener('click', saveRnsMtu);
+        document.getElementById('reticulum_link_mtu').addEventListener('input', validateRnsMtuField);
+        document.getElementById('reticulum_link_mtu').addEventListener('change', validateRnsMtuField);
 
         document.getElementById('privacy_mac_rotation').addEventListener('change', () => {
             if (document.getElementById('privacy_mac_rotation').value !== '0') {
@@ -639,6 +671,18 @@
         }
     }
 
+    async function loadRnsMtuConfig() {
+        try {
+            const res = await fetch('/api/rns_mtu_cfg');
+            if (!res.ok) return;
+            const data = await res.json();
+            setInput('reticulum_link_mtu', data.mtu || 0);
+            snapshotGroup('rns_mtu');
+        } catch (err) {
+            // ignore
+        }
+    }
+
     async function loadAll() {
         try {
             const res = await fetch('/api/get_all');
@@ -649,6 +693,7 @@
             state = await res.json();
             populateFromState();
             snapshotAll();
+            loadRnsMtuConfig();
             return true;
         } catch (err) {
             console.error('get_all error', err);
@@ -1427,6 +1472,17 @@
             console.error('savePrivacy error', err);
         }
         loadAll();
+    }
+
+    async function saveRnsMtu() {
+        const payload = readRnsMtuForm();
+        try {
+            await postJson('/api/rns_mtu_cfg', payload);
+        } catch (err) {
+            console.error('saveRnsMtu error', err);
+        }
+        loadAll();
+        loadRnsMtuConfig();
     }
 
     function sanitizeLxmf(value) {

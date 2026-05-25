@@ -10,14 +10,14 @@
 #define RNS_LINK_ID_LEN                 RNS_TRUNCATED_HASH_LEN
 #define RNS_LINKREQUEST_CORE_LEN        (64)
 
-// Window for search rns package, should be slightly (1-2%) larger that max MTU
+// Window for search rns package, should be larger that max MTU
 #ifndef RNS_STREAM_MAX_FRAME_SIZE
-#define RNS_STREAM_MAX_FRAME_SIZE       (1500)
+#define RNS_STREAM_MAX_FRAME_SIZE       (1024*10)
 #endif
 
 // Max plain package length
 #ifndef RNS_MAX_MTU
-#define RNS_MAX_MTU                     (1460)
+#define RNS_MAX_MTU                     (1024*8)
 #endif
 
 // Time for clear links without activity

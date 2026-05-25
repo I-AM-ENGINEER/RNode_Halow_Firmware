@@ -31,23 +31,10 @@
 #include "uart_slip.h"
 #include "net_log.h"
 #include "chip/txw4002ack803/sysctrl.h"
+#include "halow_pkg_handler.h"
 
-/* -------------------------------------------------------------------------- */
-/* Change version                                                             */
-/* -------------------------------------------------------------------------- */
-
-static volatile uint32_t s_change_version = 0;
 extern struct netif *netif_default;
 extern struct spi_nor_flash flash0;
-
-void web_api_notify_change( void ){
-    s_change_version++;
-    log_trace("api change version=%lu", (unsigned long)s_change_version);
-}
-
-uint32_t web_api_change_version( void ){
-    return s_change_version;
-}
 
 /* -------------------------------------------------------------------------- */
 /* JSON helpers (local, minimal)                                              */
@@ -133,21 +120,6 @@ static bool json_get_float( const cJSON *o, const char *k, float *out ){
 
     *out = (float)v->valuedouble;
     return true;
-}
-
-/* -------------------------------------------------------------------------- */
-/* /api/heartbeat                                                             */
-/* -------------------------------------------------------------------------- */
-
-int32_t web_api_heartbeat_get( const cJSON *in, cJSON *out ){
-    (void)in;
-
-    if (out == NULL) {
-        return WEB_API_RC_BAD_REQUEST;
-    }
-
-    (void)cJSON_AddNumberToObject(out, "version", (double)web_api_change_version());
-    return WEB_API_RC_OK;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -266,7 +238,7 @@ int32_t web_api_halow_cfg_post(const cJSON *in, cJSON *out) {
     halow_config_save(&cfg);
 
     log_debug("halow_cfg updated");
-    web_api_notify_change();
+
 
     return web_api_halow_cfg_get(NULL, out);
 }
@@ -361,7 +333,7 @@ int32_t web_api_slip_cfg_post(const cJSON *in, cJSON *out) {
               cfg.enabled ? 1 : 0,
               (unsigned long)cfg.baud);
 
-    web_api_notify_change();
+
     return web_api_slip_cfg_get(NULL, out);
 }
 
@@ -439,7 +411,7 @@ int32_t web_api_log_cfg_post(const cJSON *in, cJSON *out) {
               cfg.enable ? 1 : 0,
               (unsigned)cfg.port);
 
-    web_api_notify_change();
+
     return web_api_log_cfg_get(NULL, out);
 }
 
@@ -520,7 +492,7 @@ int32_t web_api_net_cfg_post( const cJSON *in, cJSON *out ){
     net_ip_config_save(&cfg);
 
     log_debug("net_cfg updated dhcp=%d", dhcp ? 1 : 0);
-    web_api_notify_change();
+
 
     return web_api_net_cfg_get(NULL, out);
 }
@@ -604,7 +576,7 @@ int32_t web_api_tcp_server_cfg_post( const cJSON *in, cJSON *out ){
     log_debug("tcp_server_cfg updated enable=%d port=%u",
               cfg.enabled ? 1 : 0,
               (unsigned)cfg.port);
-    web_api_notify_change();
+
 
     return web_api_tcp_server_cfg_get(NULL, out);
 }
@@ -704,7 +676,7 @@ int32_t web_api_lbt_cfg_post( const cJSON *in, cJSON *out ){
     halow_lbt_config_save(&cfg);
 
     log_debug("lbt_cfg updated");
-    web_api_notify_change();
+
     //return web_api_lbt_cfg_get(NULL, out);
     return web_api_halow_cfg_get(NULL, out);
 }
@@ -846,7 +818,7 @@ int32_t web_api_radio_stat_get( const cJSON *in, cJSON *out ){
 
 int32_t web_api_radio_stat_post( const cJSON *in, cJSON *out ){
     statistics_radio_reset();
-    web_api_notify_change();
+
     return web_api_lbt_cfg_get(NULL, out);
 }
 
@@ -971,7 +943,7 @@ int32_t web_api_telemetry_cfg_post( const cJSON *in, cJSON *out ){
               cfg.extended_enabled ? 1 : 0,
               (unsigned long)cfg.send_period_s,
               (unsigned)cfg.port);
-    web_api_notify_change();
+
     return web_api_telemetry_cfg_get(NULL, out);
 }
 
@@ -1009,8 +981,6 @@ int32_t web_api_all_get( const cJSON *in, cJSON *out ){
     if (out == NULL) {
         return WEB_API_RC_BAD_REQUEST;
     }
-
-    (void)cJSON_AddNumberToObject(out, "ver", (double)web_api_change_version());
 
     halow = cJSON_CreateObject();
     net   = cJSON_CreateObject();
@@ -1175,6 +1145,22 @@ int32_t web_api_nearby_modems_get( const cJSON *in, cJSON *out ){
     return WEB_API_RC_OK;
 }
 
+int32_t web_api_rns_mtu_cfg_get( const cJSON *in, cJSON *out ){
+    (void)in;
+    if (out == NULL) return WEB_API_RC_BAD_REQUEST;
+    (void)cJSON_AddNumberToObject(out, "mtu", (double)rns_mtu_limit_get());
+    return WEB_API_RC_OK;
+}
+
+int32_t web_api_rns_mtu_cfg_post( const cJSON *in, cJSON *out ){
+    int v;
+    if (json_get_int(in, "mtu", &v)) {
+        rns_mtu_limit_set((int16_t)v);
+    }
+
+    return web_api_rns_mtu_cfg_get(NULL, out);
+}
+
 int32_t web_api_privacy_cfg_get( const cJSON *in, cJSON *out ){
     mac_generator_config_t cfg;
     (void)in;
@@ -1197,7 +1183,7 @@ int32_t web_api_privacy_cfg_post( const cJSON *in, cJSON *out ){
     if (j && cJSON_IsBool(j)) cfg.broadcast_mac = (uint8_t)cJSON_IsTrue(j);
     mac_generator_config_save(&cfg);
     mac_generator_config_apply(&cfg);
-    web_api_notify_change();
+
     return WEB_API_RC_OK;
 }
 

@@ -4,10 +4,6 @@
 #include <stdint.h>
 #include "cJSON.h"
 
-void web_api_notify_change( void );
-uint32_t web_api_change_version( void );
-
-int32_t web_api_heartbeat_get( const cJSON *in, cJSON *out );
 int32_t web_api_ok_get( const cJSON *in, cJSON *out );
 
 int32_t web_api_halow_cfg_get( const cJSON *in, cJSON *out );
@@ -56,5 +52,8 @@ int32_t web_api_log_cfg_post( const cJSON *in, cJSON *out );
 
 int32_t web_api_privacy_cfg_get( const cJSON *in, cJSON *out );
 int32_t web_api_privacy_cfg_post( const cJSON *in, cJSON *out );
+
+int32_t web_api_rns_mtu_cfg_get( const cJSON *in, cJSON *out );
+int32_t web_api_rns_mtu_cfg_post( const cJSON *in, cJSON *out );
 
 #endif // __CONFIG_API_CALLS_H__

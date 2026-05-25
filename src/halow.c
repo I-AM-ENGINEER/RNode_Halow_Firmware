@@ -126,6 +126,17 @@ typedef struct {
 
 static frag_reassembly_t frag_reasm;
 
+static const uint16_t halow_max_msdu[4][8] = {
+    /* 1MHz */ {  700, 1450, 2200, 3000, 4500, 6050, 6800, 7600 },
+    /* 2MHz */ { 1600, 3200, 4900, 6500, 8192, 8192, 8192, 8192 },
+    /* 4MHz */ { 3400, 6800, 8192, 8192, 8192, 8192, 8192, 8192 },
+    /* 8MHz */ { 7400, 8192, 8192, 8192, 8192, 8192, 8192, 8192 },
+};
+
+static uint8_t halow_bw_index( uint8_t bw ) {
+    return (bw >= 8) ? 3 : (bw >= 4) ? 2 : (bw >= 2) ? 1 : 0;
+}
+
 static void halow_runtime_reconfig_barrier(void)
 {
     if (g_ops == NULL) {
@@ -646,4 +657,15 @@ int32_t halow_tx( const uint8_t *data, uint32_t len, const uint8_t destination_m
 
 void halow_set_cca_enabled(uint8_t enabled) {
     lmac_custom_cfg.ignore_cca = (enabled == 0) ? 1u : 0u;
+}
+
+uint32_t halow_get_mtu(uint8_t mcs) {
+    halow_config_t cfg;
+    halow_config_load(&cfg);
+
+    if (mcs == 10) {
+        return HALOW_MCS10_MAX_MSDU;
+    }
+
+    return (uint32_t)halow_max_msdu[halow_bw_index(cfg.bandwidth)][mcs];
 }

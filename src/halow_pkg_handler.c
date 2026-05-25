@@ -8,9 +8,11 @@
 #include "rns/stream_parser.h"
 #include "utils.h"
 #include "halow.h"
+#include "configdb.h"
 #include "tcp_server.h"
 
-#define LINK_MTU_LIMIT   (1024U)
+#define RNS_MTU_LIMIT_KEY   CONFIGDB_ADD_MODULE("rns") ".mtu"
+#define RNS_MTU_LIMIT_DEF   (500U)
 
 typedef struct {
     bool none           :1;
@@ -146,8 +148,23 @@ void halow_pkg_handler_tcp_to_rf( uint8_t* pkg, uint16_t len ){
 
     if( packet_info.valid && packet_info.packet_type == RNS_PACKET_TYPE_LINKREQUEST ){
         uint32_t original_mtu;
-        rns_link_utils_clamp_mtu(pkg, len, &packet_info, (uint32_t)LINK_MTU_LIMIT, &original_mtu);
-        log_info("cap link MTU from %db to %db", (int)original_mtu, (int)LINK_MTU_LIMIT);
+        uint32_t hw_mtu;
+        uint32_t effective_mtu;
+        halow_config_t cfg;
+        int16_t rns_mtu_limit;
+
+        halow_config_load(&cfg);
+        hw_mtu = halow_get_mtu(cfg.mcs);
+        rns_mtu_limit = rns_mtu_limit_get();
+
+        if ((uint32_t)rns_mtu_limit < hw_mtu) {
+            effective_mtu = (uint32_t)rns_mtu_limit;
+        } else {
+            effective_mtu = hw_mtu;
+        }
+
+        rns_link_utils_clamp_mtu(pkg, len, &packet_info, effective_mtu, &original_mtu);
+        log_info("cap link MTU from %db to %db", (int)original_mtu, (int)effective_mtu);
     }
 
     //link_db
@@ -158,5 +175,15 @@ void halow_pkg_handler_tcp_to_rf( uint8_t* pkg, uint16_t len ){
 }
 
 void halow_pkg_handler_init( void ){
-    
+
+}
+
+int16_t rns_mtu_limit_get( void ){
+    int16_t val = RNS_MTU_LIMIT_DEF;
+    configdb_get_i16(RNS_MTU_LIMIT_KEY, &val);
+    return val;
+}
+
+void rns_mtu_limit_set( int16_t mtu ){
+    configdb_set_i16(RNS_MTU_LIMIT_KEY, &mtu);
 }
