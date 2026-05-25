@@ -14,7 +14,7 @@
 //#define TCPIP_MBOX_SIZE              32
 //#define DEFAULT_TCP_RECVMBOX_SIZE    32
 //#define DEFAULT_ACCEPTMBOX_SIZE      8
-#define TCP_WND                     (TCP_MSS*8)
+#define TCP_WND                     (TCP_MSS*3)
 #define MEMP_NUM_TCP_PCB            8
 #define MEMP_NUM_TCP_PCB_LISTEN     8
 #define PBUF_POOL_SIZE              32

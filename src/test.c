@@ -66,7 +66,7 @@ static void test_throughput(void) {
         /* MCS5  */ { 6050, 8192, 8192, 8192 },
         /* MCS6  */ { 6800, 8192, 8192, 8192 },
         /* MCS7  */ { 7600, 8192, 8192, 8192 },
-        /* MCS10 */ { 450, 0, 0, 0 },  /* 685 sym, ndbps=6, 1MHz only */
+        /* MCS10 */ { 500, 0, 0, 0 },  /* 685 sym, ndbps=6, 1MHz only */
     };
     static const uint8_t bw_idx_map[] = {0, 0, 1, 0, 2, 0, 0, 0, 3}; /* bw->idx: 1→0 2→1 4→2 8→3 */
 

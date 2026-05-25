@@ -72,6 +72,12 @@
 #define HALOW_DBG_LEVEL         0
 #define TX_BUFFER_SIZE          (1460*20)
 
+#define HALOW_MCS10_MAX_MSDU    500
+#define HALOW_FRAG_HDR_SIZE     2
+#define HALOW_FRAG_MAX_PAYLOAD  250
+#define HALOW_FRAG_TIMEOUT_MS   1000
+#define HALOW_FRAG_MAX_TOTAL    16
+
 //#define HALOW_DEBUG
 #ifdef HALOW_DEBUG
 #define halow_debug(fmt, ...)  os_printf("[HALW] " fmt "\r\n", ##__VA_ARGS__)
@@ -94,6 +100,31 @@ extern void lmac_kick_tx_task( void );
 extern void lhw_abort_fsm(void);
 extern void update_rx_buff_addr(void);
 extern void lhw_start_rx(uint32 flags);
+
+/* ===== MCS10 fragmentation =====
+ *
+ * MCS10 (OFDMA 26-tone) has ~450B PHY payload limit.
+ * For packets exceeding this, we split into fragments with 2B header:
+ *   [0] (total << 4) | seq    total>=1, seq<total
+ *   [1] uuid                incremented per logical packet
+ *
+ * total=1: single fragment, strip header on RX
+ * total>1: reassemble on RX, discard after 1 s timeout
+ */
+static uint8_t  frag_tx_uuid;
+static uint8_t  frag_tx_buf[HALOW_FRAG_HDR_SIZE + HALOW_FRAG_MAX_PAYLOAD];
+
+typedef struct {
+    bool     active;
+    uint8_t  uuid;
+    uint8_t  total;
+    uint8_t  received;
+    uint32_t last_tick;
+    uint16_t part_len[HALOW_FRAG_MAX_TOTAL];
+    uint8_t  buf[HALOW_FRAG_MAX_PAYLOAD * HALOW_FRAG_MAX_TOTAL];
+} frag_reassembly_t;
+
+static frag_reassembly_t frag_reasm;
 
 static void halow_runtime_reconfig_barrier(void)
 {
@@ -156,33 +187,91 @@ static inline void mac_bcast(uint8_t mac[6]) {
     memset(mac, 0xff, 6);
 }
 
+static int32_t halow_lmac_rx_mcs10(struct hgic_rx_info *info,
+                                     struct ieee80211_hdr *hdr,
+                                     uint8_t *payload, int32_t payload_len) {
+    if (payload_len < HALOW_FRAG_HDR_SIZE) {
+        g_rx_cb(info, hdr, payload, payload_len);
+        return 0;
+    }
+
+    uint8_t total = payload[0] >> 4;
+
+    if (total == 0) {
+        g_rx_cb(info, hdr, payload, payload_len);
+        return 0;
+    }
+
+    uint8_t seq  = payload[0] & 0x0F;
+    uint8_t uuid = payload[1];
+    uint8_t *fdata = payload + HALOW_FRAG_HDR_SIZE;
+    int32_t flen   = payload_len - HALOW_FRAG_HDR_SIZE;
+
+    if (total == 1) {
+        g_rx_cb(info, hdr, fdata, flen);
+        return 0;
+    }
+
+    uint32_t now = (uint32_t)get_time_ms();
+
+    if (frag_reasm.active &&
+        (now - frag_reasm.last_tick) > HALOW_FRAG_TIMEOUT_MS) {
+        frag_reasm.active = false;
+    }
+
+    if (!frag_reasm.active || frag_reasm.uuid != uuid) {
+        frag_reasm.active = false;
+        frag_reasm.uuid = uuid;
+        frag_reasm.total = total;
+        frag_reasm.received = 0;
+        memset(frag_reasm.part_len, 0, sizeof(frag_reasm.part_len));
+        frag_reasm.active = true;
+    }
+
+    if (seq < frag_reasm.total) {
+        uint32_t off = 0;
+        for (uint8_t i = 0; i < seq; i++)
+            off += frag_reasm.part_len[i];
+        memcpy(frag_reasm.buf + off, fdata, (uint32_t)flen);
+        frag_reasm.part_len[seq] = (uint16_t)flen;
+        frag_reasm.received++;
+    }
+
+    frag_reasm.last_tick = now;
+
+    if (frag_reasm.received == frag_reasm.total) {
+        uint32_t rlen = 0;
+        for (uint8_t i = 0; i < frag_reasm.total; i++)
+            rlen += frag_reasm.part_len[i];
+        g_rx_cb(info, hdr, frag_reasm.buf, (int32_t)rlen);
+        frag_reasm.active = false;
+    }
+
+    return 0;
+}
+
 static int32_t halow_lmac_rx(struct lmac_ops *ops,
                              struct hgic_rx_info *info,
                              uint8_t *data,
                              int32_t len) {
     (void)ops;
 
-    halow_debug("rx: len=%ld", (long)len);
-
-    if (!data || len < (int32_t)sizeof(struct ieee80211_hdr)) {
-        halow_debug("rx: drop (invalid data or too short)");
+    if (!data || len < (int32_t)sizeof(struct ieee80211_hdr))
         return -1;
-    }
 
     struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)data;
 
-    if ((hdr->frame_control & 0x000C) != WLAN_FTYPE_DATA) {
-        halow_debug("rx: drop (not data frame)");
+    if ((hdr->frame_control & 0x000C) != WLAN_FTYPE_DATA)
         return -1;
-    }
 
     uint8_t *payload = data + sizeof(*hdr);
-    int32_t payload_len    = len - (int32_t)sizeof(*hdr);
+    int32_t payload_len = len - (int32_t)sizeof(*hdr);
 
-    if (payload_len <= 0 || !g_rx_cb) {
-        halow_debug("rx: no payload or cb=NULL");
+    if (payload_len <= 0 || !g_rx_cb)
         return 0;
-    }
+
+    if (info->mcs == 10)
+        return halow_lmac_rx_mcs10(info, hdr, payload, payload_len);
 
     g_rx_cb(info, hdr, payload, payload_len);
 
@@ -459,20 +548,9 @@ void halow_get_tx_vacanted_bytes(uint32_t bytes){
     }
 }
 
-int32_t halow_tx(const uint8_t *data, uint32_t len, const uint8_t destination_mac[6], uint8_t mcs) {
-    if(g_ops == NULL){
-        return -1;
-    }
-    if(data == NULL){
-        return -2;
-    }
-    if(len == 0){
-        return -3;
-    }
-    if(len > TX_BUFFER_SIZE){
-        return -4;
-    }
-
+static int32_t halow_send_frame(const uint8_t *payload, uint32_t len,
+                                 const uint8_t destination_mac[6], uint8_t mcs)
+{
     struct ieee80211_hdr hdr;
     memset(&hdr, 0, sizeof(hdr));
 
@@ -486,20 +564,19 @@ int32_t halow_tx(const uint8_t *data, uint32_t len, const uint8_t destination_ma
 
     uint32_t hr   = (uint32_t)g_ops->headroom;
     uint32_t tr   = (uint32_t)g_ops->tailroom;
-    uint32_t need = hr + sizeof(hdr) + (uint32_t)len + tr;
+    uint32_t need = hr + sizeof(hdr) + len + tr;
 
     struct sk_buff *skb = alloc_tx_skb(need);
-    if (!skb) {
+    if (!skb){
         return -5;
     }
 
     skb_reserve(skb, (int)hr);
     memcpy(skb_put(skb, sizeof(hdr)), &hdr, sizeof(hdr));
-    memcpy(skb_put(skb, len), data, (size_t)len);
+    memcpy(skb_put(skb, len), payload, len);
 
     skb->priority = 0;
     skb->tx       = 1;
-    //halow_lbt_wait_tx_allowed();
     halow_get_tx_vacanted_bytes(skb->len);
 
     int32_t res;
@@ -514,58 +591,57 @@ int32_t halow_tx(const uint8_t *data, uint32_t len, const uint8_t destination_ma
     return res;
 }
 
-int32_t halow_tx_batch(const uint8_t *data, uint32_t len, const uint8_t destination_mac[6], uint32_t count, uint8_t mcs) {
-    if (g_ops == NULL || data == NULL || len == 0 || count == 0)
-        return -1;
+static int32_t halow_tx_mcs10_frag( const uint8_t *data, uint32_t len, const uint8_t destination_mac[6], uint8_t mcs ) {
+    uint8_t uuid = ++frag_tx_uuid;
 
-    /* MCS10 (OFDMA 26-tone): symbol limit ~685 → ~680 bytes max payload */
-    if (mcs == 10 && len > 680)
-        return -3;
+    if (len <= HALOW_FRAG_MAX_PAYLOAD) {
+        frag_tx_buf[0] = (uint8_t)(1u << 4);
+        frag_tx_buf[1] = uuid;
+        memcpy(frag_tx_buf + HALOW_FRAG_HDR_SIZE, data, len);
+        return halow_send_frame(frag_tx_buf, HALOW_FRAG_HDR_SIZE + len, destination_mac, mcs);
+    }
 
-    lmac_custom_cfg.defer_ac_pd = 1;
+    uint8_t n = (uint8_t)((len + HALOW_FRAG_MAX_PAYLOAD - 1) / HALOW_FRAG_MAX_PAYLOAD);
+    uint32_t off = 0;
 
-    uint32_t sent = 0;
-    for (uint32_t i = 0; i < count; i++) {
-        struct ieee80211_hdr hdr;
-        memset(&hdr, 0, sizeof(hdr));
-        hdr.frame_control = (uint16_t)(WLAN_FTYPE_DATA | WLAN_STYPE_DATA);
-        mac_bcast(hdr.addr1);
-        mac_generator_get(hdr.addr2);
-        memcpy(hdr.addr3, destination_mac, 6);
-        g_seq++;
-        hdr.seq_ctrl = (uint16_t)((g_seq & 0x0fff) << 4);
-
-        uint32_t hr   = (uint32_t)g_ops->headroom;
-        uint32_t tr   = (uint32_t)g_ops->tailroom;
-        uint32_t need = hr + sizeof(hdr) + len + tr;
-
-        struct sk_buff *skb = alloc_tx_skb(need);
-        if (!skb) break;
-
-        skb_reserve(skb, (int)hr);
-        memcpy(skb_put(skb, sizeof(hdr)), &hdr, sizeof(hdr));
-        memcpy(skb_put(skb, len), data, (size_t)len);
-        skb->priority = 0;
-        skb->tx = 1;
-
-        halow_get_tx_vacanted_bytes(skb->len);
-
-        if (lmac_fast_tx(skb, mcs) != 0) {
-            g_tx_vacated_bytes += skb->len;
-            kfree_skb(skb);
-            break;
+    for (uint8_t i = 0; i < n; i++) {
+        uint32_t chunk = len - off;
+        if (chunk > HALOW_FRAG_MAX_PAYLOAD){
+            chunk = HALOW_FRAG_MAX_PAYLOAD;
         }
-        sent++;
+
+        frag_tx_buf[0] = (uint8_t)((n << 4) | i);
+        frag_tx_buf[1] = uuid;
+        memcpy(frag_tx_buf + HALOW_FRAG_HDR_SIZE, data + off, chunk);
+
+        int32_t res = halow_send_frame(frag_tx_buf, HALOW_FRAG_HDR_SIZE + chunk, destination_mac, mcs);
+        if (res != 0){
+            return res;
+        }
+
+        off += chunk;
     }
 
-    lmac_custom_cfg.defer_ac_pd = 0;
-    if (sent != 0u) {
-        LMAC_HW->AC_PD = 0;
-        LMAC_HW->AC_PD = 0xF;
+    return 0;
+}
+
+int32_t halow_tx( const uint8_t *data, uint32_t len, const uint8_t destination_mac[6], uint8_t mcs ) {
+    if (g_ops == NULL)  return -1;
+    if (data == NULL)   return -2;
+    if (len == 0)        return -3;
+    if (len > TX_BUFFER_SIZE) return -4;
+
+    if (mcs == HALOW_MCS_DEFAULT) {
+        halow_config_t cfg;
+        halow_config_load(&cfg);
+        mcs = cfg.mcs;
     }
 
-    halow_lbt_set_tx_as_active();
-    return (int32_t)sent;
+    if (mcs == 10) {
+        return halow_tx_mcs10_frag(data, len, destination_mac, mcs);
+    }
+
+    return halow_send_frame(data, len, destination_mac, mcs);
 }
 
 void halow_set_cca_enabled(uint8_t enabled) {
