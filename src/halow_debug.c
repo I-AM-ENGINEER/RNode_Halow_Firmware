@@ -1,68 +1,72 @@
-#include <stdlib.h>
 #include <stdint.h>
 
-extern int __real_ah_rfspi_write(uint32_t addr, uint32_t val);
-extern uint16_t __real_ah_rfspi_read(uint32_t addr);
-extern uint16_t __real_ah_rfspi_write_and_read(uint32_t addr, uint32_t data);
+extern void ah_rfspi_write(uint16_t addr, uint32_t data);
+extern uint16_t ah_rfspi_read(uint16_t addr);
+extern uint16_t ah_rfspi_write_and_read(uint32_t addr, uint32_t data);
+extern void delay_us(uint32_t us);
 
-volatile uint32_t g_rfspi_last_write_arg0;
-volatile uint32_t g_rfspi_last_write_arg1;
-volatile uint32_t g_rfspi_last_read_arg0;
-volatile uint32_t g_rfspi_last_wr_arg0;
-
-volatile uint32_t g_rfspi_write_count;
-volatile uint32_t g_rfspi_read_count;
-volatile uint32_t g_rfspi_wr_count;
-/*
-extern int __real_ah_rf_lo_table_ctrl(uint32_t en);
-
-int __wrap_ah_rf_lo_table_ctrl(uint32_t en)
+static int pll_calibrate(void)
 {
-    os_printf("[RF] ah_rf_lo_table_ctrl(%lu)\n", (unsigned long)en);
+    for (int i = 5; i != 0; i--) {
+        ah_rfspi_write(0x810, 0x30);
+        ah_rfspi_write(0x810, 0x31);
+        delay_us(200);
+    }
 
-    //int ret = __real_ah_rf_lo_table_ctrl(en);
+    int timeout = 100;
+    uint16_t status;
+    for (;;) {
+        delay_us(800);
+        status = ah_rfspi_read(0x811);
+        if (status & 0x400u)
+            break;
+        if (status & 0x200u) {
+            if (--timeout <= 0)
+                break;
+            continue;
+        }
+        break;
+    }
 
-    //return ret;
-	return 0;
-}*/
-
-int __wrap_ah_rfspi_write(uint32_t addr, uint32_t val)
-{
-    g_rfspi_last_write_arg0 = addr;
-    g_rfspi_last_write_arg1 = val;
-    g_rfspi_write_count++;
-
-    uint32_t frame =
-        ((addr << 16) & 0x7fff0000u) |
-        (val | 0x80000000u);
-
-//    os_printf(
-//        "[RFSPI WR %lu] addr=0x%04lx val=0x%04lx frame=0x%08lx\n",
-//        (unsigned long)g_rfspi_write_count,
-//        (unsigned long)addr,
-//        (unsigned long)val,
-//        (unsigned long)frame
-//    );
-
-    int ret = __real_ah_rfspi_write(addr, val);
-    return ret;
+    uint16_t calib = ah_rfspi_read(0x811) & 0x1FFu;
+    ah_rfspi_write_and_read(0x603, calib);
+    return (status & 0x400u) ? -1 : (timeout <= 0) ? -2 : 0;
 }
 
-uint16_t __wrap_ah_rfspi_read(uint32_t addr)
+int __wrap_ah_rf_lo_freq_set(uint32_t freq_khz)
 {
-    g_rfspi_last_read_arg0 = addr;
-    g_rfspi_read_count++;
+    float val = (float)freq_khz * 0.5f / 1000.0f * 0.125f;
+    uint16_t int_part = (uint16_t)(uint32_t)val;
+    float frac = val - (float)(uint32_t)int_part;
+    uint32_t frac_part = (uint32_t)(frac * 4194301.0f);
 
-    uint32_t cmd =
-        ((addr << 16) & 0x7fff0000u);
+    ah_rfspi_write(0x610, ah_rfspi_read(0x610) | 0xFFu);
+    ah_rfspi_write(0x600, int_part);
+    ah_rfspi_write(0x601, (uint16_t)(frac_part & 0xFFFFu));
+    ah_rfspi_write(0x602, (uint16_t)((frac_part >> 16) & 0xFFFFu));
 
-//    os_printf(
-//        "[RFSPI RD %lu] addr=0x%04lx cmd=0x%08lx\n",
-//        (unsigned long)g_rfspi_read_count,
-//        (unsigned long)addr,
-//        (unsigned long)cmd
-//    );
+    pll_calibrate();
+    return 0;
+}
 
-    uint16_t ret = __real_ah_rfspi_read(addr);
-    return ret;
+int __wrap_ah_rf_lo_freq_set(uint32_t freq_khz);
+
+int __wrap_ah_rf_lo_table_cfg(const uint32_t *freq_list, uint8_t count)
+{
+    if (count >= 0x11)
+        return -1;
+
+    for (uint8_t i = 0; i < count; i++) {
+        int ret = __wrap_ah_rf_lo_freq_set(freq_list[i]);
+        if (ret != 0)
+            return ret;
+
+        uint16_t table_addr = (uint16_t)(i * 0x10 + 0x500);
+        for (uint16_t spi_addr = 0x92E; spi_addr < 0x932; spi_addr++) {
+            uint16_t val = ah_rfspi_read(spi_addr);
+            ah_rfspi_write(table_addr, val);
+            table_addr++;
+        }
+    }
+    return 0;
 }

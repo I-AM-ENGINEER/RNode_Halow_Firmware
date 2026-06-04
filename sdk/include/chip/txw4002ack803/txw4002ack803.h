@@ -144,7 +144,7 @@ enum phy_rf_mode {
 
 
 #define LO_FREQ_MIN 730000 //730MHz 
-#define LO_FREQ_MAX 930000 //930MHz
+#define LO_FREQ_MAX 1080000 // 1080MHz
 
 
 #define LMAC_VERSION       59//43:6001, 46:4001, 59:4002a

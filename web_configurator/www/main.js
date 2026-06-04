@@ -339,7 +339,7 @@
         const freq = parseFloat(freqField.value);
 
         const powerInvalid = isNaN(power) || power < 1 || power > 25;
-        const freqInvalid = isNaN(freq) || freq < 750 || freq > 930;
+        const freqInvalid = isNaN(freq) || freq < 730 || freq > 1080;
 
         powerField.classList.toggle('error', powerInvalid);
         freqField.classList.toggle('error', freqInvalid);
@@ -349,7 +349,7 @@
     function isHalowFormValid() {
         const power = parseFloat(document.getElementById('halow_power_dbm').value);
         const freq = parseFloat(document.getElementById('halow_central_freq').value);
-        return !(isNaN(power) || power < 1 || power > 25 || isNaN(freq) || freq < 750 || freq > 930);
+        return !(isNaN(power) || power < 1 || power > 25 || isNaN(freq) || freq < 730 || freq > 1080);
     }
 
     function isLbtFormValid() {

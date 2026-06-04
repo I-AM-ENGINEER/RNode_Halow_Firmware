@@ -326,11 +326,11 @@ static void halow_cfg_sanitize(halow_config_t *cfg){
         cfg->mcs = 0;
     }
 
-    if (cfg->central_freq < 7500) {
-        cfg->central_freq = 7500;
+    if (cfg->central_freq < 7300) {
+        cfg->central_freq = 7300;
     }
-    if (cfg->central_freq > 9500) {
-        cfg->central_freq = 9500;
+    if (cfg->central_freq > 10800) {
+        cfg->central_freq = 10800;
     }
 
     if((cfg->bandwidth != 1) &&
