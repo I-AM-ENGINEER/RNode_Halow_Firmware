@@ -145,6 +145,11 @@ static void halow_runtime_reconfig_barrier(void)
 
     lmac_custom_cfg.defer_ac_pd = 1;
     LMAC_HW->AC_PD = 0u;
+
+    uint32_t saved_irq = LMAC_HW->IRQ_EN;
+    LMAC_HW->IRQ_EN = 0u;
+    LMAC_HW->IRQ_PD = 0xffffffffu;
+
     lhw_abort_fsm();
 
     for (uint32_t ac = 0; ac < 4u; ac++) {
@@ -177,6 +182,9 @@ static void halow_runtime_reconfig_barrier(void)
     LMAC_HW->CCA_STAT = 0x0ff0u;
     update_rx_buff_addr();
     lhw_start_rx(0u);
+
+    LMAC_HW->IRQ_EN = saved_irq;
+    LMAC_HW->IRQ_PD = 0xffffffffu;
 
     lmac_custom_cfg.defer_ac_pd = 0;
     for (uint32_t ac = 0; ac < 4u; ac++) {
