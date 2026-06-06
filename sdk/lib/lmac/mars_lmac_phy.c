@@ -51,9 +51,11 @@ struct sk_buff *lmac_gen_tx_agglist(uint32_t ac, uint32_t rate,
 int32 lmac_attempt_tx(uint32_t ac);
 
 lmac_custom_cfg_t lmac_custom_cfg = {
-    .bypass_backoff = 1,   /* skip random CW backoff — safe for point-to-point */
+    .bypass_backoff = 0,    /* standard CSMA/CA for mesh — normal EDCA CW */
     .ignore_cca = HALOW_LBT_IGNORE_CCA_DEF ? 1u : 0u,
-    .fast_tx = 1,          /* direct AC queue injection, skip tx_task */
+    .fast_tx = 1,           /* direct AC queue injection, skip tx_task */
+    .cca_margin_db = HALOW_LBT_CCA_MARGIN_DB_DEF,
+    .cca_mode = HALOW_LBT_CCA_MODE_DEF,
 };
 
 /* lmac_irq_tx_end helpers */
@@ -65,6 +67,7 @@ extern void   lmac_rx_gain_cfg(uint32 gain);
 extern void   update_rx_buff_addr(void);
 extern void   lhw_start_rx(uint32 flags);
 extern uint32 lmac_select_resp_ind(void);
+extern void   lmac_delay_us(uint32 us);
 
 static inline uint8_t lmac_current_ac(void)
 {
@@ -210,32 +213,9 @@ int32 lmac_tx_frm(struct sk_buff *skb)
 }
 
 /*
- * Two bugs prevent MCS0 and MCS10 from working at 1 MHz:
- *
- * Bug 1 — MCS floor (lmac[0x865]):
- *   lmac_cfg_set_bss_bw() sets lmac[0x865] = 1 on every MCS/channel change.
- *   lmac_update_tx_rate_orig reads this floor via a compound condition whose
- *   comma-operator side-effect forces mcs = floor for MCS0 and MCS10, even
- *   when bw_hint==3 (the otherwise-correct 1 MHz path).
- *   Fix: clear lmac[0x865] = 0 immediately before lmac_irq_ac_pd_orig so
- *   lmac_update_tx_rate_orig always sees floor = 0.
- *
- * Bug 2 — MCS10 retry rate table (rc_tb*_orig):
- *   When txi[0x28] (retry count) != 0, lmac_update_tx_rate_orig looks up the
- *   retry rate table with index = mcs*4 + (bw_hint+1)&3.  For MCS10 with
- *   bw_hint=3: index = 40.  The table was designed for MCS0-7 (32 entries),
- *   so rc_tb1_orig[40] = 0x01 → mcs=1.  lmac_gen_txvec_orig then builds the
- *   txvec with MCS=1 in two places:
- *     buf[1]    bits[7:4]  → TXVEC1 bits[15:12]  (primary MCS field)
- *     buf[8..9] bits[10:7] → TXVEC3 bits[10:7]   (MCS via param_3<<7)
- *   Fix: after lmac_irq_ac_pd_orig, if MCS10 is configured but the txvec
- *   buffer has MCS≠10, patch both fields and rewrite TXVEC1.  lmac_cfg_txvec_
- *   part2 (called later from lmac_tx_frm) reads the same patched buffer and
- *   writes the corrected value to TXVEC2-4.
- *
- *   The aggregate was already sized by lmac_gen_tx_agglist_orig for MCS=1
- *   (conservative: fewer frames than MCS10 would allow), but the payload is
- *   transmitted at the correct MCS=10 air rate.
+ * Full CCA/TX pipeline: select AC, rate, build agg list, generate txvec, start CCA.
+ * Replaces lmac_irq_ac_pd_orig entirely — bypasses MCS floor and retry table OOB bugs.
+ * See AGENTS.md "Architecture note: full lmac_irq_ac_pd rewrite" for call chain.
  */
 void lmac_irq_ac_pd(void)
 {
@@ -419,17 +399,8 @@ int32 lmac_attempt_tx(uint32_t ac)
     cw_max = ah_lmac.ce_ctx.cw_max[ac];
 
     cca_dur = lhw_get_cca_remain();
-    if (lmac_custom_cfg.ignore_cca) {
+    if (lmac_custom_cfg.ignore_cca || lmac_custom_cfg.bypass_backoff) {
         backoff = 0u;
-    } else if (lmac_custom_cfg.bypass_backoff) {
-        /*
-         * CW=1 is fine for latency, but backoff=0 with a busy channel
-         * makes the hardware CCA loop forever (BO IRQ never fires,
-         * END_TO_LIMIT timer doesn't tick during CCA wait).
-         * Use a small non-zero backoff so the FSM can complete
-         * its slot count and fire BO IRQ even when CCA stays busy.
-         */
-        backoff = 1u;
     } else if (cca_dur == 0u) {
         txd = (lmac_txd_t *)ah_lmac_tx.pTx_ac_aggr_data[ac].skb_list[0]->head;
         uint32_t retry_exp = (uint32_t)txd->retry_count + (uint32_t)txd->_reserved_29;
@@ -446,7 +417,7 @@ int32 lmac_attempt_tx(uint32_t ac)
 
         backoff = LMAC_HW->RAND_GEN % cw;
     } else {
-        backoff = 0u;
+        backoff = cca_dur;
     }
 
     if ((ah_lmac.qa_freq_hop_flags & 2u) == 0u) {
@@ -456,21 +427,18 @@ int32 lmac_attempt_tx(uint32_t ac)
 
     cca_mode = (uint32_t)ah_lmac.ce_ctx.cca_mode_per_ac[ac] + 3u;
 
-    LMAC_HW->FSM_CFG |= 0x200u;
-    LMAC_HW->FSM_CFG |= 0x400u;
     if (lmac_custom_cfg.ignore_cca) {
-        /* Match the original special path: start a synthetic CCA that
-         * completes immediately, then let the normal BO IRQ handler call
-         * lmac_tx_frm(). This keeps the expected FSM/IRQ ordering intact. */
         lhw_start_cca(2u, 0u);
         LMAC_HW->FSM_CFG &= ~0x200u;
         LMAC_HW->FSM_CFG |= 0x400u;
-        ah_lmac_tx.tx_cca_slot_count = 2;
+        ah_lmac_tx.tx_cca_slot_count = (uint16_t)cca_mode;
         ah_lmac_tx.tx_cca_remain = 0;
         lhw_start_tx(0u);
         lmac_cfg_txvec_part1();
         lmac_tdma_start();
     } else {
+        LMAC_HW->FSM_CFG |= 0x200u;
+        LMAC_HW->FSM_CFG |= 0x400u;
         lhw_start_cca(cca_mode, backoff);
         ah_lmac_tx.tx_cca_slot_count = (uint16_t)cca_mode;
         ah_lmac_tx.tx_cca_remain = (uint16_t)backoff;
@@ -520,6 +488,13 @@ void lmac_irq_tx_end(void)
     LMAC_HW->IRQ_PD = LMAC_IRQ_CLR_TX_END;
     lhw_abort_fsm();
     ah_tdma_abort();
+
+    if ((ah_lmac.lo_table_index != ah_lmac.lo_active_index) &&
+        !(ah_lmac.tx_irq_ctrl_flags & 0x08u) &&
+        !(ah_lmac.qa_freq_hop_flags & 0x02u)) {
+        lmac_lo_table_kick(ah_lmac.lo_table_index);
+        lmac_delay_us(52u);
+    }
 
     if ((LMAC_HW->TX_STAT & 3u) == 0u) {
         uint32_t sub_state = ah_lmac.bo_tx_substate;
@@ -571,11 +546,24 @@ void lmac_irq_tx_end(void)
     ah_lmac.bo_frame_type = 0u;
     update_rx_buff_addr();
     lmac_tdma_start();
-    lhw_start_rx(flags);
-    if (ac < 4u && skb_list_count(&ah_lmac_tx.pTx_ac_queues[ac]) > 0u) {
-        LMAC_HW->AC_PD = 0u;
-        LMAC_HW->AC_PD = 0xfu;
+
+    if (ah_lmac.bo_nav_ctrl & 0x08u) {
+        lmac_set_basic_nav(((ah_lmac.bo_nav_ctrl & 0x1FFFu) >> 6) * 1000u);
     }
+
+    lhw_start_rx(flags);
+
+    if (ah_lmac_tx.tx_pending_nav_dur != 0u) {
+        LMAC_HW->TIMER_CTL |= 0x2000u;
+        LMAC_HW->IRQ_PD = 0x80000u;
+        LMAC_HW->HF_TIMER6 = ah_lmac_tx.tx_pending_nav_dur;
+        LMAC_HW->TIMER_CTL |= 0x1000u;
+    }
+    if (ah_lmac.bo_tx_substate == 1u) {
+        ah_lmac_tx.tx_pending_nav_dur = 0u;
+    }
+
+    ah_lmac.bo_nav_ctrl &= (uint16_t)~0x2000u;
 }
 
 /* Mark the first frame in the current AC aggregate as done.
@@ -1406,22 +1394,24 @@ uint32 lmac_bknoise_get(void)
 /* CCA threshold configuration */
 void lmac_spec_cca_cfg(uint32_t enable)
 {
-    ah_lmac.cca_agc_ctrl_flags &= ~(uint8_t)(1u << 2);
+    uint8_t margin = lmac_custom_cfg.cca_margin_db;
 
     uint8_t cfg[10];
     if (enable == 1) {
-        cfg[0] = 0x9e; cfg[1] = 0xa4; cfg[2] = 0xa7; cfg[3] = 0xa7;
-        cfg[4] = 0xaa; cfg[5] = 0xaa;
+        cfg[0] = 0x9e + margin; cfg[1] = 0xa4 + margin; cfg[2] = 0xa7 + margin; cfg[3] = 0xa7 + margin;
+        cfg[4] = 0xaa + margin; cfg[5] = 0xaa + margin;
     } else {
         uint8_t v = (ah_lmac.bss_bw == 3) ? 0xaa : 0xa7;
-        cfg[0] = v; cfg[1] = v; cfg[2] = 0xaa; cfg[3] = 0xaa;
-        cfg[4] = 0xae; cfg[5] = 0xae;
+        cfg[0] = v + margin; cfg[1] = v + margin; cfg[2] = 0xaa + margin; cfg[3] = 0xaa + margin;
+        cfg[4] = 0xae + margin; cfg[5] = 0xae + margin;
     }
-    cfg[6] = 0xb5; cfg[7] = 0xb8; cfg[8] = 0xb8; cfg[9] = 0xbb;
+    cfg[6] = 0xb5 + margin; cfg[7] = 0xb8 + margin; cfg[8] = 0xb8 + margin; cfg[9] = 0xbb + margin;
     ah_wphy_cca_th_cfg(cfg);
 }
 
-/* Adjust CCA thresholds based on background RSSI */
+/* Adjust CCA thresholds based on background RSSI.
+ * Adds cca_margin_db (from lmac_custom_cfg) to raise ED threshold
+ * above the noise floor so ambient noise doesn't trigger CCA busy. */
 void lmac_adjust_cca_threshold(int32_t rssi)
 {
     if (rssi < -90) rssi = -90;
@@ -1434,7 +1424,7 @@ void lmac_adjust_cca_threshold(int32_t rssi)
     if (ah_lmac.bss_bw == 2)      adj += -3;
     else if (ah_lmac.bss_bw == 3) adj += -6;
 
-    int8_t base = ah_lmac.cca_threshold_offset + adj;
+    int8_t base = ah_lmac.cca_threshold_offset + adj + lmac_custom_cfg.cca_margin_db;
 
     uint8_t cfg[10];
     cfg[0] = (uint8_t)(base + 13);

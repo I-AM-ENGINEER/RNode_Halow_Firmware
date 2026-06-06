@@ -107,6 +107,8 @@
 #define HALOW_CONFIG_SPOWER_EN_DEF              (false)
 #define HALOW_LBT_IGNORE_CCA_DEF                (false)
 #define HALOW_LBT_CONFIG_CCA_EN_DEF             (true)
+#define HALOW_LBT_CCA_MARGIN_DB_DEF             (10)
+#define HALOW_LBT_CCA_MODE_DEF                  (2)     /* 0=ED, 1=CS, 2=ED+CS, 3=disabled */
 
 #define HALOW_LBT_CONFIG_EN_DEF                 (true)
 #define HALOW_LBT_CONFIG_NSWS_DEF               (256)

@@ -28,6 +28,8 @@ typedef struct {
     uint8_t ignore_cca;       /* 0 = wait for CCA/BO path; 1 = force immediate BO-done */
     uint8_t fast_tx;          /* 0 = normal path through tx_task;  1 = direct AC queue injection */
     uint8_t defer_ac_pd;      /* 1 = lmac_fast_tx queues but does NOT trigger AC_PD; caller must kick */
+    int8_t  cca_margin_db;    /* raise CCA ED threshold this many units above default register values */
+    uint8_t cca_mode;         /* 0=ED (power only), 1=CS (WiFi signature), 2=ED+CS (full), 3=disabled */
 } lmac_custom_cfg_t;
 
 extern lmac_custom_cfg_t lmac_custom_cfg;
