@@ -18,6 +18,9 @@ int32_t web_api_tcp_server_cfg_post( const cJSON *in, cJSON *out );
 int32_t web_api_lbt_cfg_get( const cJSON *in, cJSON *out );
 int32_t web_api_lbt_cfg_post( const cJSON *in, cJSON *out );
 
+int32_t web_api_cca_cfg_get( const cJSON *in, cJSON *out );
+int32_t web_api_cca_cfg_post( const cJSON *in, cJSON *out );
+
 int32_t web_api_telemetry_cfg_get( const cJSON *in, cJSON *out );
 int32_t web_api_telemetry_cfg_post( const cJSON *in, cJSON *out );
 int32_t web_api_telemetry_send_post( const cJSON *in, cJSON *out );

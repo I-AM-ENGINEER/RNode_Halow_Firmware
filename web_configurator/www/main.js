@@ -98,9 +98,17 @@
 
     function readLbtForm() {
         return {
-            cca_en: document.getElementById('lbt_cca_en').checked
+            en: document.getElementById('cca_en').checked ? 1 : 0,
+            ftpct: parseFloat(document.getElementById('cca_ftpct').value) || 0,
+            dlpct: parseFloat(document.getElementById('cca_dlpct').value) || 0,
+            cwmin: parseInt(document.getElementById('cca_cwmin').value, 10),
+            cwmax: parseInt(document.getElementById('cca_cwmax').value, 10),
+            thdyn: parseInt(document.getElementById('cca_thdyn').value, 10),
+            sens: parseInt(document.getElementById('cca_sens').value, 10)
         };
     }
+
+    function readCcaForm() { return readLbtForm(); }
 
     function readNetForm() {
         return {
@@ -209,6 +217,10 @@
             btn = document.getElementById('save_lbt');
             isValid = isLbtFormValid();
         }
+        if (group === 'cca') {
+            current = jsonSnapshot(readCcaForm());
+            btn = document.getElementById('save_cca');
+        }
         if (group === 'net') {
             current = jsonSnapshot(readNetForm());
             btn = document.getElementById('save_net');
@@ -252,6 +264,7 @@
     function snapshotGroup(group) {
         if (group === 'halow') { baselines.halow = jsonSnapshot(readHalowForm()); }
         if (group === 'lbt') { baselines.lbt = jsonSnapshot(readLbtForm()); }
+        if (group === 'cca') { baselines.cca = jsonSnapshot(readCcaForm()); }
         if (group === 'net') { baselines.net = jsonSnapshot(readNetForm()); }
         if (group === 'slip') { baselines.slip = jsonSnapshot(readSlipForm()); }
         if (group === 'log') { baselines.log = jsonSnapshot(readLogForm()); }
@@ -277,7 +290,7 @@
     function setupDirtyTracking() {
         const map = [
             { group: 'halow', btn: 'save_halow', ids: ['halow_power_dbm', 'halow_central_freq', 'halow_mcs_index', 'halow_bandwidth'] },
-            { group: 'lbt', btn: 'save_lbt', ids: ['lbt_cca_en'] },
+            { group: 'lbt', btn: 'save_lbt', ids: ['cca_en', 'cca_ftpct', 'cca_dlpct', 'cca_cwmin', 'cca_cwmax', 'cca_thdyn', 'cca_sens'] },
             { group: 'net', btn: 'save_net', ids: ['net_dhcp', 'net_ip_address', 'net_gw_address', 'net_netmask'] },
             { group: 'slip', btn: 'save_slip', ids: ['slip_enable', 'slip_baud', 'slip_ip_address', 'slip_gw_address'] },
             { group: 'log', btn: 'save_log', ids: ['log_udp_enable', 'log_udp_host', 'log_udp_port'] },
@@ -352,7 +365,40 @@
         return !(isNaN(power) || power < 1 || power > 25 || isNaN(freq) || freq < 730 || freq > 1080);
     }
 
+    function validateLbtFields() {
+        const ftpctField = document.getElementById('cca_ftpct');
+        const dlpctField = document.getElementById('cca_dlpct');
+        const cwminField = document.getElementById('cca_cwmin');
+        const cwmaxField = document.getElementById('cca_cwmax');
+        const sensField  = document.getElementById('cca_sens');
+
+        const ftpct = parseFloat(ftpctField.value);
+        const dlpct = parseFloat(dlpctField.value);
+        const cwmin = parseInt(cwminField.value, 10);
+        const cwmax = parseInt(cwmaxField.value, 10);
+        const sens  = parseInt(sensField.value, 10);
+
+        ftpctField.classList.toggle('error', isNaN(ftpct) || ftpct < 0.1 || ftpct > 100);
+        dlpctField.classList.toggle('error', isNaN(dlpct) || (dlpct !== 0 && dlpct < 1) || dlpct > 100);
+        cwminField.classList.toggle('error', isNaN(cwmin) || cwmin < 1 || cwmin > 2047);
+        cwmaxField.classList.toggle('error', isNaN(cwmax) || cwmax < 1 || cwmax > 2047 || cwmax < cwmin);
+        sensField.classList.toggle('error',  isNaN(sens)  || sens < 0 || sens > 10);
+
+        updateSaveButton('lbt');
+    }
+
     function isLbtFormValid() {
+        const ftpct = parseFloat(document.getElementById('cca_ftpct').value);
+        const dlpct = parseFloat(document.getElementById('cca_dlpct').value);
+        const cwmin = parseInt(document.getElementById('cca_cwmin').value, 10);
+        const cwmax = parseInt(document.getElementById('cca_cwmax').value, 10);
+        const sens  = parseInt(document.getElementById('cca_sens').value, 10);
+
+        if (isNaN(ftpct) || ftpct < 0.1 || ftpct > 100) return false;
+        if (isNaN(dlpct) || (dlpct !== 0 && dlpct < 1) || dlpct > 100) return false;
+        if (isNaN(cwmin) || cwmin < 1 || cwmin > 2047) return false;
+        if (isNaN(cwmax) || cwmax < 1 || cwmax > 2047 || cwmax < cwmin) return false;
+        if (isNaN(sens) || sens < 0 || sens > 10) return false;
         return true;
     }
 
@@ -531,6 +577,12 @@
         return true;
     }
 
+    function clampDecimal(e, decimals) {
+        const sep = e.target.value.search(/[.,]/);
+        if (sep >= 0 && e.target.value.length - sep - 1 > decimals)
+            e.target.value = e.target.value.slice(0, sep + 1 + decimals);
+    }
+
     function setupHandlers() {
         setupTableSort('.nearby-table', nearbyState, parseNearbyRow, renderNearby);
         setupTableSort('.reticulum-table', reticulumState, parseReticulumRow, renderReticulum);
@@ -549,6 +601,14 @@
         document.getElementById('save_halow').addEventListener('click', saveHalow);
 
         document.getElementById('save_lbt').addEventListener('click', saveLbt);
+        document.getElementById('cca_ftpct').addEventListener('input', function(e) { clampDecimal(e, 1); validateLbtFields(); });
+        document.getElementById('cca_dlpct').addEventListener('input', function(e) { clampDecimal(e, 1); validateLbtFields(); });
+        document.getElementById('cca_cwmin').addEventListener('input', validateLbtFields);
+        document.getElementById('cca_cwmax').addEventListener('input', validateLbtFields);
+        document.getElementById('cca_sens').addEventListener('input', validateLbtFields);
+        document.getElementById('cca_thdyn').addEventListener('change', updateCcaThresholdFields);
+
+        updateCcaThresholdFields();
 
         document.getElementById('net_dhcp').addEventListener('change', () => { updateNetDisabled(); validateNetFields(); });
         document.getElementById('net_ip_address').addEventListener('input', validateNetFields);
@@ -639,6 +699,8 @@
             el.disabled = !utilEnabled;
         }
     }
+
+    function updateCcaThresholdFields() { }
 
     function updateNetDisabled() {
         const dhcp = document.getElementById('net_dhcp').checked;
@@ -1345,8 +1407,15 @@
         updateBandwidthDisabled();
         updateMtuMaxDisplay();
 
-        const lbt = pick(state?.lbt, state?.api_lbt_cfg, state?.lbt_cfg);
-        setCheckbox('lbt_cca_en', lbt.cca_en);
+        const cca = pick(state?.cca, state?.api_cca_cfg, state?.cca_cfg);
+        setCheckbox('cca_en', cca.en ?? 1);
+        setInput('cca_ftpct', cca.ftpct ?? 0.1);
+        setInput('cca_dlpct', cca.dlpct ?? 100);
+        setInput('cca_cwmin', cca.cwmin ?? 31);
+        setInput('cca_cwmax', cca.cwmax ?? 1023);
+        setSelect('cca_thdyn', String(cca.thdyn ?? 0));
+        setInput('cca_sens', cca.sens ?? 5);
+        validateLbtFields();
 
         const net = pick(state?.net, state?.api_net_cfg, state?.net_cfg);
         setCheckbox('net_dhcp', net.dhcp);
@@ -1452,11 +1521,21 @@
     }
 
     async function saveLbt() {
-        const payload = readLbtForm();
+        if (!isLbtFormValid()) return;
         try {
-            await postJson('/api/lbt_cfg', payload);
+            await postJson('/api/cca_cfg', readLbtForm());
         } catch (err) {
             console.error('saveLbt error', err);
+        }
+        loadAll();
+    }
+
+    async function saveCca() {
+        const payload = readCcaForm();
+        try {
+            await postJson('/api/cca_cfg', payload);
+        } catch (err) {
+            console.error('saveCca error', err);
         }
         loadAll();
     }

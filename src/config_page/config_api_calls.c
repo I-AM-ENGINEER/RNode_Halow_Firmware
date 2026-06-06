@@ -17,6 +17,7 @@
 
 #include "halow.h"
 #include "halow_lbt.h"
+#include "halow_cca.h"
 #include "net_ip.h"
 #include "tcp_server.h"
 #include "utils.h"
@@ -628,8 +629,6 @@ int32_t web_api_lbt_cfg_get( const cJSON *in, cJSON *out ){
     (void)cJSON_AddNumberToObject(out, "bmin",  (double)cfg.backoff_random_min_us);
     (void)cJSON_AddNumberToObject(out, "bmax",  (double)cfg.backoff_random_max_us);
 
-    (void)cJSON_AddBoolToObject(out,   "cca_en",(cfg.cca_enabled != 0) ? 1 : 0);
-
     (void)cJSON_AddBoolToObject(out,   "uen",   (cfg.util_enabled != 0) ? 1 : 0);
     (void)cJSON_AddNumberToObject(out, "umax",  (double)cfg.util_max_percent);
     (void)cJSON_AddNumberToObject(out, "uwin",  (double)cfg.util_refill_window_ms);
@@ -665,8 +664,6 @@ int32_t web_api_lbt_cfg_post( const cJSON *in, cJSON *out ){
     if (json_get_int(in, "bmin", &v))  { if (v >= 0 && v <= 65535) cfg.backoff_random_min_us       = (uint16_t)v; }
     if (json_get_int(in, "bmax", &v))  { if (v >= 0 && v <= 65535) cfg.backoff_random_max_us       = (uint16_t)v; }
 
-    if (json_get_bool(in, "cca_en", &b))  { cfg.cca_enabled = b ? 1 : 0; }
-
     if (json_get_bool(in, "uen", &b))  { cfg.util_enabled = b ? 1 : 0; }
     if (json_get_int(in, "umax", &v))  { if (v >= 0 && v <= 100)   cfg.util_max_percent           = (uint8_t)v;  }
     if (json_get_int(in, "uwin", &v))  { if (v >= 1)               cfg.util_refill_window_ms      = (uint32_t)v; }
@@ -679,6 +676,55 @@ int32_t web_api_lbt_cfg_post( const cJSON *in, cJSON *out ){
 
     //return web_api_lbt_cfg_get(NULL, out);
     return web_api_halow_cfg_get(NULL, out);
+}
+
+int32_t web_api_cca_cfg_get( const cJSON *in, cJSON *out ){
+    halow_cca_config_t cfg;
+
+    (void)in;
+
+    if (out == NULL) {
+        return WEB_API_RC_BAD_REQUEST;
+    }
+
+    halow_cca_config_load(&cfg);
+
+    (void)cJSON_AddNumberToObject(out, "en",     (double)cfg.cca_enabled);
+    (void)cJSON_AddNumberToObject(out, "ftpct",  (double)cfg.cca_force_tx_pct / 10.0);
+    (void)cJSON_AddNumberToObject(out, "dlpct",  (double)cfg.duty_limit_pct / 10.0);
+    (void)cJSON_AddNumberToObject(out, "cwmin",  (double)cfg.cw_min);
+    (void)cJSON_AddNumberToObject(out, "cwmax",  (double)cfg.cw_max);
+    (void)cJSON_AddNumberToObject(out, "thdyn",  (double)cfg.cca_threshold_dynamic);
+    (void)cJSON_AddNumberToObject(out, "sens",   (double)cfg.cca_sensitivity);
+
+    return WEB_API_RC_OK;
+}
+
+int32_t web_api_cca_cfg_post( const cJSON *in, cJSON *out ){
+    halow_cca_config_t cfg;
+    int v;
+
+    if (in == NULL || !cJSON_IsObject(in) || out == NULL) {
+        log_warn("cca_cfg_post bad json");
+        return api_err(out, WEB_API_RC_BAD_REQUEST, "bad json");
+    }
+
+    halow_cca_config_load(&cfg);
+
+    if (json_get_int(in, "en",     &v)) { cfg.cca_enabled = (v != 0) ? 1u : 0u; }
+    { double d; if (json_get_double(in, "ftpct", &d)) { int t = (int)(d * 10.0 + 0.5); if (t >= 1 && t <= 1000) cfg.cca_force_tx_pct = (uint16_t)t; } }
+    { double d; if (json_get_double(in, "dlpct", &d)) { int t = (int)(d * 10.0 + 0.5); if (t >= 0 && t <= 1000) cfg.duty_limit_pct = (uint16_t)t; } }
+    if (json_get_int(in, "cwmin",  &v)) { if (v >= 1 && v <= 2047) cfg.cw_min = (uint16_t)v; }
+    if (json_get_int(in, "cwmax",  &v)) { if (v >= 1 && v <= 2047) cfg.cw_max = (uint16_t)v; }
+    if (json_get_int(in, "thdyn",  &v)) { cfg.cca_threshold_dynamic = (v != 0) ? 1u : 0u; }
+    if (json_get_int(in, "sens",   &v)) { if (v >= 0 && v <= 10) cfg.cca_sensitivity = (uint8_t)v; }
+
+    halow_cca_config_apply(&cfg);
+    halow_cca_config_save(&cfg);
+
+    log_debug("cca_cfg updated");
+
+    return web_api_cca_cfg_get(NULL, out);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -965,6 +1011,7 @@ int32_t web_api_all_get( const cJSON *in, cJSON *out ){
     cJSON *net   = NULL;
     cJSON *tcp   = NULL;
     cJSON *lbt   = NULL;
+    cJSON *cca   = NULL;
     cJSON *ota   = NULL;
     cJSON *slip  = NULL;
     cJSON *log   = NULL;
@@ -986,6 +1033,7 @@ int32_t web_api_all_get( const cJSON *in, cJSON *out ){
     net   = cJSON_CreateObject();
     tcp   = cJSON_CreateObject();
     lbt   = cJSON_CreateObject();
+    cca   = cJSON_CreateObject();
     ota   = cJSON_CreateObject();
     slip  = cJSON_CreateObject();
     log   = cJSON_CreateObject();
@@ -995,7 +1043,7 @@ int32_t web_api_all_get( const cJSON *in, cJSON *out ){
     radio = cJSON_CreateObject();
     telemetry = cJSON_CreateObject();
 
-    if (!halow || !net || !tcp || !lbt || !ota || !slip || !log || !telemetry || !stat || !dev || !radio) {
+    if (!halow || !net || !tcp || !lbt || !cca || !ota || !slip || !log || !telemetry || !stat || !dev || !radio) {
         rc = WEB_API_RC_INTERNAL;
         goto fail;
     }
@@ -1010,6 +1058,9 @@ int32_t web_api_all_get( const cJSON *in, cJSON *out ){
     if (rc != WEB_API_RC_OK) goto fail;
 
     rc = web_api_lbt_cfg_get(NULL, lbt);
+    if (rc != WEB_API_RC_OK) goto fail;
+
+    rc = web_api_cca_cfg_get(NULL, cca);
     if (rc != WEB_API_RC_OK) goto fail;
 
     rc = web_api_online_ota_get(NULL, ota);
@@ -1037,6 +1088,7 @@ int32_t web_api_all_get( const cJSON *in, cJSON *out ){
     cJSON_AddItemToObject(out, "net",   net);     net   = NULL;
     cJSON_AddItemToObject(out, "tcp",   tcp);     tcp   = NULL;
     cJSON_AddItemToObject(out, "lbt",   lbt);     lbt   = NULL;
+    cJSON_AddItemToObject(out, "cca",   cca);     cca   = NULL;
     cJSON_AddItemToObject(out, "ota",   ota);     ota   = NULL;
     cJSON_AddItemToObject(out, "slip",  slip);    slip  = NULL;
     cJSON_AddItemToObject(out, "log",   log);     log   = NULL;
@@ -1051,6 +1103,7 @@ fail:
     cJSON_Delete(net);
     cJSON_Delete(tcp);
     cJSON_Delete(lbt);
+    cJSON_Delete(cca);
     cJSON_Delete(ota);
     cJSON_Delete(slip);
     cJSON_Delete(log);

@@ -203,13 +203,43 @@
             </div>
 
             <div class="panel">
-                <h3>Listen Before Talk (LBT)</h3>
-                <fieldset id="lbt_fields">
-                    <label class="toggle-label">
-                        <span>LBT enable (CCA)</span>
-                        <input type="checkbox" id="lbt_cca_en">
-                    </label>
-                </fieldset>
+                <h3>LBT Settings</h3>
+                <label class="toggle-label">
+                    <span>CCA enabled</span>
+                    <input type="checkbox" id="cca_en">
+                </label>
+                <p class="note">Disabling may cause high collision rate, try change threshold settings before disable.</p>
+                <label>
+                    <span>Sensitivity</span>
+                    <input type="number" id="cca_sens" min="0" max="10" value="5">
+                </label>
+                <p class="note">Valid values: 0-10. 0 - tolerant (ignore activity on channel), 10 - strict (TX only when silence).</p>
+                <label>
+                    <span>Threshold mode</span>
+                    <select id="cca_thdyn">
+                        <option value="0">Fixed</option>
+                        <option value="1">Dynamic (based on noise floor)</option>
+                    </select>
+                </label>
+                <label>
+                    <span>Duty Cycle force TX (%)</span>
+                    <input type="number" id="cca_ftpct" min="0.1" max="100" step="0.1" value="0.1">
+                </label>
+                <p class="note">Valid values: 0-100%. Minimum duty cycle: guarantees forced TX at regular intervals even in busy channel.</p>
+                <label>
+                    <span>Duty Cycle limit (%)</span>
+                    <input type="number" id="cca_dlpct" min="0" max="100" step="0.1" value="100">
+                </label>
+                <p class="note">Valid values: 0-100%. Maximum airtime. 100% = no limit. Limits TX time even on free channel.</p>
+                <label>
+                    <span>CW min (CCA slot)</span>
+                    <input type="number" id="cca_cwmin" min="1" max="2047" value="31">
+                </label>
+                <p class="note">Valid values: 1-2047. Higher (31/63) - less collisions. Lower (7/15) - lower latency, higher priority.</p>
+                <label>
+                    <span>CW max (CCA slot)</span>
+                    <input type="number" id="cca_cwmax" min="1" max="2047" value="1023">
+                </label>
                 <div class="panel-actions">
                     <button type="button" id="save_lbt" disabled>Save</button>
                 </div>

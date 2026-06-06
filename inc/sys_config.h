@@ -2,7 +2,7 @@
 #define __SYS_CONFIG_H__
 
 #define PROJECT_TYPE           PRO_TYPE_WNB
-#define FW_VERSION              "2.1.0b"
+#define FW_VERSION              "2.1.1b"
 #define FW_FULL_VERSION         FW_VERSION " (" __DATE__ " " __TIME__ ")"
 
 #define IP_SOF_BROADCAST       1
@@ -106,9 +106,13 @@
 #define HALOW_CONFIG_MCS_DEF                    (0)
 #define HALOW_CONFIG_SPOWER_EN_DEF              (false)
 #define HALOW_LBT_IGNORE_CCA_DEF                (false)
-#define HALOW_LBT_CONFIG_CCA_EN_DEF             (true)
-#define HALOW_LBT_CCA_MARGIN_DB_DEF             (10)
-#define HALOW_LBT_CCA_MODE_DEF                  (2)     /* 0=ED, 1=CS, 2=ED+CS, 3=disabled */
+#define HALOW_LBT_CCA_ENABLED_DEF               (true)
+#define HALOW_LBT_CCA_SENSITIVITY_DEF            (5)
+#define HALOW_LBT_CCA_FORCE_TX_PCT_DEF          (1)
+#define HALOW_LBT_DUTY_LIMIT_PCT_DEF            (1000)
+#define HALOW_LBT_CW_MIN_DEF                    (31)
+#define HALOW_LBT_CW_MAX_DEF                    (1023)
+#define HALOW_LBT_CCA_THRESHOLD_DYNAMIC_DEF     (0)
 
 #define HALOW_LBT_CONFIG_EN_DEF                 (true)
 #define HALOW_LBT_CONFIG_NSWS_DEF               (256)

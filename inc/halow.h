@@ -31,7 +31,6 @@ void halow_config_load(halow_config_t *cfg);
 void halow_config_save(const halow_config_t *cfg);
 void halow_config_apply(const halow_config_t *cfg);
 void halow_config_set_mcs(uint8_t mcs);
-void halow_set_cca_enabled(uint8_t enabled);
 uint32_t halow_get_mtu(uint8_t mcs);
 
 #define HALOW_MCS_DEFAULT 0xFF  /* use globally configured MCS */

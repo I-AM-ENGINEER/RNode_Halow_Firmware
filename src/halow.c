@@ -655,10 +655,6 @@ int32_t halow_tx( const uint8_t *data, uint32_t len, const uint8_t destination_m
     return halow_send_frame(data, len, destination_mac, mcs);
 }
 
-void halow_set_cca_enabled(uint8_t enabled) {
-    lmac_custom_cfg.ignore_cca = (enabled == 0) ? 1u : 0u;
-}
-
 uint32_t halow_get_mtu(uint8_t mcs) {
     halow_config_t cfg;
     halow_config_load(&cfg);

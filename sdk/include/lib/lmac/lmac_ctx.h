@@ -52,7 +52,7 @@ struct lmac_ctx_extra_ies {
 
 struct ah_ce_ctx {
     uint8_t _pre_cw_0[0x18];      /* 0x004-0x01B: cipher engine + misc */
-    uint8_t cca_mode_per_ac[4];   /* 0x01C-0x01F: CCA mode per AC (0=ED, 1=CS, 2=ED+CS) */
+    uint8_t cca_mode_per_ac[4];   /* 0x01C-0x01F: per-AC CCA BW param (+3 → lhw_start_cca bw field). Always 0 in modem STA. */
     uint8_t _pre_cw_1c[8];        /* 0x020-0x027 */
     uint16_t cw_min[4];           /* 0x028-0x02F: EDCA CW_min per AC (read by lmac_attempt_tx_orig) */
     uint8_t _gap_030[8];          /* 0x030-0x037 */

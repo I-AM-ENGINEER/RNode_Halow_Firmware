@@ -24,12 +24,17 @@ extern "C" {
  *                        DIFS from 264 µs to SIFS (160 µs).
  */
 typedef struct {
-    uint8_t bypass_backoff;   /* 0 = standard CSMA/CA;  1 = CW=1, zero backoff */
-    uint8_t ignore_cca;       /* 0 = wait for CCA/BO path; 1 = force immediate BO-done */
-    uint8_t fast_tx;          /* 0 = normal path through tx_task;  1 = direct AC queue injection */
-    uint8_t defer_ac_pd;      /* 1 = lmac_fast_tx queues but does NOT trigger AC_PD; caller must kick */
-    int8_t  cca_margin_db;    /* raise CCA ED threshold this many units above default register values */
-    uint8_t cca_mode;         /* 0=ED (power only), 1=CS (WiFi signature), 2=ED+CS (full), 3=disabled */
+    uint8_t bypass_backoff;
+    uint8_t ignore_cca;
+    uint8_t fast_tx;
+    uint8_t defer_ac_pd;
+    uint8_t cca_enabled;
+    uint8_t cca_sensitivity;
+    uint16_t cca_force_tx_pct;
+    uint16_t duty_limit_pct;
+    uint16_t cw_min;
+    uint16_t cw_max;
+    uint8_t cca_threshold_dynamic;
 } lmac_custom_cfg_t;
 
 extern lmac_custom_cfg_t lmac_custom_cfg;

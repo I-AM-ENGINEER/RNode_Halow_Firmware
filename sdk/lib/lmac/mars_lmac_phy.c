@@ -51,12 +51,22 @@ struct sk_buff *lmac_gen_tx_agglist(uint32_t ac, uint32_t rate,
 int32 lmac_attempt_tx(uint32_t ac);
 
 lmac_custom_cfg_t lmac_custom_cfg = {
-    .bypass_backoff = 0,    /* standard CSMA/CA for mesh — normal EDCA CW */
-    .ignore_cca = HALOW_LBT_IGNORE_CCA_DEF ? 1u : 0u,
-    .fast_tx = 1,           /* direct AC queue injection, skip tx_task */
-    .cca_margin_db = HALOW_LBT_CCA_MARGIN_DB_DEF,
-    .cca_mode = HALOW_LBT_CCA_MODE_DEF,
+    .bypass_backoff        = 0,
+    .ignore_cca            = HALOW_LBT_IGNORE_CCA_DEF ? 1u : 0u,
+    .fast_tx               = 1,
+    .cca_enabled           = HALOW_LBT_CCA_ENABLED_DEF ? 1u : 0u,
+    .cca_sensitivity        = HALOW_LBT_CCA_SENSITIVITY_DEF,
+    .cca_force_tx_pct      = HALOW_LBT_CCA_FORCE_TX_PCT_DEF,
+    .duty_limit_pct        = HALOW_LBT_DUTY_LIMIT_PCT_DEF,
+    .cw_min                = HALOW_LBT_CW_MIN_DEF,
+    .cw_max                = HALOW_LBT_CW_MAX_DEF,
+    .cca_threshold_dynamic = HALOW_LBT_CCA_THRESHOLD_DYNAMIC_DEF,
 };
+
+static uint32_t duty_next_tx_jiffies;
+static uint32_t duty_limit_next_jiffies;
+
+#define DUTY_FRAME_MS 10u
 
 /* lmac_irq_tx_end helpers */
 extern void   lhw_abort_fsm(void);
@@ -252,6 +262,13 @@ void lmac_irq_ac_pd(void)
     if (ac >= 4u)
         return;
 
+    /* 9. Refresh CCA threshold before TX */
+    if (lmac_custom_cfg.cca_threshold_dynamic) {
+        lmac_adjust_cca_threshold((int32_t)(ah_lmac.cca_threshold_base));
+    } else {
+        lmac_spec_cca_cfg(1u);
+    }
+
     /* 9. Update TX rate for selected AC.
      * Our function outputs: param2=mcs, param3=bw_hint */
     uint8_t mcs, bw_hint;
@@ -371,7 +388,7 @@ struct sk_buff *lmac_gen_tx_agglist(uint32_t ac, uint32_t rate,
  */
 int32 lmac_attempt_tx(uint32_t ac)
 {
-    uint32_t cw_min, cw_max, cw, backoff, cca_dur, cca_mode;
+    uint32_t cw_min, cw_max, cw, backoff, cca_dur;
     lmac_txd_t *txd;
 
     if (ac > 3u)
@@ -380,26 +397,38 @@ int32 lmac_attempt_tx(uint32_t ac)
     if (ah_lmac_tx.pTx_ac_aggr_data[ac].queued_count == 0u)
         return -1;
 
-    /* FSM idle check — exact match with original lmac_attempt_tx_orig.
-     * Bits [9:8] of FSM_STAT must be zero (FSM sub-state idle).
-     * Bits [25:24] of FSM_STAT must be 0b01 (FSM in RX idle mode).
-     * Without this check, CCA is started on a non-idle FSM after
-     * interference aborts the previous TX, causing a hardware freeze. */
     {
         uint32_t fsm = LMAC_HW->FSM_STAT;
         if (((fsm >> 8) & 3u) != 0u || ((fsm >> 24) & 3u) != 1u)
             return -1;
     }
 
-    /* NAV timer check — original also gates on HF_TIMER3/4 inside attempt_tx */
     if (LMAC_HW->HF_TIMER3 != 0 || LMAC_HW->HF_TIMER4 != 0)
         return -1;
 
-    cw_min = ah_lmac.ce_ctx.cw_min[ac];
-    cw_max = ah_lmac.ce_ctx.cw_max[ac];
+    cw_min = lmac_custom_cfg.cw_min;
+    cw_max = lmac_custom_cfg.cw_max;
+
+    uint8_t cca_disabled = !lmac_custom_cfg.cca_enabled || lmac_custom_cfg.ignore_cca || lmac_custom_cfg.bypass_backoff;
+
+    if (!cca_disabled && lmac_custom_cfg.cca_force_tx_pct > 0u) {
+        if (lmac_custom_cfg.cca_force_tx_pct >= 1000u) {
+            cca_disabled = 1u;
+        } else {
+            uint32_t now = (uint32_t)os_jiffies();
+            if (duty_next_tx_jiffies == 0u) {
+                uint32_t interval = DUTY_FRAME_MS * 1000u / (uint32_t)lmac_custom_cfg.cca_force_tx_pct;
+                duty_next_tx_jiffies = now + interval;
+            }
+            if (now >= duty_next_tx_jiffies) {
+                cca_disabled = 1u;
+                duty_next_tx_jiffies = 0u;
+            }
+        }
+    }
 
     cca_dur = lhw_get_cca_remain();
-    if (lmac_custom_cfg.ignore_cca || lmac_custom_cfg.bypass_backoff) {
+    if (cca_disabled) {
         backoff = 0u;
     } else if (cca_dur == 0u) {
         txd = (lmac_txd_t *)ah_lmac_tx.pTx_ac_aggr_data[ac].skb_list[0]->head;
@@ -421,17 +450,24 @@ int32 lmac_attempt_tx(uint32_t ac)
     }
 
     if ((ah_lmac.qa_freq_hop_flags & 2u) == 0u) {
-        /* lmac_lo_table_kick() takes a channel-table index, not packed LO frequency bits. */
         lmac_lo_table_kick(ah_lmac.lo_table_index);
     }
 
-    cca_mode = (uint32_t)ah_lmac.ce_ctx.cca_mode_per_ac[ac] + 3u;
+    if (lmac_custom_cfg.duty_limit_pct > 0u && lmac_custom_cfg.duty_limit_pct < 1000u) {
+        uint32_t now = (uint32_t)os_jiffies();
+        if (now < duty_limit_next_jiffies)
+            return -1;
+        uint32_t cooldown = DUTY_FRAME_MS * (1000u - (uint32_t)lmac_custom_cfg.duty_limit_pct)
+                          / (uint32_t)lmac_custom_cfg.duty_limit_pct;
+        if (cooldown == 0u) cooldown = 1u;
+        duty_limit_next_jiffies = now + cooldown;
+    }
 
-    if (lmac_custom_cfg.ignore_cca) {
+    if (cca_disabled) {
         lhw_start_cca(2u, 0u);
         LMAC_HW->FSM_CFG &= ~0x200u;
         LMAC_HW->FSM_CFG |= 0x400u;
-        ah_lmac_tx.tx_cca_slot_count = (uint16_t)cca_mode;
+        ah_lmac_tx.tx_cca_slot_count = 3u;
         ah_lmac_tx.tx_cca_remain = 0;
         lhw_start_tx(0u);
         lmac_cfg_txvec_part1();
@@ -439,8 +475,8 @@ int32 lmac_attempt_tx(uint32_t ac)
     } else {
         LMAC_HW->FSM_CFG |= 0x200u;
         LMAC_HW->FSM_CFG |= 0x400u;
-        lhw_start_cca(cca_mode, backoff);
-        ah_lmac_tx.tx_cca_slot_count = (uint16_t)cca_mode;
+        lhw_start_cca(3u, backoff);
+        ah_lmac_tx.tx_cca_slot_count = 3u;
         ah_lmac_tx.tx_cca_remain = (uint16_t)backoff;
         lhw_start_tx(0u);
         lmac_cfg_txvec_part1();
@@ -1394,7 +1430,7 @@ uint32 lmac_bknoise_get(void)
 /* CCA threshold configuration */
 void lmac_spec_cca_cfg(uint32_t enable)
 {
-    uint8_t margin = lmac_custom_cfg.cca_margin_db;
+    int8_t margin = (int8_t)(5 * (10 - lmac_custom_cfg.cca_sensitivity));
 
     uint8_t cfg[10];
     if (enable == 1) {
@@ -1410,8 +1446,7 @@ void lmac_spec_cca_cfg(uint32_t enable)
 }
 
 /* Adjust CCA thresholds based on background RSSI.
- * Adds cca_margin_db (from lmac_custom_cfg) to raise ED threshold
- * above the noise floor so ambient noise doesn't trigger CCA busy. */
+ * Sensitivity 0-10 maps to margin -50..0 added above noise. */
 void lmac_adjust_cca_threshold(int32_t rssi)
 {
     if (rssi < -90) rssi = -90;
@@ -1424,7 +1459,8 @@ void lmac_adjust_cca_threshold(int32_t rssi)
     if (ah_lmac.bss_bw == 2)      adj += -3;
     else if (ah_lmac.bss_bw == 3) adj += -6;
 
-    int8_t base = ah_lmac.cca_threshold_offset + adj + lmac_custom_cfg.cca_margin_db;
+    int8_t margin = (int8_t)(-5 * lmac_custom_cfg.cca_sensitivity);
+    int8_t base = ah_lmac.cca_threshold_offset + adj + margin;
 
     uint8_t cfg[10];
     cfg[0] = (uint8_t)(base + 13);

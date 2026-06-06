@@ -26,6 +26,7 @@
 #include "lib/lmac/lmac_def.h"
 #include "halow.h"
 #include "halow_lbt.h"
+#include "halow_cca.h"
 #include "tcp_server.h"
 #include "hal/spi_nor.h"
 #include "hal/uart.h"
@@ -333,6 +334,8 @@ __init int main(void) {
     net_ip_init();
 	log_debug("halow_lbt_init");
     halow_lbt_init();
+    log_debug("halow_cca_init");
+    halow_cca_init();
 	log_debug("halow_set_rx_cb");
     halow_set_rx_cb(halow_rx_handler);
     log_debug("config_page_init");

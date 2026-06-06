@@ -81,6 +81,7 @@ static const web_api_route_t s_api_routes[] = {
     { "get_reticulum_links",web_api_reticulum_links_get,    NULL                        },
     { "halow_cfg",          web_api_halow_cfg_get,          web_api_halow_cfg_post      },
     { "lbt_cfg",            web_api_lbt_cfg_get,            web_api_lbt_cfg_post        },
+    { "cca_cfg",            web_api_cca_cfg_get,            web_api_cca_cfg_post        },
     { "net_cfg",            web_api_net_cfg_get,            web_api_net_cfg_post        },
     { "slip_cfg",           web_api_slip_cfg_get,           web_api_slip_cfg_post       },
     { "log_cfg",            web_api_log_cfg_get,            web_api_log_cfg_post        },

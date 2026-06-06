@@ -34,7 +34,6 @@
 #define HALOW_LBT_CONFIG_TX_MAX_MS_NAME         HALOW_LBT_CONFIG_ADD_CONFIG("tx_max")
 #define HALOW_LBT_CONFIG_BO_MIN_US_NAME         HALOW_LBT_CONFIG_ADD_CONFIG("bo_min")
 #define HALOW_LBT_CONFIG_BO_MAX_US_NAME         HALOW_LBT_CONFIG_ADD_CONFIG("bo_max")
-#define HALOW_LBT_CONFIG_CCA_EN_NAME            HALOW_LBT_CONFIG_ADD_CONFIG("cca_en")
 #define HALOW_LBT_CONFIG_UTIL_EN_NAME           HALOW_LBT_CONFIG_ADD_CONFIG("u_en")
 #define HALOW_LBT_CONFIG_UTIL_MAX_NAME          HALOW_LBT_CONFIG_ADD_CONFIG("u_max")
 #define HALOW_LBT_CONFIG_UTIL_REFILL_MS_NAME    HALOW_LBT_CONFIG_ADD_CONFIG("u_ref")
@@ -586,8 +585,6 @@ void halow_lbt_config_apply( const halow_lbt_config_t *cfg ){
         return;
     }
 
-    halow_set_cca_enabled(cfg->cca_enabled);
-
     ret = os_task_init((const uint8 *)"lbt", &g_lbt_task, halow_lbt_task, (uint32)ctx);
     hlbt_debug("os_task_init -> %d", (int)ret);
     if (ret != 0) {
@@ -620,7 +617,6 @@ void halow_lbt_config_save( const halow_lbt_config_t *cfg ){
     configdb_set_i16(HALOW_LBT_CONFIG_TX_MAX_MS_NAME,      (int16_t*)&cfg->tx_max_continuous_time_ms);
     configdb_set_i16(HALOW_LBT_CONFIG_BO_MIN_US_NAME,      (int16_t*)&cfg->backoff_random_min_us);
     configdb_set_i16(HALOW_LBT_CONFIG_BO_MAX_US_NAME,      (int16_t*)&cfg->backoff_random_max_us);
-    configdb_set_i8 (HALOW_LBT_CONFIG_CCA_EN_NAME,         (int8_t*)&cfg->cca_enabled);
     configdb_set_i8 (HALOW_LBT_CONFIG_UTIL_EN_NAME,        (int8_t*)&cfg->util_enabled);
     configdb_set_i8 (HALOW_LBT_CONFIG_UTIL_MAX_NAME,       (int8_t*)&cfg->util_max_percent);
     configdb_set_i32(HALOW_LBT_CONFIG_UTIL_REFILL_MS_NAME, (int32_t*)&cfg->util_refill_window_ms);
@@ -641,7 +637,6 @@ static void halow_lbt_config_set_default( halow_lbt_config_t *cfg ){
     cfg->tx_max_continuous_time_ms = HALOW_LBT_CONFIG_TX_MAX_MS_DEF;
     cfg->backoff_random_min_us     = HALOW_LBT_CONFIG_BO_MIN_US_DEF;
     cfg->backoff_random_max_us     = HALOW_LBT_CONFIG_BO_MAX_US_DEF;
-    cfg->cca_enabled               = HALOW_LBT_CONFIG_CCA_EN_DEF ? 1 : 0;
     cfg->util_enabled              = HALOW_LBT_CONFIG_UTIL_EN_DEF ? 1 : 0;
     cfg->util_max_percent          = HALOW_LBT_CONFIG_UTIL_MAX_DEF;
     cfg->util_refill_window_ms     = HALOW_LBT_CONFIG_UTIL_REFILL_MS_DEF;
@@ -664,7 +659,6 @@ void halow_lbt_config_load( halow_lbt_config_t *cfg ){
     configdb_get_i16(HALOW_LBT_CONFIG_TX_MAX_MS_NAME,      (int16_t*)&cfg->tx_max_continuous_time_ms);
     configdb_get_i16(HALOW_LBT_CONFIG_BO_MIN_US_NAME,      (int16_t*)&cfg->backoff_random_min_us);
     configdb_get_i16(HALOW_LBT_CONFIG_BO_MAX_US_NAME,      (int16_t*)&cfg->backoff_random_max_us);
-    configdb_get_i8 (HALOW_LBT_CONFIG_CCA_EN_NAME,         (int8_t*)&cfg->cca_enabled);
     configdb_get_i8 (HALOW_LBT_CONFIG_UTIL_EN_NAME,        (int8_t*)&cfg->util_enabled);
     configdb_get_i8 (HALOW_LBT_CONFIG_UTIL_MAX_NAME,       (int8_t*)&cfg->util_max_percent);
     configdb_get_i32(HALOW_LBT_CONFIG_UTIL_REFILL_MS_NAME, (int32_t*)&cfg->util_refill_window_ms);
