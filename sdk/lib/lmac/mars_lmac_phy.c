@@ -399,7 +399,7 @@ int32 lmac_attempt_tx(uint32_t ac)
 
     {
         uint32_t fsm = LMAC_HW->FSM_STAT;
-        if (((fsm >> 8) & 3u) != 0u || ((fsm >> 24) & 3u) != 1u)
+        if (((fsm >> 8) & 7u) != 0u || ((fsm >> 24) & 7u) != 1u)
             return -1;
     }
 
@@ -552,6 +552,7 @@ void lmac_irq_tx_end(void)
         }
         uint16_t gain_reg = ah_lmac.rx_gain_cfg_bits;
         LMAC_HW->TX_STAT |= 3u;
+        ah_lmac.pTx_current_sta = NULL;
         ah_lmac.bo_tx_substate = 0u;
         lmac_rx_gain_cfg((gain_reg & 0x7ffu) >> 4);
     }
@@ -573,11 +574,11 @@ void lmac_irq_tx_end(void)
         }
         aggr->selected_count = 0u;
         aggr->queued_count   = 0u;
-        if (aggr->skb_list[0] != NULL || aggr->selected_count > 0)
-            os_sema_up(&ah_lmac_tx.tx_status_sem);
-        else
-            os_sema_up(&ah_lmac_tx.tx_status_sem);
     }
+
+    /* Signal the status task unconditionally: it must wake even when aggr==NULL
+     * (stale current_ac) so pending frames are drained and g_tx_vacated_sem is posted. */
+    os_sema_up(&ah_lmac_tx.tx_status_sem);
 
     ah_lmac.bo_frame_type = 0u;
     update_rx_buff_addr();
@@ -746,7 +747,7 @@ uint32 lmac_select_tx_acq(void)
                 goto out;
             }
             if (!(ac_pending & 8u)) {
-                sel = ((ac_pending & 4u) != 0) << 1u;
+                sel = ((ac_pending & 4u) != 0) + 1u;
                 goto out;
             }
             /* fall through to AC3 */
@@ -1047,8 +1048,8 @@ void *lmac_gen_txvec(uint32_t ac, uint32_t bw_hint, uint32_t mcs)
     /* TXVEC.flags0: power [4:0] | bw_mode [7:6] */
     aggr->txvec.flags0 = (pwr & 0x1F) | (uint8_t)((bw_hint % 3u) << 6);
 
-    /* TXVEC.bw_fmt bits [1:0] <- bw_cfg bit 3 */
-    aggr->txvec.bw_fmt = (aggr->txvec.bw_fmt & 0xFC) | ((txd->bw_cfg & 0x0F) >> 3);
+    /* TXVEC.bw_fmt bits [1:0] <- bw_cfg bits [4:3] */
+    aggr->txvec.bw_fmt = (aggr->txvec.bw_fmt & 0xFC) | ((txd->bw_cfg >> 3) & 3u);
 
     /* --- Preamble mode selection (sets bw_cfg bits [2:1]) --- */
     if (bw_hint == 3) {
@@ -1430,6 +1431,7 @@ uint32 lmac_bknoise_get(void)
 /* CCA threshold configuration */
 void lmac_spec_cca_cfg(uint32_t enable)
 {
+    ah_lmac.cca_agc_ctrl_flags &= ~4u;
     int8_t margin = (int8_t)(5 * (10 - lmac_custom_cfg.cca_sensitivity));
 
     uint8_t cfg[10];
