@@ -310,6 +310,15 @@ static int32_t halow_lmac_tx_status_callback(struct lmac_ops *ops, struct sk_buf
     return 0;
 }
 
+static int32_t halow_lmac_notify(struct lmac_ops *ops, uint8 evt_id,
+                                  uint8 *data, int32 len) {
+    (void)ops;
+    (void)evt_id;
+    (void)data;
+    (void)len;
+    return 0;
+}
+
 int32_t get_mcs_val(uint8_t mcs){
     if((mcs <= 7) || (mcs == 10)){
         return LMAC_RATE_DEF(LMAC_PHY_S1G, 1, mcs, 0);
@@ -529,6 +538,7 @@ bool halow_init(uint32_t rxbuf, uint32_t rxbuf_size,
 
     g_ops->rx        = halow_lmac_rx;
     g_ops->tx_status = halow_lmac_tx_status_callback;
+    g_ops->notify    = halow_lmac_notify;
 
     lmac_set_promisc_mode(g_ops, 1);
 

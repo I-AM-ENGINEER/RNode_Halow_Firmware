@@ -2,7 +2,7 @@
 #define __SYS_CONFIG_H__
 
 #define PROJECT_TYPE           PRO_TYPE_WNB
-#define FW_VERSION              "2.1.1b"
+#define FW_VERSION              "2.2.0b"
 #define FW_FULL_VERSION         FW_VERSION " (" __DATE__ " " __TIME__ ")"
 
 #define IP_SOF_BROADCAST       1
