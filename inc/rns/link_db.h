@@ -4,6 +4,7 @@
 #include "rns/defines.h"
 
 #define RNS_DB_INDEX_NONE    (0xFFu)
+#define RNS_LINK_MAC_UNKNOWN_BYTE    (0xFFu)
 
 typedef struct {
     uint8_t id[RNS_LINK_ID_LEN];
@@ -11,14 +12,15 @@ typedef struct {
     int32_t firstseen_timestamp_s;
     int32_t lastrx_timestamp_s;
     int32_t lasttx_timestamp_s;
-    int32_t rx_bytes;
-    int32_t tx_bytes;
-    int32_t rx_packets;
-    int32_t tx_packets;
+    uint32_t rx_bytes;
+    uint32_t tx_bytes;
+    uint32_t rx_packets;
+    uint32_t tx_packets;
     uint8_t hops;
     rns_link_db_state_t state;
+    uint8_t remote_mac[6];
+    uint32_t effective_mtu;
     uint8_t hash_next;
-    void *user;
 } rns_link_db_link_t;
 
 typedef struct {
@@ -27,12 +29,26 @@ typedef struct {
     uint8_t links_count;
 } rns_link_db_t;
 
-int32_t rns_link_db_package_register( const rns_link_packet_info_t* pkg, rns_packet_direction_t direction );
-rns_link_db_link_t* rns_link_db_link_get( const uint8_t id[RNS_LINK_ID_LEN] );
-rns_link_db_link_t* rns_link_db_link_get_by_index( uint32_t index );
+void rns_link_db_init( void );
+
+/* Atomic packet registration: looks up/creates the link, updates counters,
+ * state machine, and optionally the peer MAC and effective MTU — all under a
+ * single lock. No raw link pointers escape the DB, so callers are race-free.
+ *
+ * remote_mac != NULL  -> store the peer MAC (logged only when it changes)
+ * update_mtu == true  -> store effective_mtu (logged only when it changes) */
+int32_t rns_link_db_package_register( const rns_link_packet_info_t* pkg,
+                                      rns_packet_direction_t direction,
+                                      const uint8_t *remote_mac,
+                                      uint32_t effective_mtu,
+                                      bool update_mtu );
+
 uint8_t rns_link_db_link_count_get( void );
-void rns_link_db_link_remove( rns_link_db_link_t *link );
-void* rns_link_db_link_user_get( const rns_link_db_link_t *link );
-void rns_link_db_link_user_set( rns_link_db_link_t *link, void *user );
+
+void rns_link_db_sweep_expired( void );
+
+bool rns_link_db_link_snapshot_by_index( uint32_t index, rns_link_db_link_t *out );
+
+bool rns_link_db_link_snapshot_by_id( const uint8_t link_id[RNS_LINK_ID_LEN], rns_link_db_link_t *out );
 
 #endif // __LINK_DB_H__

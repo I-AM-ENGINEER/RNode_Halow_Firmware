@@ -14,101 +14,59 @@
 #define RNS_MTU_LIMIT_KEY   CONFIGDB_ADD_MODULE("rns") ".mtu"
 #define RNS_MTU_LIMIT_DEF   (500U)
 
-typedef struct {
-    bool none           :1;
-    bool resource       :1;
-    bool resource_adv   :1;
-    bool resource_req   :1;
-    bool resource_hmu   :1;
-    bool resource_prf   :1;
-    bool resource_icl   :1;
-    bool resource_rcl   :1;
-    bool cache_request  :1;
-    bool request        :1;
-    bool response       :1;
-    bool path_response  :1;
-    bool command        :1;
-    bool command_status :1;
-    bool channel        :1;
-    bool keepalive      :1;
-    bool linkidentify   :1;
-    bool linkclose      :1;
-    bool linkproof      :1;
-    bool lrrtt          :1;
-    bool lrproof        :1;
-    bool unknown        :1;
-} halow_ack_link_context_t;
+/* Debug counters for the RX registration chain (exposed via
+ * /api/get_reticulum_links) to locate where a received frame fails to become a
+ * registered link: parse -> valid -> register. */
+volatile uint32_t g_dbg_rns_rx_calls;
+volatile uint32_t g_dbg_rns_rx_parse_fail;
+volatile uint32_t g_dbg_rns_rx_valid;
+volatile uint32_t g_dbg_rns_rx_reg_ok;
+volatile uint32_t g_dbg_rns_rx_reg_fail;
 
-typedef struct {
-    halow_ack_link_context_t contexts_en;
-    uint8_t batch_size;
-    uint8_t retries_count;
-} halow_ack_config_t;
-
-static inline bool rns_link_ack_cfg_should_ack( const halow_ack_link_context_t *cfg, rns_context_t context ){
-    if( cfg == NULL ){
-        return false;
+/* A peer MAC is "unknown" until learned from a received frame (addr2). The link
+ * db stores it as the RNS_LINK_MAC_UNKNOWN_BYTE (0xFF) sentinel on link
+ * creation; TX falls back to broadcast while still unknown. */
+static bool halow_peer_mac_known( const uint8_t mac[6] ){
+    uint32_t i;
+    for( i = 0; i < 6; i++ ){
+        if( mac[i] != RNS_LINK_MAC_UNKNOWN_BYTE ){
+            return true;
+        }
     }
-
-    switch( context ){
-        case RNS_CONTEXT_NONE:           return cfg->none;
-        case RNS_CONTEXT_RESOURCE:       return cfg->resource;
-        case RNS_CONTEXT_RESOURCE_ADV:   return cfg->resource_adv;
-        case RNS_CONTEXT_RESOURCE_REQ:   return cfg->resource_req;
-        case RNS_CONTEXT_RESOURCE_HMU:   return cfg->resource_hmu;
-        case RNS_CONTEXT_RESOURCE_PRF:   return cfg->resource_prf;
-        case RNS_CONTEXT_RESOURCE_ICL:   return cfg->resource_icl;
-        case RNS_CONTEXT_RESOURCE_RCL:   return cfg->resource_rcl;
-        case RNS_CONTEXT_CACHE_REQUEST:  return cfg->cache_request;
-        case RNS_CONTEXT_REQUEST:        return cfg->request;
-        case RNS_CONTEXT_RESPONSE:       return cfg->response;
-        case RNS_CONTEXT_PATH_RESPONSE:  return cfg->path_response;
-        case RNS_CONTEXT_COMMAND:        return cfg->command;
-        case RNS_CONTEXT_COMMAND_STATUS: return cfg->command_status;
-        case RNS_CONTEXT_CHANNEL:        return cfg->channel;
-        case RNS_CONTEXT_KEEPALIVE:      return cfg->keepalive;
-        case RNS_CONTEXT_LINKIDENTIFY:   return cfg->linkidentify;
-        case RNS_CONTEXT_LINKCLOSE:      return cfg->linkclose;
-        case RNS_CONTEXT_LINKPROOF:      return cfg->linkproof;
-        case RNS_CONTEXT_LRRTT:          return cfg->lrrtt;
-        case RNS_CONTEXT_LRPROOF:        return cfg->lrproof;
-        default:                         return false;
-    }
+    return false;
 }
 
-typedef struct __attribute__((packed)) {
-    union {
-        struct __attribute__((packed)) {
-            uint8_t data      : 1;
-            uint8_t ack_only  : 1;
-            uint8_t retry     : 1;
-            uint8_t need_ack  : 1;
-            uint8_t _reserved : 2;
-            uint8_t version   : 2;
-        };
-        uint8_t flags;
-    };
-
-    uint8_t seq;
-    uint8_t ack;
-    uint8_t ack_bits;
-} halow_hdr_t;
-
-struct link_user_ctx {
-    const rns_link_db_link_t* link;
-    uint8_t remote_mac[6];
-};
-
-void halow_pkg_handler_rf_to_tcp( uint8_t* pkg, uint16_t len ){
+void halow_pkg_handler_rf_to_tcp( uint8_t* pkg, uint16_t len, const uint8_t *src_mac ){
     int32_t res;
     rns_link_packet_info_t packet_info;
     uint8_t *allocated_rx = NULL;
     uint32_t allocated_len = 0u;
 
+    g_dbg_rns_rx_calls++;
     res = rns_link_parser_parse(pkg, len, &packet_info);
     if( res != RNS_RET_OK ){
+        g_dbg_rns_rx_parse_fail++;
         log_warn("rx rns package parse error=%d len=%u", (int)res, (unsigned int)len);
         return;
+    }
+
+    /* Register the Reticulum link (creating/updating it) and learn the peer's
+     * MAC from addr2. remote_mac is later used by the TX path to address the
+     * neighbour directly instead of broadcasting. */
+    if( packet_info.valid ){
+        int32_t rr;
+        uint32_t rx_mtu = 0;
+        bool have_mtu = (packet_info.packet_type == RNS_PACKET_TYPE_LINKREQUEST &&
+                         rns_link_utils_get_mtu(pkg, len, &packet_info, &rx_mtu) == RNS_RET_OK);
+
+        g_dbg_rns_rx_valid++;
+        rr = rns_link_db_package_register(&packet_info, RNS_PACKET_DIRECTION_RX,
+                                          src_mac, rx_mtu, have_mtu);
+        if( rr == RNS_RET_OK ){
+            g_dbg_rns_rx_reg_ok++;
+        }else{
+            g_dbg_rns_rx_reg_fail++;
+        }
     }
 
     res = rns_stream_encode_alloc(pkg, len, &allocated_rx, &allocated_len);
@@ -130,14 +88,21 @@ void halow_pkg_handler_rf_to_tcp( uint8_t* pkg, uint16_t len ){
         allocated_rx
     );
 
-    tcp_server_send(allocated_rx, allocated_len);
+    /* Non-blocking enqueue: tcp_server_send returns <0 when the TX ring is full
+     * (see tcp_server.c). This runs on the LMAC RX context which must not stall
+     * — dropping here is correct; TCP reliability / host retransmit covers the
+     * loss. */
+    res = tcp_server_send(allocated_rx, allocated_len);
+    if( res != 0 ){
+        log_warn("rf->tcp ring full res=%d, drop len=%u", (int)res, (unsigned int)allocated_len);
+    }
     free(allocated_rx);
 }
 
 void halow_pkg_handler_tcp_to_rf( uint8_t* pkg, uint16_t len ){
     int32_t res;
     rns_link_packet_info_t packet_info;
-    
+
     res = rns_link_parser_parse(pkg, len, &packet_info);
     if(res != RNS_RET_OK){
         log_warn("tx rns package parse error=%d", res);
@@ -147,9 +112,10 @@ void halow_pkg_handler_tcp_to_rf( uint8_t* pkg, uint16_t len ){
     log_trace("receive pkg type=%d", (int)packet_info.packet_type);
 
     if( packet_info.valid && packet_info.packet_type == RNS_PACKET_TYPE_LINKREQUEST ){
-        uint32_t original_mtu;
+        uint32_t original_mtu = 0;
         uint32_t hw_mtu;
-        uint32_t effective_mtu;
+        uint32_t mtu_limit;
+        uint32_t stored_mtu;
         halow_config_t cfg;
         int16_t rns_mtu_limit;
 
@@ -158,24 +124,41 @@ void halow_pkg_handler_tcp_to_rf( uint8_t* pkg, uint16_t len ){
         rns_mtu_limit = rns_mtu_limit_get();
 
         if ((uint32_t)rns_mtu_limit < hw_mtu) {
-            effective_mtu = (uint32_t)rns_mtu_limit;
+            mtu_limit = (uint32_t)rns_mtu_limit;
         } else {
-            effective_mtu = hw_mtu;
+            mtu_limit = hw_mtu;
         }
 
-        rns_link_utils_clamp_mtu(pkg, len, &packet_info, effective_mtu, &original_mtu);
-        log_info("cap link MTU from %db to %db", (int)original_mtu, (int)effective_mtu);
+        rns_link_utils_clamp_mtu(pkg, len, &packet_info, mtu_limit, &original_mtu);
+        log_info("cap link MTU from %db to %db", (int)original_mtu, (int)mtu_limit);
+
+        stored_mtu = (original_mtu <= mtu_limit) ? original_mtu : mtu_limit;
+
+        rns_link_db_package_register(&packet_info, RNS_PACKET_DIRECTION_TX,
+                                     NULL, stored_mtu, true);
+    }else if( packet_info.valid ){
+        rns_link_db_package_register(&packet_info, RNS_PACKET_DIRECTION_TX,
+                                     NULL, 0, false);
     }
 
-    //link_db
-    halow_tx(pkg, len, mac_broadcast, HALOW_MCS_DEFAULT);
-    //
-    
-    //if(pkg)
+    /* Address the frame to the neighbour's MAC when the Reticulum link has a
+     * known peer (learned on RX from addr2). halow_send_frame carries the
+     * destination in addr3 with addr1=broadcast, so this stays ACK-free
+     * (broadcast-addressed at the PHY, no MAC-level ACK) while letting the
+     * receiver accept the frame via its addr3 filter (addr3 == own MAC).
+     * No known peer -> broadcast. */
+    rns_link_db_link_t link;
+    if( packet_info.valid &&
+        rns_link_db_link_snapshot_by_id(packet_info.link_id, &link) &&
+        halow_peer_mac_known(link.remote_mac) ){
+        (void)halow_tx(pkg, len, link.remote_mac, HALOW_MCS_DEFAULT);
+    }else{
+        (void)halow_tx(pkg, len, mac_broadcast, HALOW_MCS_DEFAULT);
+    }
 }
 
 void halow_pkg_handler_init( void ){
-
+    rns_link_db_init();
 }
 
 int16_t rns_mtu_limit_get( void ){

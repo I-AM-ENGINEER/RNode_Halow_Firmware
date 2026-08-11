@@ -90,3 +90,30 @@ rns_ret_t rns_link_utils_clamp_mtu(
 
     return RNS_RET_OK;
 }
+
+rns_ret_t rns_link_utils_get_mtu(
+    const uint8_t *packet,
+    uint16_t packet_len,
+    const rns_link_packet_info_t *pkt,
+    uint32_t *mtu
+){
+    if( mtu != NULL ){
+        *mtu = 0U;
+    }
+
+    if( packet == NULL || pkt == NULL || mtu == NULL ){
+        return RNS_RET_NULLPTR;
+    }
+
+    if( pkt->packet_type != RNS_PACKET_TYPE_LINKREQUEST ){
+        return RNS_RET_INVALID_PACKET_TYPE;
+    }
+
+    if( pkt->payload_len < 67U ){
+        return RNS_RET_PACKET_TOO_SHORT;
+    }
+
+    *mtu = link_request_get_mtu(packet, packet_len, pkt);
+
+    return RNS_RET_OK;
+}

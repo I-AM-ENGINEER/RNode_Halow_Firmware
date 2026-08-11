@@ -112,6 +112,7 @@ int32_t rns_link_parser_parse( const uint8_t *packet, size_t packet_len, rns_lin
 
     if( out->destination_type == RNS_DESTINATION_TYPE_LINK ){
         memcpy(out->link_id, out->destination, RNS_LINK_ID_LEN);
+        out->valid = true;
         return RNS_RET_OK;
     }
 

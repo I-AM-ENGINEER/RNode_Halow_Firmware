@@ -103,13 +103,19 @@ static void halow_rx_handler(struct hgic_rx_info *info,
     statistics_radio_register_rx_package(len);
 
     uint8_t my_mac[6];
-    get_mac(my_mac);
+    /* Compare addr3 (the destination, see halow_send_frame) against the node's
+     * TX identity (g_wmac via mac_generator_get), NOT get_mac() (g_efuse): the
+     * peer learns our MAC from our TX addr2 == mac_generator_get, and addresses
+     * us via addr3 with that same value. g_efuse != g_wmac, so the old
+     * get_mac() comparison rejected every unicast-to-us frame (only never
+     * noticed because addr3 was always broadcast). */
+    mac_generator_get(my_mac);
     if ((memcmp(hdr->addr3, mac_broadcast, 6) != 0) &&
         (memcmp(hdr->addr3, my_mac, 6) != 0)) {
         log_trace("RX not my mac, drop");
         return;
     }
-    halow_pkg_handler_rf_to_tcp(data, (uint16_t)len);
+    halow_pkg_handler_rf_to_tcp(data, (uint16_t)len, (const uint8_t *)hdr->addr2);
 }
 
 // TCP -> rns stream decoder

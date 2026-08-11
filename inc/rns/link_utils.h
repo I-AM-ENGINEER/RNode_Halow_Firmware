@@ -14,4 +14,11 @@ rns_ret_t rns_link_utils_clamp_mtu(
     uint32_t *original_mtu
 );
 
+rns_ret_t rns_link_utils_get_mtu(
+    const uint8_t *packet,
+    uint16_t packet_len,
+    const rns_link_packet_info_t *pkt,
+    uint32_t *mtu
+);
+
 #endif // __RNS_LINK_UTILS_H__

@@ -18,6 +18,7 @@
 #include "halow.h"
 #include "halow_lbt.h"
 #include "halow_cca.h"
+#include "rns/link_db.h"
 #include "net_ip.h"
 #include "tcp_server.h"
 #include "utils.h"
@@ -1241,14 +1242,71 @@ int32_t web_api_privacy_cfg_post( const cJSON *in, cJSON *out ){
 }
 
 int32_t web_api_reticulum_links_get( const cJSON *in, cJSON *out ){
+    cJSON *arr;
+    cJSON *row;
+    rns_link_db_link_t link;
+    char id_hex[RNS_LINK_ID_LEN * 2 + 1];
+    char mac_str[18];
+    uint8_t count;
+    uint8_t i;
+    uint8_t j;
+
+    extern volatile uint32_t g_dbg_rns_rx_calls;
+    extern volatile uint32_t g_dbg_rns_rx_parse_fail;
+    extern volatile uint32_t g_dbg_rns_rx_valid;
+    extern volatile uint32_t g_dbg_rns_rx_reg_ok;
+    extern volatile uint32_t g_dbg_rns_rx_reg_fail;
+
     (void)in;
 
     if (out == NULL) {
         return WEB_API_RC_BAD_REQUEST;
     }
 
-    if (cJSON_AddArrayToObject(out, "d") == NULL) {
+    arr = cJSON_AddArrayToObject(out, "d");
+    if (arr == NULL) {
         return WEB_API_RC_INTERNAL;
+    }
+
+    cJSON_AddNumberToObject(out, "rx_calls", (double)g_dbg_rns_rx_calls);
+    cJSON_AddNumberToObject(out, "rx_parse_fail", (double)g_dbg_rns_rx_parse_fail);
+    cJSON_AddNumberToObject(out, "rx_valid", (double)g_dbg_rns_rx_valid);
+    cJSON_AddNumberToObject(out, "rx_reg_ok", (double)g_dbg_rns_rx_reg_ok);
+    cJSON_AddNumberToObject(out, "rx_reg_fail", (double)g_dbg_rns_rx_reg_fail);
+
+    /* Dump every known Reticulum link with the learned neighbour MAC, state and
+     * per-direction counters — the primary way to verify (over HTTP, without
+     * UART) that links are registered and peer MACs are being learned. */
+    count = rns_link_db_link_count_get();
+    for (i = 0; i < count; i++) {
+        if (!rns_link_db_link_snapshot_by_index(i, &link)) {
+            continue;
+        }
+
+        for (j = 0; j < RNS_LINK_ID_LEN; j++) {
+            sprintf(id_hex + j * 2, "%02X", link.id[j]);
+        }
+        id_hex[RNS_LINK_ID_LEN * 2] = '\0';
+
+        snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
+                 link.remote_mac[0], link.remote_mac[1], link.remote_mac[2],
+                 link.remote_mac[3], link.remote_mac[4], link.remote_mac[5]);
+
+        row = cJSON_CreateArray();
+        if (row == NULL) {
+            return WEB_API_RC_INTERNAL;
+        }
+
+        cJSON_AddItemToArray(row, cJSON_CreateString(id_hex));            /* link_id      */
+        cJSON_AddItemToArray(row, cJSON_CreateString(mac_str));           /* remote_mac   */
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)link.state));/* state        */
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)link.hops)); /* hops         */
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)link.rx_packets));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)link.tx_packets));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)link.rx_bytes));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)link.tx_bytes));
+
+        cJSON_AddItemToArray(arr, row);
     }
 
     return WEB_API_RC_OK;

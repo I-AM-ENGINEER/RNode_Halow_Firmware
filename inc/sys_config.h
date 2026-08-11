@@ -146,6 +146,10 @@
 #define STATISTICS_TASK_PRIO                    (OS_TASK_PRIORITY_LOW)
 #define STATISTICS_TASK_STACK                   (2*1024)
 
+#define LINK_DB_SWEEP_TASK_PRIO                 (OS_TASK_PRIORITY_LOW)
+#define LINK_DB_SWEEP_TASK_STACK                (1*1024)
+#define LINK_DB_SWEEP_PERIOD_S                  (60)
+
 #define HALOW_LBT_LISTEN_TASK_PRIO              (OS_TASK_PRIORITY_IDLE)
 #define HALOW_LBT_LISTEN_TASK_STACK             (2*1024)
 
@@ -174,6 +178,7 @@
 #define LOG_LEVEL_TCP_SERVER                    (LOG_NONE)
 #define LOG_LEVEL_TELEMETRY                     (LOG_NONE)
 #define LOG_LEVEL_RNS_STREAM_PARSER             (LOG_NONE)
+#define LOG_LEVEL_RNS_LINK_DB                   (LOG_INFO)
 #define LOG_LEVEL_FAL_PORT                      (LOG_INFO)
 #define LOG_LEVEL_RNS_LINK_PARSER               (LOG_NONE)
 #define LOG_LEVEL_UART_SLIP                     (LOG_NONE)

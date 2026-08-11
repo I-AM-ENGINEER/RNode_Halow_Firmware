@@ -21,8 +21,20 @@ flasher/OTA/.venv/
 **/build/
 .claude
 .kilo
+.zcode
+CLAUDE.md
+re_findings
+
+# runtime artifacts (logs, dumps, captures, nm output)
+logs/
+dumps/
+*.log
+nm_*.txt
 
 tmp
 
 # venv files
 .venv
+
+# Auto-regenerated per build (Makefile gen-fw-build-info target, when present)
+src/fw_build_info.c
