@@ -1256,6 +1256,9 @@ int32_t web_api_reticulum_links_get( const cJSON *in, cJSON *out ){
     extern volatile uint32_t g_dbg_rns_rx_valid;
     extern volatile uint32_t g_dbg_rns_rx_reg_ok;
     extern volatile uint32_t g_dbg_rns_rx_reg_fail;
+    extern void lmac_get_rx_debug(uint32_t *rx_gain_bits, int8_t *agc_hi,
+                                  int8_t *agc_lo, uint8_t *agc_flags,
+                                  uint32_t *fsm_stat);
 
     (void)in;
 
@@ -1273,6 +1276,21 @@ int32_t web_api_reticulum_links_get( const cJSON *in, cJSON *out ){
     cJSON_AddNumberToObject(out, "rx_valid", (double)g_dbg_rns_rx_valid);
     cJSON_AddNumberToObject(out, "rx_reg_ok", (double)g_dbg_rns_rx_reg_ok);
     cJSON_AddNumberToObject(out, "rx_reg_fail", (double)g_dbg_rns_rx_reg_fail);
+
+    /* RX-chain debug: gain field ([7:4], 5=high/weak, 4=low/strong), AGC
+     * thresholds, AGC flags (bit3 = dynamic adjust enable), FSM state. */
+    {
+        uint32_t rg = 0, fsm = 0;
+        int8_t ah = 0, al = 0;
+        uint8_t af = 0;
+        lmac_get_rx_debug(&rg, &ah, &al, &af, &fsm);
+        cJSON_AddNumberToObject(out, "rx_gain_bits", (double)rg);
+        cJSON_AddNumberToObject(out, "rx_gain_field", (double)((rg >> 4) & 0xFu));
+        cJSON_AddNumberToObject(out, "agc_hi", (double)ah);
+        cJSON_AddNumberToObject(out, "agc_lo", (double)al);
+        cJSON_AddNumberToObject(out, "agc_flags", (double)af);
+        cJSON_AddNumberToObject(out, "fsm_stat", (double)fsm);
+    }
 
     /* Dump every known Reticulum link with the learned neighbour MAC, state and
      * per-direction counters — the primary way to verify (over HTTP, without

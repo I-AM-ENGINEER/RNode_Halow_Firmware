@@ -1522,6 +1522,20 @@ set_gain:
     lmac_rx_gain_cfg((ah_lmac.rx_gain_cfg_bits & 0x7ff) >> 4);
 }
 
+/* RX-chain debug snapshot (exposed via /api/get_reticulum_links) to diagnose
+ * directional RX sensitivity: current RX gain field, AGC thresholds, the
+ * AGC-enable flags (bit3 = dynamic AGC adjust), and the FSM state. The gain
+ * field is rx_gain_cfg_bits[7:4]; 5 = high gain (weak signal), 4 = low gain. */
+void lmac_get_rx_debug(uint32_t *rx_gain_bits, int8_t *agc_hi, int8_t *agc_lo,
+                       uint8_t *agc_flags, uint32_t *fsm_stat)
+{
+    if (rx_gain_bits) *rx_gain_bits = (uint32_t)ah_lmac.rx_gain_cfg_bits;
+    if (agc_hi)       *agc_hi       = ah_lmac.agc_threshold_high;
+    if (agc_lo)       *agc_lo       = ah_lmac.agc_threshold_low;
+    if (agc_flags)    *agc_flags    = ah_lmac.cca_agc_ctrl_flags;
+    if (fsm_stat)     *fsm_stat     = LMAC_HW->FSM_STAT;
+}
+
 /* Check if current AC has prepared data and configure its TX vector.
  * Original binary: 0x2003730C (lmac_tx_date_prepared_orig) */
 int32 lmac_tx_date_prepared(void)
