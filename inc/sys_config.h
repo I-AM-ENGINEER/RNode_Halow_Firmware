@@ -100,7 +100,12 @@
 #define LOG_OUTPUT_TARGET_UART                  (1)
 #define LOG_OUTPUT_TARGET                       LOG_OUTPUT_TARGET_UART
 
-#define HALOW_CONFIG_CENTRAL_FREQ_DEF           (8645)
+/* Default channel = 920 MHz. The deployed nodes use 915 MHz ISM-band antennas
+ * (resonant ~905-925 MHz). At 864.5 MHz the balcony node's RX antenna is
+ * off-resonance and decodes only ~40% of frames regardless of power/MCS; at
+ * 920 MHz both directions are <1% (measured). This is a hardware fact, so it
+ * belongs in the default. Runtime /api/halow_cfg still overrides it. */
+#define HALOW_CONFIG_CENTRAL_FREQ_DEF           (9200)
 #define HALOW_CONFIG_POWER_DEF                  (14)
 #define HALOW_CONFIG_BANDWIDTH_DEF              (1)
 #define HALOW_CONFIG_MCS_DEF                    (0)
