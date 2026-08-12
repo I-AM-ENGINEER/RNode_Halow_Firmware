@@ -1241,6 +1241,8 @@ int32_t web_api_ack_cfg_get( const cJSON *in, cJSON *out ){
     cJSON_AddNumberToObject(out, "rate_adapt", (double)cfg.rate_adapt);
     cJSON_AddNumberToObject(out, "ra_loss_up",   (double)cfg.ra_loss_up);
     cJSON_AddNumberToObject(out, "ra_loss_down", (double)cfg.ra_loss_down);
+    cJSON_AddNumberToObject(out, "window",   (double)cfg.window);
+    cJSON_AddNumberToObject(out, "fids",     (double)cfg.ack_fids);
     halow_ack_stats_get(&st);
     cJSON_AddNumberToObject(out, "tx_frames",  (double)st.tx_frames);
     cJSON_AddNumberToObject(out, "acked",      (double)st.acked);
@@ -1265,6 +1267,8 @@ int32_t web_api_ack_cfg_post( const cJSON *in, cJSON *out ){
     if (json_get_int(in, "rate_adapt", &v)) { cfg.rate_adapt = (uint8_t)(v ? 1u : 0u); }
     if (json_get_int(in, "ra_loss_up",   &v)) { if (v >= 0 && v <= 100) cfg.ra_loss_up   = (uint8_t)v; }
     if (json_get_int(in, "ra_loss_down", &v)) { if (v >= 0 && v <= 100) cfg.ra_loss_down = (uint8_t)v; }
+    if (json_get_int(in, "window", &v)) { if (v >= 1 && v <= 32) cfg.window = (uint8_t)v; }
+    if (json_get_int(in, "fids",   &v)) { if (v >= 1 && v <= 8)  cfg.ack_fids = (uint8_t)v; }
     halow_ack_config_apply(&cfg);
     return web_api_ack_cfg_get(NULL, out);
 }

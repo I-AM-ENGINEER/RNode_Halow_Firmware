@@ -247,17 +247,27 @@
 
             <div class="panel">
                 <h3>ACK (ARQ) Settings</h3>
-                <p class="note">Per-DATA-packet ACK, stop-and-wait per node. DATA frames carry no header (legacy-compatible); a 3-byte ACK [magic][evm] is sent on every received frame at MCS10.</p>
+                <p class="note">Per-DATA-packet cumulative ACK. Each received frame is acknowledged with an ACK carrying the last N frame ids (cumulative), so a few lost ACKs no longer starve the retry timer. ACK = [magic][evm][fid0..fidK] at MCS10.</p>
                 <label>
                     <span>Max retries</span>
                     <input type="number" id="ack_retries" min="0" max="8" value="3">
                 </label>
-                <p class="note">0 = NOACK (fire-and-forget). Per-peer budget slides −1 when a frame gets no ACK at all, snaps back to max on any ACK.</p>
+                <p class="note">0 = NOACK (fire-and-forget). Per-slot retry budget; slots that exhaust it are dropped.</p>
                 <label>
                     <span>ACK timeout (ms)</span>
                     <input type="number" id="ack_timeout_ms" min="5" max="500" value="40">
                 </label>
                 <p class="note">Wait for ACK before each retransmit. Stop-and-wait ARQ rate ≈ 1000/timeout frames/s per peer.</p>
+                <label>
+                    <span>Window (tracked TX slots)</span>
+                    <input type="number" id="ack_window" min="1" max="32" value="8">
+                </label>
+                <p class="note">Sliding-window size: number of in-flight frames tracked for retry (heap-allocated). Larger = more concurrent recovery under loss, uses more RAM (~2 KB per slot).</p>
+                <label>
+                    <span>Fids per ACK</span>
+                    <input type="number" id="ack_fids" min="1" max="8" value="4">
+                </label>
+                <p class="note">Cumulative-ACK depth: how many recent frame ids each ACK carries. Each frame is acked ~this many times in a row, so lost ACKs are tolerated. Larger = more robust, slightly bigger ACK.</p>
                 <div class="ack-stats" id="ack_stats_box" style="font-size:12px;color:#888;margin-top:8px"></div>
                 <div class="panel-actions">
                     <button type="button" id="save_ack" disabled>Save</button>

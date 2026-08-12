@@ -4,11 +4,11 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* ACK = [0xA5][0x5A][evm]. 0xA5 0x5A cannot start an RNS frame (FLAG=0x7E). */
 
 #define HALOW_ACK_MAGIC0           0xA5u
 #define HALOW_ACK_MAGIC1           0x5Au
-#define HALOW_ACK_ACK_LEN          3u
+#define HALOW_ACK_ACK_LEN_MIN      5u
+#define HALOW_ACK_ACK_LEN_MAX      (3u + 2u * HALOW_ACK_ACK_FIDS_MAX)
 #define HALOW_ACK_ACK_MCS          10u
 
 #define HALOW_ACK_DEFAULT_MAX_RETRIES   3u
@@ -19,12 +19,19 @@
 #define HALOW_ACK_RA_STALE_MS           60000u
 #define HALOW_ACK_RA_COOLDOWN_MS        60000u
 
+#define HALOW_ACK_DEFAULT_WINDOW        8u
+#define HALOW_ACK_DEFAULT_ACK_FIDS      4u
+#define HALOW_ACK_SLOTS_MAX             32u
+#define HALOW_ACK_ACK_FIDS_MAX          8u
+
 typedef struct {
     uint8_t  max_retries;
     uint16_t timeout_ms;
     uint8_t  rate_adapt;
     uint8_t  ra_loss_up;
     uint8_t  ra_loss_down;
+    uint8_t  window;
+    uint8_t  ack_fids;
 } halow_ack_config_t;
 
 typedef struct {

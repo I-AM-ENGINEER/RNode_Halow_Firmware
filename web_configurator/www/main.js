@@ -312,7 +312,7 @@
             },
             { group: 'privacy', btn: 'save_privacy', ids: ['privacy_mac_rotation', 'privacy_mac_broadcast'] },
             { group: 'rns_mtu', btn: 'save_rns_mtu', ids: ['reticulum_link_mtu'] },
-            { group: 'ack', btn: 'save_ack', ids: ['ack_retries', 'ack_timeout_ms', 'ack_rate_adapt', 'ack_ra_loss_up', 'ack_ra_loss_down'] }
+            { group: 'ack', btn: 'save_ack', ids: ['ack_retries', 'ack_timeout_ms', 'ack_rate_adapt', 'ack_ra_loss_up', 'ack_ra_loss_down', 'ack_window', 'ack_fids'] }
         ];
 
         map.forEach(m => {
@@ -821,6 +821,8 @@
             setInput('ack_timeout_ms', data.timeout_ms != null ? data.timeout_ms : 40);
             setInput('ack_ra_loss_up',   data.ra_loss_up   != null ? data.ra_loss_up   : 5);
             setInput('ack_ra_loss_down', data.ra_loss_down != null ? data.ra_loss_down : 30);
+            setInput('ack_window', data.window != null ? data.window : 8);
+            setInput('ack_fids',   data.fids   != null ? data.fids   : 4);
             const ra = document.getElementById('ack_rate_adapt');
             const upFld = document.getElementById('ack_ra_loss_up');
             const dnFld = document.getElementById('ack_ra_loss_down');
@@ -1714,7 +1716,9 @@
             timeout_ms: parseInt(document.getElementById('ack_timeout_ms').value, 10) || 40,
             rate_adapt: (ra && ra.checked && !ra.disabled) ? 1 : 0,
             ra_loss_up:   isNaN(up) ? 5   : Math.max(0, Math.min(99, up)),
-            ra_loss_down: isNaN(dn) ? 30  : Math.max(1, Math.min(100, dn))
+            ra_loss_down: isNaN(dn) ? 30  : Math.max(1, Math.min(100, dn)),
+            window: Math.max(1, Math.min(32, parseInt(document.getElementById('ack_window').value, 10) || 8)),
+            fids:   Math.max(1, Math.min(8,  parseInt(document.getElementById('ack_fids').value, 10) || 4))
         };
     }
 

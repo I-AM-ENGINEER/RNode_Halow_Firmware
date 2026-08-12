@@ -26,9 +26,8 @@ volatile uint32_t g_dbg_rns_rx_reg_fail;
 #define HALOW_ACK_CFG(k)       HALOW_ACK_CFG_PREFIX "." k
 
 #define HALOW_ACK_MAX_PEERS    4u
-#define HALOW_ACK_SLOTS        HALOW_ACK_MAX_PEERS
 #define HALOW_ACK_FRAME_MAX    2000u
-#define HALOW_ACK_DEDUP_WIN    4u
+#define HALOW_ACK_DEDUP_WIN    HALOW_ACK_ACK_FIDS_MAX
 #define HALOW_ACK_TICK_MS      10u
 
 #define HALOW_ACK_RA_MAX_MCS     7u
@@ -40,6 +39,7 @@ typedef struct {
     uint8_t  retries_used;
     uint64_t tx_jiff;
     uint16_t frame_len;
+    uint16_t fid;             /* fnv1a(payload) & 0xFFFF, matches the ACK */
     uint8_t  dest_mac[6];
     uint8_t  frame[HALOW_ACK_FRAME_MAX];
 } halow_ack_slot_t;
@@ -62,7 +62,8 @@ typedef struct {
 } halow_ack_peer_t;
 
 static halow_ack_config_t g_ack_cfg;
-static halow_ack_slot_t   g_ack_slots[HALOW_ACK_SLOTS];
+static halow_ack_slot_t  *g_ack_slots;
+static uint32_t           g_ack_slot_count;
 static halow_ack_peer_t   g_ack_peers[HALOW_ACK_MAX_PEERS];
 static halow_ack_stats_t  g_ack_stats;
 static struct os_work     g_ack_tick_wk;
@@ -70,6 +71,25 @@ static struct os_mutex    g_ack_mutex;
 
 static void halow_ack_lock(void)   { (void)os_mutex_lock(&g_ack_mutex, -1); }
 static void halow_ack_unlock(void) { os_mutex_unlock(&g_ack_mutex); }
+
+static bool halow_ack_slots_resize_locked( uint8_t window ){
+    if( window == 0u ) window = HALOW_ACK_DEFAULT_WINDOW;
+    if( window > HALOW_ACK_SLOTS_MAX ) window = HALOW_ACK_SLOTS_MAX;
+    if( window == g_ack_slot_count && g_ack_slots != NULL ) return true;
+    halow_ack_slot_t *nw = (halow_ack_slot_t *)os_malloc((uint32_t)window * sizeof(halow_ack_slot_t));
+    if( nw == NULL ){
+        log_warn("ack: slot malloc failed window=%u (keep %lu)",
+                 (unsigned)window, (unsigned long)g_ack_slot_count);
+        return false;
+    }
+    memset(nw, 0, (uint32_t)window * sizeof(halow_ack_slot_t));
+    for( uint32_t i = 0; i < g_ack_slot_count; i++ )
+        if( g_ack_slots != NULL && g_ack_slots[i].in_use ) g_ack_stats.dropped++;
+    if( g_ack_slots != NULL ) os_free(g_ack_slots);
+    g_ack_slots = nw;
+    g_ack_slot_count = window;
+    return true;
+}
 
 static uint8_t halow_ack_default_mcs( void ){
     halow_config_t hcfg;
@@ -134,7 +154,7 @@ static uint32_t halow_ack_fnv1a( const uint8_t *p, uint16_t len ){
 
 bool halow_ack_is_ack_frame( const uint8_t *data, uint16_t len ){
     return (data != NULL &&
-            len >= HALOW_ACK_ACK_LEN &&
+            len >= HALOW_ACK_ACK_LEN_MIN &&
             data[0] == HALOW_ACK_MAGIC0 &&
             data[1] == HALOW_ACK_MAGIC1);
 }
@@ -146,6 +166,8 @@ void halow_ack_config_set_default( halow_ack_config_t *cfg ){
     cfg->rate_adapt    = HALOW_ACK_DEFAULT_RATE_ADAPT;
     cfg->ra_loss_up    = HALOW_ACK_DEFAULT_RA_LOSS_UP;
     cfg->ra_loss_down  = HALOW_ACK_DEFAULT_RA_LOSS_DOWN;
+    cfg->window        = HALOW_ACK_DEFAULT_WINDOW;
+    cfg->ack_fids      = HALOW_ACK_DEFAULT_ACK_FIDS;
 }
 
 static void halow_ack_config_clamp( halow_ack_config_t *cfg ){
@@ -158,6 +180,10 @@ static void halow_ack_config_clamp( halow_ack_config_t *cfg ){
         cfg->ra_loss_down = HALOW_ACK_DEFAULT_RA_LOSS_DOWN;
     }
     if( cfg->max_retries == 0u )   cfg->rate_adapt = 0u;
+    if( cfg->window == 0u ) cfg->window = HALOW_ACK_DEFAULT_WINDOW;
+    if( cfg->window > HALOW_ACK_SLOTS_MAX ) cfg->window = HALOW_ACK_SLOTS_MAX;
+    if( cfg->ack_fids == 0u ) cfg->ack_fids = 1u;
+    if( cfg->ack_fids > HALOW_ACK_ACK_FIDS_MAX ) cfg->ack_fids = HALOW_ACK_ACK_FIDS_MAX;
 }
 
 void halow_ack_config_load( halow_ack_config_t *cfg ){
@@ -168,6 +194,8 @@ void halow_ack_config_load( halow_ack_config_t *cfg ){
     configdb_get_i8 (HALOW_ACK_CFG("ra"),     (int8_t *)&cfg->rate_adapt);
     configdb_get_i8 (HALOW_ACK_CFG("rlup"),   (int8_t *)&cfg->ra_loss_up);
     configdb_get_i8 (HALOW_ACK_CFG("rldn"),   (int8_t *)&cfg->ra_loss_down);
+    configdb_get_i8 (HALOW_ACK_CFG("window"), (int8_t *)&cfg->window);
+    configdb_get_i8 (HALOW_ACK_CFG("fids"),   (int8_t *)&cfg->ack_fids);
     halow_ack_config_clamp(cfg);
 }
 
@@ -178,6 +206,8 @@ void halow_ack_config_save( const halow_ack_config_t *cfg ){
     configdb_set_i8 (HALOW_ACK_CFG("ra"),     (int8_t *)&cfg->rate_adapt);
     configdb_set_i8 (HALOW_ACK_CFG("rlup"),   (int8_t *)&cfg->ra_loss_up);
     configdb_set_i8 (HALOW_ACK_CFG("rldn"),   (int8_t *)&cfg->ra_loss_down);
+    configdb_set_i8 (HALOW_ACK_CFG("window"), (int8_t *)&cfg->window);
+    configdb_set_i8 (HALOW_ACK_CFG("fids"),   (int8_t *)&cfg->ack_fids);
 }
 
 void halow_ack_config_get_live( halow_ack_config_t *cfg ){
@@ -197,6 +227,11 @@ void halow_ack_config_apply( const halow_ack_config_t *cfg ){
 
     halow_ack_lock();
     g_ack_cfg = c;
+    /* grow/shrink the sliding-window slot pool if window changed */
+    if( c.window != g_ack_slot_count || g_ack_slots == NULL ){
+        (void)halow_ack_slots_resize_locked(c.window);
+        if( g_ack_slot_count != c.window ) g_ack_cfg.window = (uint8_t)g_ack_slot_count;
+    }
     for( uint32_t i = 0; i < HALOW_ACK_MAX_PEERS; i++ ){
         halow_ack_peer_t *p = &g_ack_peers[i];
         if( !p->in_use ) continue;
@@ -211,10 +246,12 @@ void halow_ack_config_apply( const halow_ack_config_t *cfg ){
         }
     }
     halow_ack_unlock();
-    halow_ack_config_save(&c);
-    log_info("ack: apply retries=%u tmo=%ums ra=%u up=%u%% down=%u%%",
-             (unsigned)c.max_retries, (unsigned)c.timeout_ms, (unsigned)c.rate_adapt,
-             (unsigned)c.ra_loss_up, (unsigned)c.ra_loss_down);
+    halow_ack_config_save(&g_ack_cfg);
+    log_info("ack: apply retries=%u tmo=%ums ra=%u up=%u%% down=%u%% window=%lu fids=%u",
+             (unsigned)g_ack_cfg.max_retries, (unsigned)g_ack_cfg.timeout_ms,
+             (unsigned)g_ack_cfg.rate_adapt,
+             (unsigned)g_ack_cfg.ra_loss_up, (unsigned)g_ack_cfg.ra_loss_down,
+             (unsigned long)g_ack_slot_count, (unsigned)g_ack_cfg.ack_fids);
 }
 
 static halow_ack_peer_t *halow_ack_peer_find( const uint8_t mac[6] ){
@@ -225,8 +262,19 @@ static halow_ack_peer_t *halow_ack_peer_find( const uint8_t mac[6] ){
 }
 
 static halow_ack_slot_t *halow_ack_slot_for_peer( const uint8_t mac[6] ){
-    for( uint32_t i = 0; i < HALOW_ACK_SLOTS; i++ )
+    for( uint32_t i = 0; i < g_ack_slot_count; i++ )
         if( g_ack_slots[i].in_use && memcmp(g_ack_slots[i].dest_mac, mac, 6) == 0 )
+            return &g_ack_slots[i];
+    return NULL;
+}
+
+/* Find the outstanding slot for (mac, fid). Used to free the exact frame the
+ * incoming ACK is confirming. Replaces the old "free the single peer slot". */
+static halow_ack_slot_t *halow_ack_slot_match( const uint8_t mac[6], uint16_t fid ){
+    for( uint32_t i = 0; i < g_ack_slot_count; i++ )
+        if( g_ack_slots[i].in_use &&
+            g_ack_slots[i].fid == fid &&
+            memcmp(g_ack_slots[i].dest_mac, mac, 6) == 0 )
             return &g_ack_slots[i];
     return NULL;
 }
@@ -282,15 +330,26 @@ static void halow_ack_peer_dedup_remember( halow_ack_peer_t *p, uint32_t hash ){
 }
 
 static halow_ack_slot_t *halow_ack_slot_alloc( void ){
-    for( uint32_t i = 0; i < HALOW_ACK_SLOTS; i++ )
+    for( uint32_t i = 0; i < g_ack_slot_count; i++ )
         if( !g_ack_slots[i].in_use ) return &g_ack_slots[i];
     return NULL;
 }
 
-static void halow_ack_send_ack( int8_t evm, const uint8_t dest_mac[6] ){
-    uint8_t a[HALOW_ACK_ACK_LEN] = { HALOW_ACK_MAGIC0, HALOW_ACK_MAGIC1, (uint8_t)evm };
+static void halow_ack_send_ack( int8_t evm, const uint8_t dest_mac[6],
+                                const uint16_t fids[HALOW_ACK_ACK_FIDS_MAX] ){
+    uint8_t nfids = g_ack_cfg.ack_fids;
+    if( nfids > HALOW_ACK_ACK_FIDS_MAX ) nfids = HALOW_ACK_ACK_FIDS_MAX;
+    if( nfids == 0u ) nfids = 1u;
+    uint8_t a[HALOW_ACK_ACK_LEN_MAX];
+    a[0] = HALOW_ACK_MAGIC0;
+    a[1] = HALOW_ACK_MAGIC1;
+    a[2] = (uint8_t)evm;
+    for( uint32_t i = 0; i < nfids; i++ ){
+        a[3u + 2u*i]      = (uint8_t)(fids[i] & 0xFFu);
+        a[3u + 2u*i + 1u] = (uint8_t)((fids[i] >> 8) & 0xFFu);
+    }
     g_ack_stats.acks_sent++;
-    (void)halow_tx(a, HALOW_ACK_ACK_LEN, dest_mac, HALOW_ACK_ACK_MCS);
+    (void)halow_tx(a, 3u + 2u*nfids, dest_mac, HALOW_ACK_ACK_MCS);
 }
 
 int32_t halow_ack_tx( const uint8_t *payload, uint16_t len, const uint8_t dest_mac[6] ){
@@ -310,12 +369,17 @@ int32_t halow_ack_tx( const uint8_t *payload, uint16_t len, const uint8_t dest_m
         return halow_tx(payload, len, dest_mac, HALOW_MCS_DEFAULT);
     }
     uint8_t pmcs = p->tx_mcs;
-    if( p->cur_retries == 0u || halow_ack_slot_for_peer(dest_mac) != NULL ){
+    /* NOACK peer (cur_retries slid to 0): no point queuing retries. Otherwise
+     * allocate a tracked slot per frame (sliding window). The old code also
+     * bailed when a slot for this peer already existed ("1 outstanding per
+     * peer") which made every further frame fire-and-forget under load. */
+    if( p->cur_retries == 0u ){
         halow_ack_unlock();
         return halow_tx(payload, len, dest_mac, pmcs);
     }
     halow_ack_slot_t *s = halow_ack_slot_alloc();
     if( s == NULL ){
+        /* window full: TX without a retry slot rather than blocking */
         halow_ack_unlock();
         return halow_tx(payload, len, dest_mac, pmcs);
     }
@@ -324,6 +388,7 @@ int32_t halow_ack_tx( const uint8_t *payload, uint16_t len, const uint8_t dest_m
     s->retries_used = 0;
     s->tx_jiff      = os_jiffies();
     s->frame_len    = len;
+    s->fid          = (uint16_t)(halow_ack_fnv1a(payload, len) & 0xFFFFu);
     memcpy(s->dest_mac, dest_mac, 6);
     memcpy(s->frame, payload, len);
     p->tx++;
@@ -352,29 +417,49 @@ bool halow_ack_on_rx( const uint8_t *payload, uint16_t len, const uint8_t src_ma
             p->evm_ewma = (int8_t)(((int16_t)p->evm_ewma * 7 + (int16_t)ack_evm) / 8);
             halow_ack_ra_on_ack(p);
         }
-        halow_ack_slot_t *s = halow_ack_slot_for_peer(src_mac);
-        if( s != NULL ){
-            s->in_use = 0;
-            g_ack_stats.acked++;
-            if( p != NULL ) p->acked++;
-        }else{
-            g_ack_stats.acks_rx_dup++;
+        /* Cumulative ACK: free every outstanding slot whose fid appears among
+         * the fids carried in this ACK frame. nfids is bounded by both the
+         * received frame length and the configured ack_fids, so a sender with a
+         * different ack_fids (config mismatch / upgrade) is parsed safely. */
+        uint32_t nfids = (len - 3u) / 2u;
+        if( nfids > g_ack_cfg.ack_fids ) nfids = g_ack_cfg.ack_fids;
+        for( uint32_t k = 0; k < nfids; k++ ){
+            uint16_t ack_fid = (uint16_t)((uint16_t)payload[3u + 2u*k]
+                                          | ((uint16_t)payload[3u + 2u*k + 1u] << 8));
+            if( ack_fid == 0u ) continue;   /* 0 == no/unused fid slot */
+            halow_ack_slot_t *s = halow_ack_slot_match(src_mac, ack_fid);
+            if( s != NULL ){
+                s->in_use = 0;
+                g_ack_stats.acked++;
+                if( p != NULL ) p->acked++;
+            }else{
+                g_ack_stats.acks_rx_dup++;
+            }
         }
         halow_ack_unlock();
         return false;
     }
 
     uint32_t hash = halow_ack_fnv1a(payload, len);
+    uint16_t fids[HALOW_ACK_ACK_FIDS_MAX] = {0};
     halow_ack_lock();
     halow_ack_peer_t *p = halow_ack_peer_get(src_mac);
     bool deliver = true;
     if( p != NULL ){
         deliver = !halow_ack_peer_dedup_seen(p, hash);
         if( deliver ) halow_ack_peer_dedup_remember(p, hash);
+        /* snapshot the most-recent ack_fids entries of the rolling dedup window
+         * (most recent first) as low-16 fids for the cumulative ACK */
+        uint8_t want = g_ack_cfg.ack_fids;
+        if( want > HALOW_ACK_ACK_FIDS_MAX ) want = HALOW_ACK_ACK_FIDS_MAX;
+        for( uint32_t i = 0; i < want; i++ ){
+            uint32_t idx = (p->dedup_idx + HALOW_ACK_DEDUP_WIN - 1u - i) % HALOW_ACK_DEDUP_WIN;
+            fids[i] = (uint16_t)(p->dedup[idx] & 0xFFFFu);
+        }
     }
     halow_ack_unlock();
 
-    halow_ack_send_ack(evm, src_mac);
+    halow_ack_send_ack(evm, src_mac, fids);
 
     if( deliver ){
         *out_payload = payload;
@@ -392,17 +477,20 @@ void halow_ack_tick( void ){
 
     halow_ack_lock();
     uint8_t dflt_mcs = halow_ack_default_mcs();
-    for( uint32_t i = 0; i < HALOW_ACK_SLOTS; i++ ){
+    for( uint32_t i = 0; i < g_ack_slot_count; i++ ){
         halow_ack_slot_t *s = &g_ack_slots[i];
         if( !s->in_use ) continue;
         if( (now - s->tx_jiff) < timeout_j ) continue;
 
         halow_ack_peer_t *p = halow_ack_peer_find(s->dest_mac);
-        if( p == NULL || p->cur_retries == 0u ){
+        if( p == NULL ){
             s->in_use = 0;
             continue;
         }
-        if( s->retries_used < p->cur_retries ){
+        /* Per-slot retry budget (fixed = max_retries). Was shared via the peer's
+         * cur_retries, which with a sliding window would let several dropping
+         * slots slide the peer to NOACK and disable retries entirely. */
+        if( s->retries_used < g_ack_cfg.max_retries ){
             s->retries_used++;
             s->tx_jiff = now;
             g_ack_stats.retransmitted++;
@@ -415,14 +503,6 @@ void halow_ack_tick( void ){
             g_ack_stats.dropped++;
             p->dropped++;
             halow_ack_ra_on_drop(p);
-            if( p->cur_retries > 0u ){
-                p->cur_retries--;
-                if( p->cur_retries == 0u ){
-                    g_ack_stats.noack_hits++;
-                    log_warn("ack: peer %02x:%02x:%02x:%02x:%02x:%02x slid to NOACK",
-                             p->mac[0],p->mac[1],p->mac[2],p->mac[3],p->mac[4],p->mac[5]);
-                }
-            }
         }
     }
     for( uint32_t i = 0; i < HALOW_ACK_MAX_PEERS; i++ ){
@@ -440,18 +520,25 @@ static int32_t halow_ack_tick_work( struct os_work *work ){
 
 void halow_ack_init( void ){
     halow_ack_config_load(&g_ack_cfg);
-    memset(g_ack_slots, 0, sizeof(g_ack_slots));
     memset(g_ack_peers, 0, sizeof(g_ack_peers));
     memset(&g_ack_stats, 0, sizeof(g_ack_stats));
+    g_ack_slots = NULL;
+    g_ack_slot_count = 0;
 
     (void)os_mutex_init(&g_ack_mutex);
     os_mutex_unlock(&g_ack_mutex);
 
+    /* allocate the sliding-window slot pool on the heap (sized by config) */
+    halow_ack_lock();
+    (void)halow_ack_slots_resize_locked(g_ack_cfg.window);
+    halow_ack_unlock();
+
     OS_WORK_INIT(&g_ack_tick_wk, halow_ack_tick_work, 0);
     os_run_work_delay(&g_ack_tick_wk, HALOW_ACK_TICK_MS);
 
-    log_info("ack: init retries=%u tmo=%ums",
-             (unsigned)g_ack_cfg.max_retries, (unsigned)g_ack_cfg.timeout_ms);
+    log_info("ack: init retries=%u tmo=%ums window=%lu fids=%u",
+             (unsigned)g_ack_cfg.max_retries, (unsigned)g_ack_cfg.timeout_ms,
+             (unsigned long)g_ack_slot_count, (unsigned)g_ack_cfg.ack_fids);
 }
 
 void halow_ack_stats_get( halow_ack_stats_t *out ){
@@ -459,7 +546,7 @@ void halow_ack_stats_get( halow_ack_stats_t *out ){
     halow_ack_lock();
     *out = g_ack_stats;
     uint32_t n = 0, peers = 0;
-    for( uint32_t i = 0; i < HALOW_ACK_SLOTS; i++ )     if( g_ack_slots[i].in_use ) n++;
+    for( uint32_t i = 0; i < g_ack_slot_count; i++ )     if( g_ack_slots[i].in_use ) n++;
     for( uint32_t i = 0; i < HALOW_ACK_MAX_PEERS; i++ )  if( g_ack_peers[i].in_use ) peers++;
     out->outstanding = (uint8_t)n;
     out->peers       = (uint8_t)peers;

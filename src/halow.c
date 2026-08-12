@@ -59,7 +59,7 @@
 #define HALOW_RETRY_FRM_MAX     0
 #define HALOW_RETRY_RTS_MAX     0
 #define HALOW_RETRY_FB_CNT      0
-#define HALOW_RTS_THRESH        0xFFFF
+#define HALOW_RTS_THRESH        100
 
 /* CCA */
 #define HALOW_CCA_FOR_CE        0
