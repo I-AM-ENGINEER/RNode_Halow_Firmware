@@ -57,6 +57,7 @@
 #include "uart_slip.h"
 #include "net_log.h"
 #include "halow_pkg_handler.h"
+#include "halow_ack.h"
 #include "lib/net/ethphy/eth_phy.h"
 
 static struct os_work blink_wk;
@@ -98,7 +99,9 @@ static void halow_rx_handler(struct hgic_rx_info *info,
     };
     memcpy(modem_pkg_info.mac, hdr->addr2, 6);
 
-    nearby_modem_package_register(&modem_pkg_info);
+    if (!halow_ack_is_ack_frame(data, (uint16_t)len)) {
+        nearby_modem_package_register(&modem_pkg_info);
+    }
     indication_led_rx();
     statistics_radio_register_rx_package(len);
 
@@ -115,7 +118,7 @@ static void halow_rx_handler(struct hgic_rx_info *info,
         log_trace("RX not my mac, drop");
         return;
     }
-    halow_pkg_handler_rf_to_tcp(data, (uint16_t)len, (const uint8_t *)hdr->addr2);
+    halow_pkg_handler_rf_to_tcp(data, (uint16_t)len, (const uint8_t *)hdr->addr2, info->evm);
 }
 
 // TCP -> rns stream decoder

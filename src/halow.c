@@ -660,7 +660,12 @@ int32_t halow_tx( const uint8_t *data, uint32_t len, const uint8_t destination_m
     if (len == 0)        return -3;
     if (len > TX_BUFFER_SIZE) return -4;
 
-    if (mcs == HALOW_MCS_DEFAULT) {
+    /* Per-frame MCS override. Fall back to the globally configured (sanitized)
+     * MCS for HALOW_MCS_DEFAULT or any value the LMAC TX rate tables cannot
+     * index: only MCS0-7 and the special MCS10 are supported. Without this,
+     * auto-rate-adaptation can drive the per-peer TX MCS up to 8/9 -> OOB in
+     * the NDBPS/retry tables -> wrong symbol count -> truncated frame in air. */
+    if (mcs == HALOW_MCS_DEFAULT || (mcs > 7 && mcs != 10)) {
         halow_config_t cfg;
         halow_config_load(&cfg);
         mcs = cfg.mcs;

@@ -89,6 +89,7 @@ static const web_api_route_t s_api_routes[] = {
     { "telemetry_cfg",      web_api_telemetry_cfg_get,      web_api_telemetry_cfg_post  },
     { "privacy_cfg",        web_api_privacy_cfg_get,        web_api_privacy_cfg_post    },
     { "rns_mtu_cfg",        web_api_rns_mtu_cfg_get,        web_api_rns_mtu_cfg_post    },
+    { "ack_cfg",            web_api_ack_cfg_get,            web_api_ack_cfg_post        },
     { "telemetry_send",     NULL,                           web_api_telemetry_send_post },
 
     { "ota_wipe_lfs",       NULL,                           web_api_ota_wipe_lfs_post   },

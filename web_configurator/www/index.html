@@ -246,6 +246,45 @@
             </div>
 
             <div class="panel">
+                <h3>ACK (ARQ) Settings</h3>
+                <p class="note">Per-DATA-packet ACK, stop-and-wait per node. DATA frames carry no header (legacy-compatible); a 3-byte ACK [magic][evm] is sent on every received frame at MCS10.</p>
+                <label>
+                    <span>Max retries</span>
+                    <input type="number" id="ack_retries" min="0" max="8" value="3">
+                </label>
+                <p class="note">0 = NOACK (fire-and-forget). Per-peer budget slides −1 when a frame gets no ACK at all, snaps back to max on any ACK.</p>
+                <label>
+                    <span>ACK timeout (ms)</span>
+                    <input type="number" id="ack_timeout_ms" min="5" max="500" value="40">
+                </label>
+                <p class="note">Wait for ACK before each retransmit. Stop-and-wait ARQ rate ≈ 1000/timeout frames/s per peer.</p>
+                <div class="ack-stats" id="ack_stats_box" style="font-size:12px;color:#888;margin-top:8px"></div>
+                <div class="panel-actions">
+                    <button type="button" id="save_ack" disabled>Save</button>
+                </div>
+            </div>
+
+            <div class="panel" id="ra_panel">
+                <h3>Rate Adaptation</h3>
+                <p class="note panel-warn" id="ra_warn" style="display:none;color:#a00;font-weight:bold">Requires ACK: set Max retries &gt; 0 in the ACK card above to enable.</p>
+                <label class="toggle-label">
+                    <span>Enable</span>
+                    <input type="checkbox" id="ack_rate_adapt">
+                </label>
+                <label>
+                    <span>Step up at loss ≤ (%)</span>
+                    <input type="number" id="ack_ra_loss_up" min="0" max="99" value="5">
+                </label>
+                <p class="note">When a peer's smoothed loss drops at/under this, TX MCS steps up (faster). Lower = aggressive "fast link".</p>
+                <label>
+                    <span>Step down at loss ≥ (%)</span>
+                    <input type="number" id="ack_ra_loss_down" min="1" max="100" value="30">
+                </label>
+                <p class="note">When a peer's smoothed loss reaches/exceeds this, TX MCS steps down (more robust). Higher = "reliable link". Must be greater than the up threshold.</p>
+                <p class="note">Staleness: if no ACK from a peer in 1 min, its TX MCS resets to the global default and is held there for a 1-min cooldown.</p>
+            </div>
+
+            <div class="panel">
                 <h3>Network Settings</h3>
                 <label class="toggle-label">
                     <span>Enable DHCP</span>
@@ -468,6 +507,7 @@
                     <tbody>
                     <tr><th>WiFi MAC</th><td id="nearby_self_mac">--</td></tr>
                     <tr><th>Heard devices</th><td id="nearby_count">--</td></tr>
+                    <tr><th>Default MCS index</th><td id="nearby_tx_mcs">--</td></tr>
                     </tbody>
                 </table>
 
@@ -478,7 +518,10 @@
                                 <th data-key="mac">MAC</th>
                                 <th data-key="rssi">Last RSSI</th>
                                 <th data-key="snr">Last SNR</th>
-                                <th data-key="mcs">MCS</th>
+                                <th data-key="mcs">RX MCS</th>
+                                <th data-key="txMcs">TX MCS</th>
+                                <th data-key="loss">Loss</th>
+                                <th data-key="evm">EVM</th>
                                 <th data-key="packets">Packets</th>
                                 <th data-key="bytes">RX Data</th>
                                 <th data-key="rate">RX Rate</th>
@@ -486,7 +529,7 @@
                             </tr>
                         </thead>
                         <tbody id="nearby_table_body">
-                            <tr><td colspan="13">--</td></tr>
+                            <tr><td colspan="11">--</td></tr>
                         </tbody>
                     </table>
                 </div>

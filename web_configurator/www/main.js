@@ -18,7 +18,8 @@
         tcp: '',
         telemetry: '',
         privacy: '',
-        rns_mtu: ''
+        rns_mtu: '',
+        ack: ''
     };
     const DASHBOARD_REFRESH_MS = 1000;
     const dashboardState = {
@@ -255,6 +256,10 @@
             btn = document.getElementById('save_rns_mtu');
             isValid = isRnsMtuFormValid();
         }
+        if (group === 'ack') {
+            current = jsonSnapshot(readAckForm());
+            btn = document.getElementById('save_ack');
+        }
 
         if (!btn) { return; }
 
@@ -272,6 +277,7 @@
         if (group === 'telemetry') { baselines.telemetry = jsonSnapshot(readTelemetryForm()); }
         if (group === 'privacy') { baselines.privacy = jsonSnapshot(readPrivacyForm()); }
         if (group === 'rns_mtu') { baselines.rns_mtu = jsonSnapshot(readRnsMtuForm()); }
+        if (group === 'ack') { baselines.ack = jsonSnapshot(readAckForm()); }
         updateSaveButton(group);
     }
 
@@ -305,7 +311,8 @@
                 ]
             },
             { group: 'privacy', btn: 'save_privacy', ids: ['privacy_mac_rotation', 'privacy_mac_broadcast'] },
-            { group: 'rns_mtu', btn: 'save_rns_mtu', ids: ['reticulum_link_mtu'] }
+            { group: 'rns_mtu', btn: 'save_rns_mtu', ids: ['reticulum_link_mtu'] },
+            { group: 'ack', btn: 'save_ack', ids: ['ack_retries', 'ack_timeout_ms', 'ack_rate_adapt', 'ack_ra_loss_up', 'ack_ra_loss_down'] }
         ];
 
         map.forEach(m => {
@@ -321,6 +328,28 @@
             const btn = document.getElementById(m.btn);
             if (btn) { btn.disabled = true; }
         });
+
+        const retriesFld = document.getElementById('ack_retries');
+        const raBox = document.getElementById('ack_rate_adapt');
+        const upFld = document.getElementById('ack_ra_loss_up');
+        const dnFld = document.getElementById('ack_ra_loss_down');
+        const raPanel = document.getElementById('ra_panel');
+        const raWarn = document.getElementById('ra_warn');
+        if (retriesFld && raBox) {
+            const syncRateAdapt = () => {
+                const ackOn = (parseInt(retriesFld.value, 10) || 0) > 0;
+                if (!ackOn) raBox.checked = false;
+                const raOn = !!raBox.checked && ackOn;
+                if (upFld) upFld.disabled = !raOn;
+                if (dnFld) dnFld.disabled = !raOn;
+                if (raPanel) raPanel.classList.toggle('disabled', !ackOn);
+                if (raWarn) raWarn.style.display = ackOn ? 'none' : 'block';
+                updateSaveButton('ack');
+            };
+            retriesFld.addEventListener('input', syncRateAdapt);
+            retriesFld.addEventListener('change', syncRateAdapt);
+            raBox.addEventListener('change', syncRateAdapt);
+        }
     }
 
     function switchTab(tabName) {
@@ -649,6 +678,8 @@
 
         document.getElementById('save_privacy').addEventListener('click', savePrivacy);
         document.getElementById('save_rns_mtu').addEventListener('click', saveRnsMtu);
+        const saveAckBtn = document.getElementById('save_ack');
+        if (saveAckBtn) saveAckBtn.addEventListener('click', saveAck);
         document.getElementById('reticulum_link_mtu').addEventListener('input', validateRnsMtuField);
         document.getElementById('reticulum_link_mtu').addEventListener('change', validateRnsMtuField);
 
@@ -781,6 +812,51 @@
         }
     }
 
+    async function loadAckConfig() {
+        try {
+            const res = await fetch('/api/ack_cfg');
+            if (!res.ok) return;
+            const data = await res.json();
+            setInput('ack_retries', data.retries != null ? data.retries : 3);
+            setInput('ack_timeout_ms', data.timeout_ms != null ? data.timeout_ms : 40);
+            setInput('ack_ra_loss_up',   data.ra_loss_up   != null ? data.ra_loss_up   : 5);
+            setInput('ack_ra_loss_down', data.ra_loss_down != null ? data.ra_loss_down : 30);
+            const ra = document.getElementById('ack_rate_adapt');
+            const upFld = document.getElementById('ack_ra_loss_up');
+            const dnFld = document.getElementById('ack_ra_loss_down');
+            const raPanel = document.getElementById('ra_panel');
+            const raWarn = document.getElementById('ra_warn');
+            const retries = Number(data.retries) || 0;
+            const ackOn = retries > 0;
+            const raOn = !!data.rate_adapt && ackOn;
+            if (ra) ra.checked = raOn;
+            if (upFld) upFld.disabled = !raOn;
+            if (dnFld) dnFld.disabled = !raOn;
+            if (raPanel) raPanel.classList.toggle('disabled', !ackOn);
+            if (raWarn) raWarn.style.display = ackOn ? 'none' : 'block';
+            const box = document.getElementById('ack_stats_box');
+            if (box) {
+                const acked = Number(data.acked) || 0;
+                const dropped = Number(data.dropped) || 0;
+                const lossPct = (acked + dropped) > 0
+                    ? (dropped / (acked + dropped) * 100).toFixed(1) + '%'
+                    : '--';
+                box.textContent = 'loss=' + lossPct +
+                    '  tx=' + (data.tx_frames||0) +
+                    '  acked=' + acked +
+                    '  retrans=' + (data.retransmitted||0) +
+                    '  dropped=' + dropped +
+                    '  acks_sent=' + (data.acks_sent||0) +
+                    '  noack_hits=' + (data.noack_hits||0) +
+                    '  peers=' + (data.peers||0) +
+                    '  outstanding=' + (data.outstanding||0) +
+                    '  last_evm=' + (data.last_evm||0) + 'dB';
+            }
+            snapshotGroup('ack');
+        } catch (err) {
+        }
+    }
+
     async function loadAll() {
         try {
             const res = await fetch('/api/get_all');
@@ -792,6 +868,7 @@
             populateFromState();
             snapshotAll();
             loadRnsMtuConfig();
+            loadAckConfig();
             return true;
         } catch (err) {
             console.error('get_all error', err);
@@ -995,7 +1072,12 @@
                 mcs: row[3],
                 packets: row[4],
                 bytes: row[5],
-                lastSeen: row[6]
+                lastSeen: row[6],
+                txMcs: row[7],
+                acked: row[8],
+                dropped: row[9],
+                evm: row[10],
+                lossPct: row[11]
             };
         }
 
@@ -1006,8 +1088,20 @@
             mcs: row?.s ?? row?.mcs,
             packets: row?.p ?? row?.rx_packets,
             bytes: row?.b ?? row?.rx_bytes,
-            lastSeen: row?.l ?? row?.last_seen
+            lastSeen: row?.l ?? row?.last_seen,
+            txMcs: row?.txMcs,
+            acked: row?.acked,
+            dropped: row?.dropped,
+            evm: row?.evm,
+            lossPct: row?.lossPct ?? row?.loss_pct
         };
+    }
+
+    function calcPeerLoss(acked, dropped) {
+        const a = Number(acked) || 0;
+        const d = Number(dropped) || 0;
+        if (a + d === 0) return null;
+        return d / (a + d);
     }
 
     function calcNearbyBitrate(mac, bytes) {
@@ -1049,7 +1143,7 @@
     function sortRows(rows, parseFn, key, desc, rateCache) {
         if (!key) return rows;
         const sorted = rows.slice();
-        const numericKeys = new Set(['rssi', 'snr', 'mcs', 'packets', 'bytes', 'lastSeen',
+        const numericKeys = new Set(['rssi', 'snr', 'mcs', 'txMcs', 'loss', 'evm', 'packets', 'bytes', 'lastSeen',
             'rxBytes', 'txBytes', 'rxPackets', 'txPackets', 'lastRx', 'lastTx', 'mtu']);
         sorted.sort((a, b) => {
             const pa = parseFn(a);
@@ -1128,7 +1222,7 @@
         if (!rows.length) {
             const tr = document.createElement('tr');
             const td = document.createElement('td');
-            td.colSpan = 7;
+            td.colSpan = 11;
             td.textContent = 'No devices';
             tr.appendChild(td);
             body.appendChild(tr);
@@ -1138,11 +1232,19 @@
         rows.forEach(srcRow => {
             const row = parseNearbyRow(srcRow);
             const tr = document.createElement('tr');
+            const ewmaPct = Number(row.lossPct);
+            const cumLoss = calcPeerLoss(row.acked, row.dropped);
+            const lossStr = Number.isFinite(ewmaPct) && ewmaPct >= 0
+                ? (ewmaPct.toFixed(1) + '%')
+                : ((cumLoss === null) ? '--' : (cumLoss * 100).toFixed(1) + '%');
             const values = [
                 formatMac(row.mac),
                 row.rssi + ' dBm',
                 row.snr + ' dB',
                 normalizeNearbyMcs(row.mcs),
+                normalizeNearbyMcs(row.txMcs),
+                lossStr,
+                (row.evm !== undefined && row.evm !== null && row.evm !== '') ? (row.evm + ' dB') : '--',
                 Number(row.packets).toLocaleString('ru-RU'),
                 formatBytes(row.bytes),
                 calcNearbyBitrate(row.mac, row.bytes)
@@ -1191,6 +1293,7 @@
 
             setText('nearby_self_mac', formatMac(data?.m ?? '--'));
             setText('nearby_count', total);
+            setText('nearby_tx_mcs', (data?.tx_mcs != null) ? ('MCS' + data.tx_mcs) : '--');
             nearbyState.rows = rows;
             renderNearby();
         } catch (err) {
@@ -1333,8 +1436,8 @@
                 fmt(row.txPackets),
                 (Number.isFinite(lastRx) && lastRx >= 0) ? formatDurationCompact(lastRx) : '--',
                 (Number.isFinite(lastTx) && lastTx >= 0) ? formatDurationCompact(lastTx) : '--',
-                rxRate !== '--' ? rxRate + ' kbit/s' : '0 kbit/s',
-                txRate !== '--' ? txRate + ' kbit/s' : '0 kbit/s',
+                rxRate !== '--' ? formatNearbyBitrate(Number(rxRate)) : '0 kbit/s',
+                txRate !== '--' ? formatNearbyBitrate(Number(txRate)) : '0 kbit/s',
                 fmt(row.mtu)
             ];
 
@@ -1599,6 +1702,30 @@
         }
         loadAll();
         loadRnsMtuConfig();
+        loadAckConfig();
+    }
+
+    function readAckForm() {
+        const ra = document.getElementById('ack_rate_adapt');
+        const up = parseInt(document.getElementById('ack_ra_loss_up').value, 10);
+        const dn = parseInt(document.getElementById('ack_ra_loss_down').value, 10);
+        return {
+            retries: parseInt(document.getElementById('ack_retries').value, 10) || 0,
+            timeout_ms: parseInt(document.getElementById('ack_timeout_ms').value, 10) || 40,
+            rate_adapt: (ra && ra.checked && !ra.disabled) ? 1 : 0,
+            ra_loss_up:   isNaN(up) ? 5   : Math.max(0, Math.min(99, up)),
+            ra_loss_down: isNaN(dn) ? 30  : Math.max(1, Math.min(100, dn))
+        };
+    }
+
+    async function saveAck() {
+        const payload = readAckForm();
+        try {
+            await postJson('/api/ack_cfg', payload);
+        } catch (err) {
+            console.error('saveAck error', err);
+        }
+        loadAckConfig();
     }
 
     function sanitizeLxmf(value) {

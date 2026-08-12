@@ -18,6 +18,7 @@
 #include "halow.h"
 #include "halow_lbt.h"
 #include "halow_cca.h"
+#include "halow_ack.h"
 #include "rns/link_db.h"
 #include "net_ip.h"
 #include "tcp_server.h"
@@ -1148,6 +1149,10 @@ int32_t web_api_nearby_modems_get( const cJSON *in, cJSON *out ){
         return WEB_API_RC_BAD_REQUEST;
     }
 
+    halow_config_t hcfg;
+    halow_config_load(&hcfg);
+    uint8_t default_tx_mcs = hcfg.mcs;
+
     arr = cJSON_AddArrayToObject(out, "d");
     if (arr == NULL) {
         return WEB_API_RC_INTERNAL;
@@ -1185,6 +1190,15 @@ int32_t web_api_nearby_modems_get( const cJSON *in, cJSON *out ){
         cJSON_AddItemToArray(row, cJSON_CreateNumber((double)m->rx_bytes));
         cJSON_AddItemToArray(row, cJSON_CreateNumber((double)age));
 
+        halow_ack_peer_stats_t ps;
+        (void)halow_ack_peer_stats_by_mac(m->mac, &ps);
+        uint8_t tx_mcs = (ps.tx_mcs == HALOW_MCS_DEFAULT) ? default_tx_mcs : ps.tx_mcs;
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)tx_mcs));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)ps.acked));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)ps.dropped));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)ps.evm));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)ps.loss_pct));
+
         cJSON_AddItemToArray(arr, row);
     }
 
@@ -1195,6 +1209,7 @@ int32_t web_api_nearby_modems_get( const cJSON *in, cJSON *out ){
                 wifi_mac[0], wifi_mac[1], wifi_mac[2],
                 wifi_mac[3], wifi_mac[4], wifi_mac[5]);
     cJSON_AddStringToObject(out, "m", s);
+    cJSON_AddNumberToObject(out, "tx_mcs", (double)default_tx_mcs);
 
     return WEB_API_RC_OK;
 }
@@ -1213,6 +1228,45 @@ int32_t web_api_rns_mtu_cfg_post( const cJSON *in, cJSON *out ){
     }
 
     return web_api_rns_mtu_cfg_get(NULL, out);
+}
+
+int32_t web_api_ack_cfg_get( const cJSON *in, cJSON *out ){
+    halow_ack_config_t cfg;
+    halow_ack_stats_t st;
+    (void)in;
+    if (out == NULL) return WEB_API_RC_BAD_REQUEST;
+    halow_ack_config_get_live(&cfg);
+    cJSON_AddNumberToObject(out, "retries",  (double)cfg.max_retries);
+    cJSON_AddNumberToObject(out, "timeout_ms", (double)cfg.timeout_ms);
+    cJSON_AddNumberToObject(out, "rate_adapt", (double)cfg.rate_adapt);
+    cJSON_AddNumberToObject(out, "ra_loss_up",   (double)cfg.ra_loss_up);
+    cJSON_AddNumberToObject(out, "ra_loss_down", (double)cfg.ra_loss_down);
+    halow_ack_stats_get(&st);
+    cJSON_AddNumberToObject(out, "tx_frames",  (double)st.tx_frames);
+    cJSON_AddNumberToObject(out, "acked",      (double)st.acked);
+    cJSON_AddNumberToObject(out, "retransmitted", (double)st.retransmitted);
+    cJSON_AddNumberToObject(out, "dropped",    (double)st.dropped);
+    cJSON_AddNumberToObject(out, "acks_sent",  (double)st.acks_sent);
+    cJSON_AddNumberToObject(out, "acks_rx_dup",(double)st.acks_rx_dup);
+    cJSON_AddNumberToObject(out, "noack_hits", (double)st.noack_hits);
+    cJSON_AddNumberToObject(out, "last_evm",   (double)st.last_evm);
+    cJSON_AddNumberToObject(out, "peers",      (double)st.peers);
+    cJSON_AddNumberToObject(out, "outstanding",(double)st.outstanding);
+    return WEB_API_RC_OK;
+}
+
+int32_t web_api_ack_cfg_post( const cJSON *in, cJSON *out ){
+    halow_ack_config_t cfg;
+    int v;
+    if (in == NULL) return WEB_API_RC_BAD_REQUEST;
+    halow_ack_config_get_live(&cfg);
+    if (json_get_int(in, "retries",  &v)) { if (v >= 0 && v <= 8) cfg.max_retries = (uint8_t)v; }
+    if (json_get_int(in, "timeout_ms", &v)) { if (v >= 5 && v <= 500) cfg.timeout_ms = (uint16_t)v; }
+    if (json_get_int(in, "rate_adapt", &v)) { cfg.rate_adapt = (uint8_t)(v ? 1u : 0u); }
+    if (json_get_int(in, "ra_loss_up",   &v)) { if (v >= 0 && v <= 100) cfg.ra_loss_up   = (uint8_t)v; }
+    if (json_get_int(in, "ra_loss_down", &v)) { if (v >= 0 && v <= 100) cfg.ra_loss_down = (uint8_t)v; }
+    halow_ack_config_apply(&cfg);
+    return web_api_ack_cfg_get(NULL, out);
 }
 
 int32_t web_api_privacy_cfg_get( const cJSON *in, cJSON *out ){
@@ -1246,6 +1300,7 @@ int32_t web_api_reticulum_links_get( const cJSON *in, cJSON *out ){
     cJSON *row;
     rns_link_db_link_t link;
     char id_hex[RNS_LINK_ID_LEN * 2 + 1];
+    char dest_hex[RNS_TRUNCATED_HASH_LEN * 2 + 1];
     char mac_str[18];
     uint8_t count;
     uint8_t i;
@@ -1283,28 +1338,60 @@ int32_t web_api_reticulum_links_get( const cJSON *in, cJSON *out ){
             continue;
         }
 
+        /* Skip links that never learned a neighbour MAC. These are
+         * unanswered outbound LINKREQUESTs (state REQUEST_SENT, never seen
+         * on RX): the TX path already falls back to broadcast for them, so
+         * they carry no useful peer info and only clutter the table. */
+        bool mac_unknown = true;
+        for (j = 0; j < 6; j++) {
+            if (link.remote_mac[j] != RNS_LINK_MAC_UNKNOWN_BYTE) {
+                mac_unknown = false;
+                break;
+            }
+        }
+        if (mac_unknown) {
+            continue;
+        }
+
         for (j = 0; j < RNS_LINK_ID_LEN; j++) {
             sprintf(id_hex + j * 2, "%02X", link.id[j]);
         }
         id_hex[RNS_LINK_ID_LEN * 2] = '\0';
 
+        for (j = 0; j < RNS_TRUNCATED_HASH_LEN; j++) {
+            sprintf(dest_hex + j * 2, "%02X", link.destination[j]);
+        }
+        dest_hex[RNS_TRUNCATED_HASH_LEN * 2] = '\0';
+
         snprintf(mac_str, sizeof(mac_str), "%02X:%02X:%02X:%02X:%02X:%02X",
                  link.remote_mac[0], link.remote_mac[1], link.remote_mac[2],
                  link.remote_mac[3], link.remote_mac[4], link.remote_mac[5]);
+
+        int32_t now_s = (int32_t)time(NULL);
+        int32_t last_rx_age = (link.lastrx_timestamp_s > 0)
+                              ? (now_s - link.lastrx_timestamp_s) : -1;
+        int32_t last_tx_age = (link.lasttx_timestamp_s > 0)
+                              ? (now_s - link.lasttx_timestamp_s) : -1;
 
         row = cJSON_CreateArray();
         if (row == NULL) {
             return WEB_API_RC_INTERNAL;
         }
 
-        cJSON_AddItemToArray(row, cJSON_CreateString(id_hex));            /* link_id      */
-        cJSON_AddItemToArray(row, cJSON_CreateString(mac_str));           /* remote_mac   */
-        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)link.state));/* state        */
-        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)link.hops)); /* hops         */
-        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)link.rx_packets));
-        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)link.tx_packets));
+        /* Order MUST match parseReticulumRow() in web_configurator/www/main.js:
+         * [id, remoteMac, destination, state, rxBytes, txBytes,
+         *  rxPackets, txPackets, lastRx, lastTx, mtu] */
+        cJSON_AddItemToArray(row, cJSON_CreateString(id_hex));             /* id           */
+        cJSON_AddItemToArray(row, cJSON_CreateString(mac_str));            /* remote_mac   */
+        cJSON_AddItemToArray(row, cJSON_CreateString(dest_hex));           /* destination  */
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)link.state)); /* state        */
         cJSON_AddItemToArray(row, cJSON_CreateNumber((double)link.rx_bytes));
         cJSON_AddItemToArray(row, cJSON_CreateNumber((double)link.tx_bytes));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)link.rx_packets));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)link.tx_packets));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)last_rx_age));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)last_tx_age));
+        cJSON_AddItemToArray(row, cJSON_CreateNumber((double)link.effective_mtu));
 
         cJSON_AddItemToArray(arr, row);
     }
