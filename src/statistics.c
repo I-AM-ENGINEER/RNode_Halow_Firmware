@@ -33,6 +33,8 @@ void statistics_radio_reset( void ) {
     g_stat_radio.tx_bytes = 0;
     g_stat_radio.rx_packets = 0;
     g_stat_radio.tx_packets = 0;
+    g_stat_radio.rx_bitps = 0;
+    g_stat_radio.tx_bitps = 0;
 }
 
 void statistics_cpu_load_get( char *return_str, uint32_t max_len ) {
@@ -166,8 +168,8 @@ static void statistics_task( void *arg ) {
         uint32_t rx_bytes_now = g_stat_radio.rx_bytes;
         uint32_t tx_bytes_now = g_stat_radio.tx_bytes;
 
-        uint32_t rx_delta = rx_bytes_now - rx_bytes_previous;
-        uint32_t tx_delta = tx_bytes_now - tx_bytes_previous;
+        uint32_t rx_delta = (rx_bytes_now >= rx_bytes_previous) ? (rx_bytes_now - rx_bytes_previous) : 0;
+        uint32_t tx_delta = (tx_bytes_now >= tx_bytes_previous) ? (tx_bytes_now - tx_bytes_previous) : 0;
 
         g_stat_radio.rx_bitps = rx_delta * 8;
         g_stat_radio.tx_bitps = tx_delta * 8;
