@@ -24,6 +24,16 @@ typedef struct {
 
 static wota_ctx_t s_wota;
 
+/* True while an OTA file-transfer session is in progress. The TX hard-wedge
+ * watchdog consults this before its last-resort reboot. */
+bool ota_wota_active( void ){
+    return s_wota.active;
+}
+
+void ota_wota_session_abort( void ){
+    s_wota.active = false;
+}
+
 /* Feed bytes into raw (non-finalized) CRC accumulator.
  * Initialize with 0xFFFFFFFF, finalize by XOR with 0xFFFFFFFF. */
 static uint32_t crc32_feed( uint32_t c, const uint8_t *p, uint32_t n ){

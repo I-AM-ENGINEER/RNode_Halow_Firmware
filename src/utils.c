@@ -48,8 +48,9 @@ bool utils_cidr_to_mask( const char *s, ip4_addr_t *mask ){
 
     slash = strchr(s, '/');
     if (slash != NULL) {
-        unsigned long p = strtoul(slash + 1, NULL, 10);
-        if (p > 32ul) {
+        char *endp = NULL;
+        unsigned long p = strtoul(slash + 1, &endp, 10);
+        if (endp == slash + 1 || *endp != '\0' || p > 32ul) {
             return false;
         }
         prefix = (uint32_t)p;
