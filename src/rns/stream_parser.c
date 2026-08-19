@@ -1,6 +1,7 @@
 #include "rns/stream_parser.h"
 #define LOG_LOCAL_LEVEL RNS_STREAM_PARSER_LOG_LEVEL
 #include "lib/logc/log.h"
+#include "halow_ack.h"      /* HALOW_ACK_TX_THROTTLE: the only hold-worthy status */
 #include <string.h>
 #include <stdlib.h>
 
@@ -8,18 +9,18 @@
 #define RNS_STREAM_ESC       0x7Du
 #define RNS_STREAM_ESC_MASK  0x20u
 
-static void rns_stream_emit_frame( rns_stream_decoder_t *decoder, void *user ){
+static int32_t rns_stream_emit_frame( rns_stream_decoder_t *decoder, void *user ){
     if( decoder == NULL || decoder->on_frame == NULL ){
-        return;
+        return 0;
     }
 
     if( decoder->frame_len == 0u ){
         log_trace("frame format error: empty frame");
-        return;
+        return 0;
     }
 
     log_trace("frame received: payload_len=%u", (unsigned int)decoder->frame_len);
-    decoder->on_frame(decoder->frame_buffer, decoder->frame_len, user);
+    return decoder->on_frame(decoder->frame_buffer, decoder->frame_len, user);
 }
 
 void rns_stream_decoder_init( rns_stream_decoder_t *decoder, rns_stream_frame_cb_t on_frame ){
@@ -38,13 +39,43 @@ void rns_stream_decoder_reset( rns_stream_decoder_t *decoder ){
 
     decoder->state = RNS_STREAM_STATE_WAIT_FRAME_START;
     decoder->frame_len = 0u;
+    decoder->held = false;
 }
 
-void rns_stream_decoder_process( rns_stream_decoder_t *decoder, const uint8_t *data, uint16_t data_len, void *user ){
+int32_t rns_stream_decoder_retry_held( rns_stream_decoder_t *decoder, void *user ){
+    if( decoder == NULL || !decoder->held ){
+        return 0;
+    }
+    int32_t r = rns_stream_emit_frame(decoder, user);
+    if( r == HALOW_ACK_TX_THROTTLE ){
+        return r;
+    }
+    decoder->held = false;
+    decoder->state = RNS_STREAM_STATE_READ_FRAME;
+    decoder->frame_len = 0u;
+    return r;
+}
+
+int32_t rns_stream_decoder_process( rns_stream_decoder_t *decoder, const uint8_t *data, uint16_t data_len, void *user, uint16_t *consumed ){
     uint16_t i;
 
     if( decoder == NULL || data == NULL || data_len == 0u ){
-        return;
+        if( consumed != NULL ) *consumed = 0u;
+        return 0;
+    }
+
+    /* A previously HELD frame (rejected with THROTTLE) retries FIRST, before
+     * any new byte is consumed: the frame is complete in frame_buffer and the
+     * caller explicitly re-invoked us. Still throttled -> nothing is consumed. */
+    if( decoder->held ){
+        int32_t r = rns_stream_emit_frame(decoder, user);
+        if( r == HALOW_ACK_TX_THROTTLE ){
+            if( consumed != NULL ) *consumed = 0u;
+            return r;
+        }
+        decoder->held = false;
+        decoder->state = RNS_STREAM_STATE_READ_FRAME;
+        decoder->frame_len = 0u;
     }
 
     for( i = 0; i < data_len; i++ ){
@@ -63,7 +94,21 @@ void rns_stream_decoder_process( rns_stream_decoder_t *decoder, const uint8_t *d
                  decoder->state == RNS_STREAM_STATE_READ_ESCAPED_BYTE) &&
                 decoder->frame_len > 0u
             ){
-                rns_stream_emit_frame(decoder, user);
+                int32_t r = rns_stream_emit_frame(decoder, user);
+                if( r == HALOW_ACK_TX_THROTTLE ){
+                    /* CONTRACT (a frame accepted from TCP must reach the air):
+                     * the frame is NOT dropped and NOT forgotten -- it stays
+                     * complete in frame_buffer (held) and the input stops
+                     * right after this FLAG. The caller must re-feed the
+                     * unconsumed tail; until the frame is accepted we report
+                     * THROTTLE so the TCP recv loop closes the window.
+                     * Other nonzero returns are NOT holds: parse-garbage is
+                     * consumed (returns 0 upstream) and slot-path TX errors
+                     * already own a retry slot. */
+                    decoder->held = true;
+                    if( consumed != NULL ) *consumed = (uint16_t)(i + 1u);
+                    return r;
+                }
             }
 
             decoder->state = RNS_STREAM_STATE_READ_FRAME;
@@ -95,6 +140,8 @@ void rns_stream_decoder_process( rns_stream_decoder_t *decoder, const uint8_t *d
 
         decoder->frame_buffer[decoder->frame_len++] = byte;
     }
+    if( consumed != NULL ) *consumed = data_len;
+    return 0;
 }
 
 static uint32_t rns_stream_get_escaped_size( const uint8_t *data, uint32_t data_len ){

@@ -5,7 +5,9 @@
 
 #include "lwip/ip4_addr.h"
 
-typedef int32_t (*tcp_server_rx_cb_t)(const uint8_t *data, uint32_t len);
+typedef int32_t (*tcp_server_rx_cb_t)(const uint8_t *data, uint32_t len,
+                                     uint16_t *consumed);   /* out: bytes the
+                                     * decoder accepted; the tail must be re-fed */
 
 typedef struct {
     bool enabled;

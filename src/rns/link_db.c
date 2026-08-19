@@ -143,7 +143,8 @@ int32_t rns_link_db_package_register( const rns_link_packet_info_t *pkg,
                                       rns_packet_direction_t direction,
                                       const uint8_t *remote_mac,
                                       uint32_t effective_mtu,
-                                      bool update_mtu ){
+                                      bool update_mtu,
+                                      bool unicast_to_me ){
     rns_link_db_link_t *link;
     int32_t index;
     int32_t slot;
@@ -228,7 +229,8 @@ int32_t rns_link_db_package_register( const rns_link_packet_info_t *pkg,
         link->tx_bytes += pkg->payload_len;
     }
 
-    if( remote_mac != NULL ){
+    if( remote_mac != NULL &&
+        ( unicast_to_me || rns_link_mac_is_unknown(link->remote_mac) ) ){
         mac_changed = rns_link_mac_is_unknown(link->remote_mac) ||
                       (memcmp(link->remote_mac, remote_mac, 6) != 0);
         memcpy(link->remote_mac, remote_mac, sizeof(link->remote_mac));
@@ -236,7 +238,11 @@ int32_t rns_link_db_package_register( const rns_link_packet_info_t *pkg,
          * RX delivery does NOT require the peer to be in the LMAC STA table —
          * broadcast-addressed frames are delivered to the host unconditionally,
          * and the per-destination filter happens in halow_rx_handler on addr3.
-         * remote_mac is stored here purely so the TX path can address the peer. */
+         * remote_mac is stored here purely so the TX path can address the peer.
+         * An already-learned MAC is only re-written for frames ADDRESSED TO US:
+         * a captured frame replayed with a broadcast addr3 (which the RX filter
+         * accepts) must not be able to silently move our TX destination to an
+         * attacker's MAC. */
     }
 
     if( update_mtu && link->effective_mtu != effective_mtu ){
