@@ -6,6 +6,7 @@
 #include "utils.h"
 #include "osal/sleep.h"
 #include "osal/task.h"
+#include "osal/string.h"   /* os_malloc/os_free */
 #include "chip/txw4002ack803/sysctrl.h"
 #include <string.h>
 
@@ -53,7 +54,13 @@ static void test_temperature(void) {
 static void test_throughput(void) {
     static const uint8_t mcs_list[] = {0, 1, 2, 3, 4, 5, 6, 7, 10};
     static const uint8_t bw_list[]  = {1, 2, 4, 8};
-    static uint8_t pkt[8192];
+    /* heap, not static: 8 KiB parked forever in .bss for a debug-only sweep
+     * on a chip where code shares RAM with data */
+    uint8_t *pkt = (uint8_t *)os_malloc(8192);
+    if (pkt == NULL) {
+        log_warn("test_throughput: no mem for pkt");
+        return;
+    }
     for (uint32_t i = 0; i < 8192; i++) pkt[i] = (uint8_t)i;
 
     /* Max payload per MCS/BW: MCS0-7 use 511 sym limit, MCS10 uses 685 sym limit, 40B overhead margin */
@@ -110,6 +117,7 @@ static void test_throughput(void) {
         }
     }
 
+    os_free(pkt);
     log_info("=== THROUGHPUT TEST DONE ===");
 }
 

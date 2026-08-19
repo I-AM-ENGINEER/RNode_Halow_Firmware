@@ -36,5 +36,6 @@ void nearby_modem_package_register( const nearby_modem_package_info_t *pkg );
 nearby_modem_t* nearby_modem_get_by_index( uint32_t index );
 uint8_t nearby_modem_count_get( void );
 void nearby_modem_print_table( void );
+int8_t nearby_modem_best_recent_rssi( uint32_t age_s );
 
 #endif

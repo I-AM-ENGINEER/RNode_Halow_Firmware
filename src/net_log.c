@@ -126,7 +126,14 @@ bool net_log_send( const void *data, uint16_t len ){
     memcpy(msg->data, data, len);
 
     psr = cpu_intrpt_save();
-    lwrb_write(&g_rb, &msg, sizeof(msg));
+    if( lwrb_write(&g_rb, &msg, sizeof(msg)) != sizeof(msg) ){
+        cpu_intrpt_restore(psr);
+        os_free(msg);
+        psr = cpu_intrpt_save();
+        g_alloc_total -= alloc_sz;
+        cpu_intrpt_restore(psr);
+        return false;
+    }
     cpu_intrpt_restore(psr);
 
     os_sema_up(&g_sem);

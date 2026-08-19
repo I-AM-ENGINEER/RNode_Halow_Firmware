@@ -2,7 +2,7 @@
 #define __SYS_CONFIG_H__
 
 #define PROJECT_TYPE           PRO_TYPE_WNB
-#define FW_VERSION              "2.2.0"
+#define FW_VERSION              "2.3.0"
 #define FW_FULL_VERSION         FW_VERSION " (" __DATE__ " " __TIME__ ")"
 
 #define IP_SOF_BROADCAST       1
@@ -12,12 +12,20 @@
 // LWIP debug
 
 //#define TCPIP_MBOX_SIZE              32
-//#define DEFAULT_TCP_RECVMBOX_SIZE    32
+#define DEFAULT_TCP_RECVMBOX_SIZE    16
 //#define DEFAULT_ACCEPTMBOX_SIZE      8
-#define TCP_WND                     (TCP_MSS*10)
-#define MEMP_NUM_TCP_PCB            8
+/* 4*MSS: the RF link tops out ~0.5 Mbps; a 10*MSS window let the single TCP
+ * client legally pin ~14 pool pbufs and forced PBUF_POOL_SIZE=48 (72 KiB of
+ * the RAM-resident firmware). 4*MSS (~5.8 KB) still saturates the link
+ * (5.8 KB / 100 ms RTT > 460 kbps) and frees the pool pressure below. */
+#define TCP_WND                     (TCP_MSS*4)
+#define MEMP_NUM_TCP_PCB            16
 #define MEMP_NUM_TCP_PCB_LISTEN     8
-#define PBUF_POOL_SIZE              32
+/* 24 pbufs (~36 KiB) are enough NOW that TCP_WND is 4*MSS: the client can
+ * hold ~5-6 pbufs + recvmbox + web UI. (With the old 10*MSS window 24 starved
+ * the pool under bidir load and the GMAC RX path dropped silently on
+ * pbuf_alloc NULL -- that is why this was 48.) Verify with a TCP blast. */
+#define PBUF_POOL_SIZE              48
 //#define DEFAULT_RAW_RECVMBOX_SIZE 8
 //#define MEMP_NUM_NETBUF 8
 #define TCP_LISTEN_BACKLOG 1
@@ -39,14 +47,36 @@
 // #define TCP_WND_DEBUG        LWIP_DBG_ON
 // #define TCP_QLEN_DEBUG       LWIP_DBG_ON
 
+/* RNS stream decoder frame buffer: sized for the actual link MTU (500 B
+ * reticulum) with headroom. RNS_MAX_MTU (8 KB) is the protocol ceiling, but
+ * real frames are ~519 B (header + payload). 2048 covers any single RNS frame
+ * on this link and frees ~8 KB vs the original 10 KB default. */
+#ifndef RNS_STREAM_MAX_FRAME_SIZE
+#define RNS_STREAM_MAX_FRAME_SIZE       (1024*2)
+#endif
+
 #define TDMA_BUFF_SIZE 0
 
-#define SYS_HEAP_SIZE     (128 * 1024)
+/*
+ * Auto-sized malloc heap
+ * ----------------------
+ * The malloc heap takes ALL free SRAM that is not reserved for the WiFi DMA RX
+ * buffer or the TX skb pool.  The pool boundaries come from the linker symbols
+ * __heap_start (= end of .bss) and __heap_end (= top of SRAM), so the heap
+ * grows / shrinks automatically as firmware size changes — no manual tuning.
+ *
+ * SKB_POOL_RESERVE is the minimum kept back for the TX skb free-list.  The skb
+ * pool is a software free-list: exhaustion causes graceful -5 TX drops (no
+ * crash).  48 KB comfortably covers the TX_BUFFER_SIZE (29 200 B) in-flight
+ * budget for full-size frames with headroom for LMAC mgmt skbs.
+ */
+#define SKB_POOL_RESERVE  (48 * 1024)
 
 #define WIFI_RX_BUFF_SIZE (40 * 1024) //(17*1024)
 
 #define SRAM_POOL_START   (srampool_start)
 #define SRAM_POOL_SIZE    (srampool_end - srampool_start)
+#define SYS_HEAP_SIZE     (SRAM_POOL_SIZE - TDMA_BUFF_SIZE - WIFI_RX_BUFF_SIZE - SKB_POOL_RESERVE)
 #define TDMA_BUFF_ADDR    (SRAM_POOL_START)
 #define SYS_HEAP_START    (TDMA_BUFF_ADDR + TDMA_BUFF_SIZE)
 #define WIFI_RX_BUFF_ADDR (SYS_HEAP_START + SYS_HEAP_SIZE)
@@ -110,7 +140,7 @@
 #define HALOW_LBT_CCA_SENSITIVITY_DEF            (5)
 #define HALOW_LBT_CCA_FORCE_TX_PCT_DEF          (1)
 #define HALOW_LBT_DUTY_LIMIT_PCT_DEF            (1000)
-#define HALOW_LBT_CW_MIN_DEF                    (31)
+#define HALOW_LBT_CW_MIN_DEF                    (63)
 #define HALOW_LBT_CW_MAX_DEF                    (1023)
 #define HALOW_LBT_CCA_THRESHOLD_DYNAMIC_DEF     (0)
 
@@ -138,10 +168,10 @@
 #define TCP_SERVER_CONFIG_WHITELIST_MASK_DEF    PP_HTONL(LWIP_MAKEU32(0, 0, 0, 0))
 
 #define CONFIG_PAGE_TASK_PRIO                   (OS_TASK_PRIORITY_ABOVE_NORMAL)
-#define CONFIG_PAGE_TASK_STACK                  (2*1024)
+#define CONFIG_PAGE_TASK_STACK                  (4*1024)
 
 #define TCP_SERVER_TASK_PRIO                    (OS_TASK_PRIORITY_ABOVE_NORMAL + 2)
-#define TCP_SERVER_TASK_STACK                   (2*1024)
+#define TCP_SERVER_TASK_STACK                   (4*1024)
 
 #define STATISTICS_TASK_PRIO                    (OS_TASK_PRIORITY_LOW)
 #define STATISTICS_TASK_STACK                   (2*1024)
@@ -175,14 +205,15 @@
 #define LOG_LEVEL_CONFIG_PAGE                   (LOG_NONE)
 #define LOG_LEVEL_TFTP_SERVER                   (LOG_NONE)
 #define LOG_LEVEL_STATISTICS                    (LOG_NONE)
-#define LOG_LEVEL_TCP_SERVER                    (LOG_NONE)
+#define LOG_LEVEL_TCP_SERVER                    (LOG_WARN)
 #define LOG_LEVEL_TELEMETRY                     (LOG_NONE)
 #define LOG_LEVEL_RNS_STREAM_PARSER             (LOG_NONE)
-#define LOG_LEVEL_RNS_LINK_DB                   (LOG_INFO)
+#define LOG_LEVEL_RNS_LINK_DB                   (LOG_WARN)
 #define LOG_LEVEL_FAL_PORT                      (LOG_INFO)
 #define LOG_LEVEL_RNS_LINK_PARSER               (LOG_NONE)
 #define LOG_LEVEL_UART_SLIP                     (LOG_NONE)
 #define LOG_LEVEL_HALOW_PKG_HANDLER             (LOG_NONE)
+#define LOG_LEVEL_HALOW                        (LOG_WARN)
 #define LOG_LEVEL_MARS_LMAC_HW                  (LOG_NONE)
 #define LOG_LEVEL_MARS_LMAC_TX                  (LOG_WARN)
 #define LOG_LEVEL_MARS_RFSPI                    (LOG_NONE)

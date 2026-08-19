@@ -4,6 +4,7 @@
 #include "basic_include.h"
 #include "statistics.h"
 #include "halow_lbt.h"
+#include "halow.h"
 #include "lib/logc/log.h"
 #include <string.h>
 #include <time.h>
@@ -161,6 +162,7 @@ void statistics_uptime_get( char *return_str, uint32_t max_len ) {
 static void statistics_task( void *arg ) {
     static uint32_t rx_bytes_previous;
     static uint32_t tx_bytes_previous;
+    static uint8_t  rx_idle_s, tx_idle_s;
 
     (void)arg;
 
@@ -171,16 +173,63 @@ static void statistics_task( void *arg ) {
         uint32_t rx_delta = (rx_bytes_now >= rx_bytes_previous) ? (rx_bytes_now - rx_bytes_previous) : 0;
         uint32_t tx_delta = (tx_bytes_now >= tx_bytes_previous) ? (tx_bytes_now - tx_bytes_previous) : 0;
 
-        g_stat_radio.rx_bitps = rx_delta * 8;
-        g_stat_radio.tx_bitps = tx_delta * 8;
+        /* IIR runs EVERY second, traffic or not: y = (3y + x)/4 with
+         * x = this window's rate (0 when idle). The filter output therefore
+         * decays progressively in silence (75% -> 56% -> 42% ... of the last
+         * real rate) instead of freezing at the last value until the
+         * timeout, and 10 consecutive idle seconds clamp the residual tail
+         * to a clean zero. */
+        g_stat_radio.rx_bitps = (g_stat_radio.rx_bitps * 3u + rx_delta * 8u) / 4u;
+        g_stat_radio.tx_bitps = (g_stat_radio.tx_bitps * 3u + tx_delta * 8u) / 4u;
+        if( rx_delta != 0u ) rx_idle_s = 0u;
+        else if( ++rx_idle_s >= 10u ) g_stat_radio.rx_bitps = 0u;
+        if( tx_delta != 0u ) tx_idle_s = 0u;
+        else if( ++tx_idle_s >= 10u ) g_stat_radio.tx_bitps = 0u;
+        (void)rx_idle_s; (void)tx_idle_s;
 
         rx_bytes_previous = rx_bytes_now;
         tx_bytes_previous = tx_bytes_now;
+
+        /* ACK-tick stall canary: the tick task feeds the hardware watchdog, so
+         * a tick frozen >10 s resets the node SILENTLY (observed twice under
+         * heavy bidir blasts, no panic output). This task is independent of
+         * g_ack_mutex, so it can still log while the tick is stuck -- the
+         * timestamped UART trail shows whether the tick (and which phase of
+         * the blast) froze before the watchdog fired. */
+        {
+            static uint32_t last_tick_count;
+            static uint8_t  stalled_secs;
+            extern volatile uint32_t g_ack_tick_count;
+            uint32_t tc = g_ack_tick_count;
+            if( tc == last_tick_count ){
+                if( ++stalled_secs >= 3u ){
+                    log_warn("stat: ack tick STALLED %us (count=%u)",
+                             (unsigned)stalled_secs, (unsigned)tc);
+                }
+            }else{
+                if( stalled_secs >= 3u ){
+                    log_info("stat: ack tick recovered after %us stall",
+                             (unsigned)stalled_secs);
+                }
+                stalled_secs   = 0u;
+                last_tick_count = tc;
+            }
+        }
 
         g_stat_radio.bkgnd_noise_dbm = halow_lbt_background_long_dbm_get();
         g_stat_radio.bkgnd_noise_dbm_now = halow_lbt_background_short_dbm_get();
         g_stat_radio.airtime = halow_lbt_airtime_get();
         g_stat_radio.ch_util = halow_lbt_ch_util_get();
+
+        /* Keep the TX-path MCS/BW config cache warm from THIS low-stakes
+         * context: the TX hot path (incl. the ack tick's retransmit/ACK
+         * rounds, which feed the hardware watchdog) must never run a
+         * configdb load itself -- the KV reads can block on the flash
+         * mutexes for seconds behind a config-save GC and starve the
+         * watchdog (silent resets observed after OTA + blast). */
+        halow_cfg_mcs_bw_refresh();
+
+        halow_gain_pilot_tick();
 
         os_sleep(1);
     }

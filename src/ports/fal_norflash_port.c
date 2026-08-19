@@ -7,6 +7,7 @@
 
 #include "hal/spi_nor.h"
 #include "lib/logc/log.h"
+#include "chip/txw4002ack803/sysctrl.h"   /* mcu_watchdog_feed() in the erase loop */
 #include <stdint.h>
 #include <stddef.h>
 
@@ -161,8 +162,15 @@ static int write_one_sector(uint32_t sector_addr, uint32_t addr,
     }
 
     log_debug("erase-before-write sector 0x%08X", sector_addr);
+    /* KV/GC writes hold the configdb mutex while the ack tick (the hardware
+     * watchdog feeder) may be blocked on it: without feeding here, a GC chain
+     * over several sectors outlives the 10 s watchdog -> silent reset MID
+     * WRITE, which also dirties the sector and lengthens the next GC (spiral
+     * risk -- the boot re-seed already needed the same treatment). */
+    mcu_watchdog_feed();
     spi_nor_sector_erase(&flash0, sector_addr);
     program_pages(sector_addr, sect_buf, sect);
+    mcu_watchdog_feed();
 
     return (int)size;
 }
@@ -230,6 +238,10 @@ static int erase(long offset, size_t size){
         log_debug("erase sector 0x%08X", cur);
         spi_nor_sector_erase(&flash0, cur);
         cur += sect;
+        /* A full-partition OTA erase is up to 200 sectors (tens of seconds,
+         * busy-polled): without feeding, the 10 s boot/runtime watchdog resets
+         * the node MID-ERASE and bricks it. */
+        mcu_watchdog_feed();
     }
 
     spi_nor_close(&flash0);
