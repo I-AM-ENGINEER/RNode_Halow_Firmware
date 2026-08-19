@@ -7,7 +7,10 @@
  */
 #include "sys_config.h"
 
-#define LOG_LOCAL_LEVEL LOG_DEBUG
+/* LOG_WARN, not LOG_DEBUG: several log_debug calls sit on the LMAC IRQ path
+ * (reorder/txvec) -- log_log() takes the log lock and formats unconditionally,
+ * which must never run in interrupt context. */
+#define LOG_LOCAL_LEVEL LOG_WARN
 #include "lib/logc/log.h"
 #include "typesdef.h"
 
@@ -18,9 +21,12 @@
 #include "lib/skb/skb_list.h"
 #include "osal/time.h"
 #include "osal/semaphore.h"
+#include "halow.h"   /* halow_tx_dbg_t (TX-wedge diagnostics) */
 
 void lmac_check_tx_queue_empty(void);
-extern void lmac_cfg_end_to_limit(uint32_t value);
+/* Original binary TX functions (renamed via the WRAP mechanism in
+ * mars_lmac_tx_orig.c); used as fallbacks for states without a C rewrite. */
+extern void lmac_irq_bo_fns_orig(void);
 
 #define LMAC_AGGR_CTRL_START   (1u << 0)
 #define LMAC_AGGR_CTRL_AMPDU   (1u << 1)
@@ -110,7 +116,7 @@ int32 lmac_cfg_txvec_part2(void)
     else if (ant_fmt == 2u)
         ant = 1u;
     else
-        ant = (ah_lmac.tx_bw_ctrl_flags >> 4u) & 1u;
+        ant = (ah_lmac.tx_bw_ctrl_flags >> 4u) & 0xFu;   /* binary extracts 4 bits */
 
     lmac_ant_sel(ant);
     return 0;
@@ -119,7 +125,7 @@ int32 lmac_cfg_txvec_part2(void)
 uint32 lmac_hdr_dur_calc(uint32 len)
 {
     uint32_t timer6 = LMAC_HW->HF_TIMER6;
-    uint32_t limit  = timer6 & 0x7fffu;
+    uint32_t limit  = timer6 & 0xffffu;   /* full u16 like the binary: 0x7fff zeroed Duration when HF_TIMER6 bit15 set */
     uint32_t result;
 
     if (len < limit)
@@ -148,12 +154,15 @@ int32 lmac_send_data_to_phy(uint32 ac)
     aggr = &ah_lmac_tx.pTx_ac_aggr_data[ac];
     if (aggr->selected_count == 0u) {
         ah_lmac.tx_irq_error_flags |= 0x4000u;
-        log_warn("send_data_to_phy: ac=%u selected_count=0", ac);
         return -1;
     }
 
     rate_flags = *(uint16_t *)&aggr->rate_cfg;
-    duration = lmac_hdr_dur_calc((aggr->symbol_len + ((rate_flags & 0x01ffu) >> 6)) * 40u);
+    /* bits[9:6] of the frame descriptor are the 4-bit TXVEC format (14 for
+     * S1G 1 MHz, 6 short, 8 for >=2 MHz): a 3-bit extraction (0x1ff) read 6
+     * instead of 14 in 1 MHz mode, skewing every data frame's Duration/NAV
+     * by 8 symbols (320 us). */
+    duration = lmac_hdr_dur_calc((aggr->symbol_len + ((rate_flags & 0x03ffu) >> 6)) * 40u);
     tx_duration = ah_lmac_tx.tx_pending_nav_dur;
     if (tx_duration < duration)
         tx_duration = (uint16_t)duration;
@@ -166,7 +175,6 @@ int32 lmac_send_data_to_phy(uint32 ac)
         uint8_t *data;
 
         if (skb == NULL) {
-            log_warn("send_data_to_phy: ac=%u skb[%u]=NULL", ac, i);
             continue;
         }
 
@@ -207,8 +215,8 @@ int32 lmac_tx_frm(struct sk_buff *skb)
     }
 
     aggr = &ah_lmac_tx.pTx_ac_aggr_data[ac];
-    if (((aggr->tx_flags >> 2u) & 1u) == 0u) {
-        log_warn("tx_frm: ac=%u not ready flags=0x%02x", ac, aggr->tx_flags);
+    if (((aggr->tx_flags >> 2u) & 3u) == 0u) {   /* 2-bit state field, binary accepts 1..3 */
+        ah_lmac.tx_irq_error_flags |= 0x8000u;
         return -1;
     }
 
@@ -217,7 +225,7 @@ int32 lmac_tx_frm(struct sk_buff *skb)
     lmac_send_data_to_phy(ac);
     lmac_cfg_txvec_part2();
 
-    aggr->tx_flags &= (uint8_t)~0x04u;
+    aggr->tx_flags &= (uint8_t)~0x0Cu;   /* both state bits: still-binary readers mask 0x0C */
     ah_lmac.ac_tx_attempt_count[ac] += 1u;
     return 0;
 }
@@ -227,8 +235,17 @@ int32 lmac_tx_frm(struct sk_buff *skb)
  * Replaces lmac_irq_ac_pd_orig entirely — bypasses MCS floor and retry table OOB bugs.
  * See AGENTS.md "Architecture note: full lmac_irq_ac_pd rewrite" for call chain.
  */
+/* Standalone (ABI-frozen structs must not grow): incremented at every ac_pd
+ * IRQ. The TX watchdog reads it to tell a DEAD TX machine (ac_pd frozen too)
+ * from a CONTENDED one (ac_pd keeps firing, attempt_tx keeps failing on
+ * CCA/LBT) -- purging the latter destroyed queued frames for nothing during
+ * bidir blasts. Single IRQ-context writer, task readers: ++ is safe. */
+volatile uint32_t lmac_ac_pd_count = 0u;
+
 void lmac_irq_ac_pd(void)
 {
+    lmac_ac_pd_count++;
+
     /* 1. Clear AC_PD interrupt status */
     LMAC_HW->IRQ_PD = 0x80u;
 
@@ -288,11 +305,12 @@ void lmac_irq_ac_pd(void)
     /* 12. Update frame TX vector pointer */
     lmac_update_frm_tx_vec();
 
-    /* 13. Adjust END_TO_LIMIT for MCS10 (OFDMA 26-tone needs longer TX window) */
-    if (mcs == 10u)
-        lmac_cfg_end_to_limit(65000u);
-    else
-        lmac_cfg_end_to_limit(25000u);
+    /* 13. END_TO_LIMIT: intentionally NOT written here. The stock firmware
+     * never touches LMAC+0x5C; the invented fixed values (25000, and the
+     * 65000-for-MCS10 symptom patch) silently truncated any TXOP longer
+     * than ~125 symbols -- empirically: fixed MCS1, 360B frames (121 sym)
+     * 0.3% loss vs 420B (142 sym) 12.5% at 30 dB SNR. The register is set
+     * to its maximum once at irq init instead. */
 
     /* 14. Attempt TX.  BO IRQ dispatches by bo_frame_type; data must be state 1. */
     ah_lmac.bo_frame_type = 1u;
@@ -489,6 +507,29 @@ int32 lmac_attempt_tx(uint32_t ac)
 static void lmac_irq_bo_fns_tx_data_state(void)
 {
     lmac_tx_frm(NULL);
+    /* Faithful 0x70F capture (a binary consumer in mars_lmac.o reads it):
+     * for a selected skb with mcast(tx_ctrl.7)+started(tx_flags.1) both set,
+     * pack the just-used TX vector into tx_last_mcs_bw: bits[2:0]=TXVEC1[7:6]
+     * (BW), bits[7:4]=TXVEC1[15:12] (MCS). The aggregate shares one TXVEC, so
+     * the first matching skb decides. The rewrite dropped this and left the
+     * byte permanently stale for the still-binary reader. */
+    {
+        uint8_t ac = lmac_current_ac();
+        if (ac < 4u) {
+            lmac_tx_ctx_buff *a = &ah_lmac_tx.pTx_ac_aggr_data[ac];
+            for (uint32_t i = 0u; i < a->selected_count && i < 64u; i++) {
+                struct sk_buff *skb = a->skb_list[i];
+                lmac_txd_t *txd = (skb && skb->head) ? (lmac_txd_t *)skb->head : NULL;
+                if (txd != NULL && (txd->tx_ctrl & 0x80u) != 0u &&
+                    (txd->tx_flags & 0x02u) != 0u) {
+                    uint32_t tv1 = LMAC_HW->TXVEC1;
+                    ah_lmac.tx_last_mcs_bw = (uint8_t)((((tv1 >> 12) & 0x0Fu) << 4) |
+                                                       ((tv1 >> 6) & 0x07u));
+                    break;
+                }
+            }
+        }
+    }
     ah_lmac.bo_tx_substate = 1u;
     lmac_common_bo_irq_finish();
 }
@@ -509,8 +550,14 @@ void lmac_irq_bo_fns(void)
         ah_lmac.bo_tx_substate = 4u;
         break;
     default:
-        ah_lmac.tx_irq_error_flags |= 1u;
-        break;
+        /* Frame types 3-10 (BA/RTS/CTS/CFPoll/CFEnd/beacon/null/pspoll) have
+         * no C rewrite: fall back to the ORIGINAL implementation instead of
+         * erroring them out -- the entry writes above are idempotent (the
+         * _orig re-does IRQ_PD/BO_CNT0/CCA_STAT/substate), so this is safe.
+         * Modem-mode traffic only ever schedules types 0-2 (tx_dbg bo_ftype
+         * stays 0), so this is insurance for still-binary scheduling paths. */
+        lmac_irq_bo_fns_orig();
+        return;
     }
     lmac_common_bo_irq_finish();
 }
@@ -520,6 +567,27 @@ void lmac_irq_tx_end(void)
     uint32_t flags = 0u;
     uint8_t ac = lmac_current_ac();
     lmac_tx_ctx_buff *aggr = (ac < 4u) ? &ah_lmac_tx.pTx_ac_aggr_data[ac] : NULL;
+    /* Which TX just finished. Only substate 1 is the data path (bo_fns state 1
+     * -> lmac_tx_frm). Response-frame TX (software ACK after RX, RTS/CTS) runs
+     * other substates and owns NO aggregate skb -- completing the current AC's
+     * aggregate for them silently dropped the data frame that was parked there
+     * by a failed attempt_tx (it is kept for the next AC period by design). */
+    uint8_t done_sub = ah_lmac.bo_tx_substate;
+
+    /* Diagnostics for the saturation TX-wedge (no logs in IRQ -- counters
+     * only, read via /api/tx_dbg). tx_end_count moving == the HW TX machine
+     * is alive; frozen with pending queues == wedge. The sub_state histogram
+     * shows WHICH completion paths the traffic actually exercises. */
+    {
+        extern halow_tx_dbg_t g_tx_dbg;
+        g_tx_dbg.tx_end_count++;
+        uint32_t ss = ah_lmac.bo_tx_substate;
+        if( ss < 8u ) g_tx_dbg.tx_end_sub[ss]++;
+        /* Airtime-honesty heartbeat: the true RF end-of-TX (also covers
+         * beacon/response TXOPs the budget path is blind to). Single atomic
+         * store, no mutex, no log -- IRQ-safe. */
+        { extern void halow_lbt_tx_done_notify( void ); halow_lbt_tx_done_notify(); }
+    }
 
     LMAC_HW->IRQ_PD = LMAC_IRQ_CLR_TX_END;
     lhw_abort_fsm();
@@ -533,6 +601,23 @@ void lmac_irq_tx_end(void)
     }
 
     if ((LMAC_HW->TX_STAT & 3u) == 0u) {
+        /* Faithful capture of the just-transmitted vector (orig tx_end
+         * loc_182): seq/FCS echo into tx_last_fcs and the TXVEC1 echo packed
+         * into tx_last_rate_packed. The rewrite dropped this -- the NDP-ACK/BA
+         * handlers below then matched against permanently stale values, and
+         * any binary reader of the "last TX rate" saw garbage. Bit layout
+         * mirrors the binary exactly (incl. the pos7/len5 ins whose upper
+         * bits are truncated by the byte store). */
+        ah_lmac_tx.tx_last_fcs = LMAC_HW->FCS_RES;
+        {
+            uint32_t tv1 = LMAC_HW->TXVEC1;
+            uint16_t rp = ah_lmac_tx.tx_last_rate_packed;
+            rp = (uint16_t)((rp & 0xFE00u) | (uint16_t)((tv1 & 0x7Fu) << 9));
+            ah_lmac_tx.tx_last_rate_packed = rp;
+            uint8_t *b1 = &((uint8_t *)&ah_lmac_tx.tx_last_rate_packed)[1];
+            *b1 = (uint8_t)((*b1 & 0x87u) | (uint8_t)(((tv1 >> 6) & 0x07u) << 4));
+            *b1 = (uint8_t)((*b1 & 0x7Fu) | (uint8_t)(((tv1 >> 12) & 0x01u) << 7));
+        }
         uint32_t sub_state = ah_lmac.bo_tx_substate;
         if (sub_state < 7u && ((1u << sub_state) & 0x6eu)) {
             struct sk_buff *first = aggr ? aggr->skb_list[0] : NULL;
@@ -545,6 +630,10 @@ void lmac_irq_tx_end(void)
         }
     } else {
         ah_lmac.tx_irq_error_flags |= 2u;
+        {
+            extern halow_tx_dbg_t g_tx_dbg;
+            g_tx_dbg.tx_end_err++;
+        }
         if (ah_lmac.debug_flags & 0x10u) {
             uint32_t err = ah_wphy_err_code_get();
             log_warn("tx_end err: sub=%u wphy=0x%x stat=0x%x tv1=0x%x",
@@ -554,13 +643,21 @@ void lmac_irq_tx_end(void)
         LMAC_HW->TX_STAT |= 3u;
         ah_lmac.pTx_current_sta = NULL;
         ah_lmac.bo_tx_substate = 0u;
+        ah_lmac.bo_frame_type  = 0u;
         lmac_rx_gain_cfg((gain_reg & 0x7ffu) >> 4);
+        /* NOTE: no lhw_abort_fsm() here -- aborting inside the tx_end IRQ
+         * handler wrecked the FOLLOWING TXOPs (bench b50: tx_end_err jumped
+         * from ~4 to 534 in one soak run, an error-per-error cascade that
+         * jammed the channel and starved the peer). Recovery from a genuinely
+         * stuck machine is the TX watchdog's job (purge path), not the IRQ's. */
     }
 
     /* Move completed skbs from aggregate to status queue so the status task
      * calls halow_lmac_tx_status_callback → frees skb → ups g_tx_vacated_sem.
-     * Without this, halow_tx blocks forever after TX_BUFFER_SIZE bytes. */
-    if (aggr) {
+     * Without this, halow_tx blocks forever after TX_BUFFER_SIZE bytes.
+     * Data-path only (done_sub==1): a response-frame tx_end must not touch a
+     * data aggregate parked by attempt_tx failure. */
+    if (aggr && done_sub == 1u) {
         uint32_t moved = 0;
         for (uint32_t i = 0; i < aggr->selected_count && i < 64; i++) {
             struct sk_buff *skb = aggr->skb_list[i];
@@ -585,7 +682,7 @@ void lmac_irq_tx_end(void)
     lmac_tdma_start();
 
     if (ah_lmac.bo_nav_ctrl & 0x08u) {
-        lmac_set_basic_nav(((ah_lmac.bo_nav_ctrl & 0x1FFFu) >> 6) * 1000u);
+        lmac_set_basic_nav(((ah_lmac.bo_nav_ctrl >> 6) & 0xFFu) * 1000u);
     }
 
     lhw_start_rx(flags);
@@ -600,7 +697,12 @@ void lmac_irq_tx_end(void)
         ah_lmac_tx.tx_pending_nav_dur = 0u;
     }
 
-    ah_lmac.bo_nav_ctrl &= (uint16_t)~0x2000u;
+    /* Faithful exit cleanup (orig tx_end): clear bit 13 of the halfwords
+     * inside the ACK/BA response templates (0x90E/0x91E in ah_lmac_tx) --
+     * NOT bo_nav_ctrl bit 13 (the rewrite cleared the wrong field, leaving
+     * the template "armed" bits set). */
+    *(uint16_t *)&ah_lmac.ack_resp_frame[10] &= (uint16_t)~0x2000u;
+    *(uint16_t *)&ah_lmac.ba_resp_frame[10] &= (uint16_t)~0x2000u;
 }
 
 /* Mark the first frame in the current AC aggregate as done.
@@ -786,21 +888,23 @@ int32 lmac_cfg_txvec_part1(void)
     LMAC_HW->TXVEC1 = *(uint32_t *)txvec;
 
     if (!((uint8_t)ah_lmac.lo_freq_or_channel_bits & 1u)) {
-        pwr_arg = (ah_lmac.tx_power_config & 0x1ffu) >> 5u;
+        pwr_arg = (ah_lmac.tx_power_config >> 5) & 0x1fu;   /* 5-bit index (binary zext 9,5) */
     } else {
         pwr_arg = *txvec & 0x1fu;
-        uint32_t pwr_cap = (ah_lmac.tx_power_config & 0x1ffu) >> 5u;
+        uint32_t pwr_cap = (ah_lmac.tx_power_config >> 5) & 0x1fu;   /* 5-bit */
         if (pwr_cap < pwr_arg) {
             ah_lmac.tx_irq_error_flags |= 0x2000u;
             pwr_arg = pwr_cap;
         }
-        if ((ah_lmac.tx_rate_ctrl_flags & 0xcu) == 0u && pwr_arg < 3u) {
+        if ((((uint8_t *)&ah_lmac.tx_power_config)[1] & 0xcu) == 0u && pwr_arg < 3u) {
             ah_lmac.tx_irq_error_flags |= 0x2000u;
             pwr_arg = 3u;
         }
     }
 
-    uint8_t bw_pwr_bits = ah_lmac.tx_rate_ctrl_flags & 0xcu;
+    /* binary reads the mode bits from tx_power_config byte[1] (ctx+0x36D),
+     * NOT tx_rate_ctrl_flags (0x36E) -- a different flag byte */
+    uint8_t bw_pwr_bits = ((uint8_t *)&ah_lmac.tx_power_config)[1] & 0xcu;
     if (bw_pwr_bits != 0u) {
         uint32_t pwr_fallback;
         if (bw_pwr_bits == 8u) {
@@ -825,7 +929,7 @@ done_pwr:
 
     if ((ah_lmac.bo_nav_ctrl & 2u) &&
         ((ah_lmac.pwr_ft_att_flags & 0x3fu) != ft_att_pre)) {
-        config_ft_att_val();
+        config_ft_att_val(ah_lmac.pwr_ft_att_flags & 0x3fu);   /* binary passes the att value in r0 */
         ft_att_pre = ah_lmac.pwr_ft_att_flags & 0x3fu;
     }
 
@@ -931,6 +1035,9 @@ int32 lmac_reorder_tx_agglist(void)
 
         for (i = 0; i < (int32_t)agg_cnt; i++) {
             skb = ac_aggr(ac)->skb_list[i];
+            if (skb == NULL) continue;   /* purged/evicted mid-list: count can
+                                          * lag the NULLing across critical
+                                          * sections -- never deref stale slots */
             txd = (lmac_txd_t *)skb->head;
             skb_bf = (uint8_t *)skb + 0x2A; /* priority/acked/cloned bitfield byte */
 
@@ -1012,6 +1119,11 @@ do_complete:
             skb_list_queue(&ah_lmac_tx.tx_frames_pending_queue, skb);
             ac_aggr(ac)->queued_count -= 1;
             ah_lmac_tx.pTx_agg_count_per_ac[ac] -= 1;
+            ac_aggr(ac)->skb_list[i] = NULL;
+        }
+
+        for (; keep < (int32_t)agg_cnt; keep++) {
+            ac_aggr(ac)->skb_list[keep] = NULL;
         }
 
         /* Clear aggr flags bit 2 (AGGR_CTRL_START) */
@@ -1117,7 +1229,7 @@ void *lmac_gen_txvec(uint32_t ac, uint32_t bw_hint, uint32_t mcs)
 
         cw_lo[0] = (cw_lo[0] & 0xE3) |
                     (uint8_t)((txd->tx_ctrl >> 6) & 1) << 2 |
-                    (uint8_t)((aggr->txvec.flags0 >> 6) & 1) << 3;
+                    (uint8_t)((aggr->txvec.flags0 >> 6) & 3u) << 3;   /* 2-bit bw: binary zext 7,6 */
 
         uint16_t dur_val = *(uint16_t *)&txi[0x30];
         if ((cw_lo[0] & 0x04) == 0)
@@ -1131,7 +1243,7 @@ void *lmac_gen_txvec(uint32_t ac, uint32_t bw_hint, uint32_t mcs)
                     (uint8_t)(mcs_nib << 3);
         cw_lo[3] = (uint8_t)((int8_t)(uint8_t)agg_sym * 2) | 0x01;
         cw_hi[0] = (cw_hi[0] & 0xFC) |
-                    (uint8_t)((agg_sym & 0xFF) >> 7);
+                    (uint8_t)((agg_sym >> 7) & 0x03u);   /* sym[8:7]: binary zext 8,7 */
 
         uint32_t resp = lmac_select_resp_ind();
         uint8_t tmp = (cw_hi[0] & 0xE3) |
@@ -1166,7 +1278,7 @@ void *lmac_gen_txvec(uint32_t ac, uint32_t bw_hint, uint32_t mcs)
 
         cw_lo[0] = (cw_lo[0] & 0xE3) |
                     (uint8_t)((txd->tx_ctrl >> 6) & 1) << 2 |
-                    (uint8_t)((aggr->txvec.flags0 >> 6) & 1) << 3;
+                    (uint8_t)((aggr->txvec.flags0 >> 6) & 3u) << 3;   /* 2-bit bw: binary zext 7,6 */
 
         uint16_t dur_val = *(uint16_t *)&txi[0x30];
         if ((cw_lo[0] & 0x04) == 0)
@@ -1180,7 +1292,7 @@ void *lmac_gen_txvec(uint32_t ac, uint32_t bw_hint, uint32_t mcs)
                     (uint8_t)(mcs_nib << 3);
         cw_lo[3] = (uint8_t)((int8_t)(uint8_t)agg_sym * 2) | 0x01;
         cw_hi[0] = (cw_hi[0] & 0xFC) |
-                    (uint8_t)((agg_sym & 0xFF) >> 7);
+                    (uint8_t)((agg_sym >> 7) & 0x03u);   /* sym[8:7]: binary zext 8,7 */
 
         uint32_t resp = lmac_select_resp_ind();
         uint8_t tmp = (cw_hi[0] & 0xE3) |
@@ -1193,7 +1305,7 @@ void *lmac_gen_txvec(uint32_t ac, uint32_t bw_hint, uint32_t mcs)
     if ((txd->tx_flags & 0x40) != 0) {
         ah_lmac.beacon_airtime = (int16_t)(
             (aggr->txvec.tx_symbol_len +
-             ((*(uint16_t *)&aggr->rate_cfg & 0x01FF) >> 6)) * 0x28);
+             ((*(uint16_t *)&aggr->rate_cfg & 0x03FF) >> 6)) * 0x28);
     }
 
     /* Mark TXVEC valid (aggr_hdr_ctrl bit 10) */
@@ -1270,18 +1382,19 @@ int32_t lmac_tx_pwr_sel(void *txi_ptr, uint32_t mcs)
 
     /* Simple path: frame not started or no station */
     if (!(txd->tx_flags & 0x02) || txd->sta == NULL) {
-        return tx_pwr_adjust_by_mcs((ah_lmac.tx_power_config & 0x1FF) >> 5, mcs);
+        return tx_pwr_adjust_by_mcs((ah_lmac.tx_power_config >> 5) & 0x1F, mcs);   /* 5-bit */
     }
 
     /* Power control enabled? */
     if (!((uint8_t)ah_lmac.lo_freq_or_channel_bits & 0x01)) {
-        pwr = (ah_lmac.tx_power_config & 0x1FF) >> 5;
+        pwr = (ah_lmac.tx_power_config >> 5) & 0x1F;   /* 5-bit */
     } else {
         int8_t rssi = (int8_t)((uint8_t *)&ah_lmac.last_rx_pv0_ctrl_info)[3];
-        int threshold = (int)((ah_lmac.tx_power_config & 0x1FFFFFu) >> 14);
+        /* binary: 32-bit load at 0x36C, zext bits[21:14] -> 8-bit threshold */
+        int threshold = (int)((*(uint32_t *)&ah_lmac.tx_power_config >> 14) & 0xFFu);
 
         if (rssi < threshold || (ah_lmac.bo_nav_ctrl & 0x02)) {
-            pwr = tx_pwr_adjust_by_mcs(ah_lmac.tx_power_config & 0x1F, mcs);
+            pwr = tx_pwr_adjust_by_mcs((ah_lmac.tx_power_config >> 5) & 0x1F, mcs);   /* 5-bit (was raw &0x1F) */
         } else {
             pwr = ah_lmac.tx_power_config & 0x1F;
         }
@@ -1733,11 +1846,44 @@ int32_t lmac_ah_test_tx(struct lmac_ops *ops, struct sk_buff *skb)
 { (void)ops; (void)skb; return 0; }
 void lmac_irq_tx_tmo(void)
 {
+    {
+        extern halow_tx_dbg_t g_tx_dbg;
+        g_tx_dbg.tx_tmo_count++;
+    }
     //hgprintf("\n\nTIMEOUT!!!\n\n");
     lmac_cancle_tx_tmo();
     ah_lmac.bo_frame_type = 0u;
     ah_lmac.bo_tx_substate = 0u;
     lhw_abort_fsm();
+
+    /* Complete the in-flight aggregate exactly like lmac_irq_tx_end does.
+     * The tmo fires when the HW TX timer expires mid-frame (long low-MCS
+     * bundle under contention); the selected skb was already DEQUEUED from
+     * the AC queue by lmac_gen_tx_agglist, so without this it stays
+     * referenced in aggr->skb_list[0] forever: selected_count never returns
+     * to 0, every later lmac_irq_ac_pd sees a busy aggregate and never
+     * transmits again -- the permanent saturation wedge (budget frozen,
+     * airtime 100%, TX dead until reboot). Its bytes must also go back to
+     * the TX-vacancy budget via the normal status path. */
+    {
+        uint8_t ac = lmac_current_ac();
+        lmac_tx_ctx_buff *aggr = (ac < 4u) ? &ah_lmac_tx.pTx_ac_aggr_data[ac] : NULL;
+        if (aggr) {
+            for (uint32_t i = 0; i < aggr->selected_count && i < 64; i++) {
+                struct sk_buff *skb = aggr->skb_list[i];
+                if (skb != NULL) {
+                    lmac_txd_t *txd = (lmac_txd_t *)skb->head;
+                    txd->tx_flags |= 0x80u;
+                    skb_list_queue(&ah_lmac_tx.tx_frames_pending_queue, skb);
+                    aggr->skb_list[i] = NULL;
+                }
+            }
+            aggr->selected_count = 0u;
+            aggr->queued_count   = 0u;
+        }
+        os_sema_up(&ah_lmac_tx.tx_status_sem);
+    }
+
     lhw_enable_irq_ac();
 }
 

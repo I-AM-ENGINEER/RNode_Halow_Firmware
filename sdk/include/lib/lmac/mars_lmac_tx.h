@@ -1091,7 +1091,7 @@ uint32 calc_symbol_len(uint32 bytes, uint32 bw, uint32 mcs);
 /**
  * @brief Configure FT attenuation value
  */
-void config_ft_att_val(void);
+void config_ft_att_val(uint32 val);   /* arg consumed by the binary: att1/att2 split */
 
 /**
  * @brief Print hex dump
@@ -1127,7 +1127,7 @@ extern uint8 *lmac_convert_sid2mac(uint16 sid);
 extern uint32 calc_max_agg_bytes(uint32 bw, uint32 mcs);
 extern uint32 calc_symbol_len(uint32 bytes, uint32 bw, uint32 mcs);
 extern void ah_rfdigicali_tx_pwr(uint32 arg0);
-extern void config_ft_att_val(void);
+extern void config_ft_att_val(uint32 val);   /* arg consumed by the binary: att1/att2 split */
 extern int jtag_map_set(uint8 val);
 extern int32 gpio_set_dir(uint32 pin, int32 direction);
 extern int32 gpio_set_val(uint32 pin, int32 value);
