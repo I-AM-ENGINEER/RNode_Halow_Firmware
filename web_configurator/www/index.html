@@ -45,6 +45,9 @@
             <table class="stats-table">
                 <tbody>
                 <tr><th>Chip temperature</th><td id="stat_chip_temp">--</td></tr>
+                <tr><th>Supply voltage</th><td id="stat_vcc">--</td></tr>
+                <tr><th>Core voltage 1.3B</th><td id="stat_vdd13b">--</td></tr>
+                <tr><th>Core voltage 1.3C</th><td id="stat_vdd13c">--</td></tr>
                 <tr><th>Uptime</th><td id="stat_uptime">--</td></tr>
 				<tr><th>CPU usage</th><td id="stat_cpu">--</td></tr>
 				<tr><th>Heap</th><td id="stat_heap">--</td></tr>
@@ -247,27 +250,22 @@
 
             <div class="panel">
                 <h3>ACK (ARQ) Settings</h3>
-                <p class="note">Per-DATA-packet cumulative ACK. Each received frame is acknowledged with an ACK carrying the last N frame ids (cumulative), so a few lost ACKs no longer starve the retry timer. ACK = [magic][evm][fid0..fidK] at MCS10.</p>
+                <p class="note">Unicast data frames are retransmitted until the peer acknowledges them. Set retries to 0 to send without delivery guarantee.</p>
                 <label>
                     <span>Max retries</span>
                     <input type="number" id="ack_retries" min="0" max="8" value="3">
                 </label>
-                <p class="note">0 = NOACK (fire-and-forget). Per-slot retry budget; slots that exhaust it are dropped.</p>
+                <p class="note">0 = NOACK (fire-and-forget). Frames that exhaust the retry budget are dropped.</p>
                 <label>
-                    <span>ACK timeout (ms)</span>
-                    <input type="number" id="ack_timeout_ms" min="5" max="500" value="40">
+                    <span>Frame aggregation</span>
+                    <input type="checkbox" id="ack_agg" checked>
                 </label>
-                <p class="note">Wait for ACK before each retransmit. Stop-and-wait ARQ rate ≈ 1000/timeout frames/s per peer.</p>
+                <p class="note">Packs several frames for the same peer into one RF frame. Improves throughput; disable only to debug.</p>
                 <label>
-                    <span>Window (tracked TX slots)</span>
-                    <input type="number" id="ack_window" min="1" max="32" value="8">
+                    <span>Broadcast repeat count</span>
+                    <input type="number" id="ack_bc_repeat" min="1" max="3" value="2">
                 </label>
-                <p class="note">Sliding-window size: number of in-flight frames tracked for retry (heap-allocated). Larger = more concurrent recovery under loss, uses more RAM (~2 KB per slot).</p>
-                <label>
-                    <span>Fids per ACK</span>
-                    <input type="number" id="ack_fids" min="1" max="8" value="4">
-                </label>
-                <p class="note">Cumulative-ACK depth: how many recent frame ids each ACK carries. Each frame is acked ~this many times in a row, so lost ACKs are tolerated. Larger = more robust, slightly bigger ACK.</p>
+                <p class="note">Broadcast frames (announces, link bootstrap) get no ACK, so repeats are their only loss protection. 2 = send each broadcast twice (default), 3 = most robust (poor conditions), 1 = off.</p>
                 <div class="ack-stats" id="ack_stats_box" style="font-size:12px;color:#888;margin-top:8px"></div>
                 <div class="panel-actions">
                     <button type="button" id="save_ack" disabled>Save</button>
@@ -526,20 +524,24 @@
                         <thead>
                             <tr>
                                 <th data-key="mac">MAC</th>
-                                <th data-key="rssi">Last RSSI</th>
-                                <th data-key="snr">Last SNR</th>
-                                <th data-key="mcs">RX MCS</th>
+                                <th data-key="rxRssi">RX RSSI</th>
+                                <th data-key="rxSnr">RX SNR</th>
+                                <th data-key="rxMcs">RX MCS</th>
                                 <th data-key="txMcs">TX MCS</th>
-                                <th data-key="loss">Loss</th>
-                                <th data-key="evm">EVM</th>
-                                <th data-key="packets">Packets</th>
-                                <th data-key="bytes">RX Data</th>
-                                <th data-key="rate">RX Rate</th>
-                                <th data-key="lastSeen">Last seen</th>
+                                <th data-key="txLoss">TX Loss</th>
+                                <th data-key="txEvm">TX EVM</th>
+                                <th data-key="rxPackets">RX Pkts</th>
+                                <th data-key="txPackets">TX Pkts</th>
+                                <th data-key="rxBytes">RX Data</th>
+                                <th data-key="txBytes">TX Data</th>
+                                <th data-key="rxRate">RX Rate</th>
+                                <th data-key="txRate">TX Rate</th>
+                                <th data-key="rxLast">Last RX</th>
+                                <th data-key="txLast">Last TX</th>
                             </tr>
                         </thead>
                         <tbody id="nearby_table_body">
-                            <tr><td colspan="11">--</td></tr>
+                            <tr><td colspan="15">--</td></tr>
                         </tbody>
                     </table>
                 </div>
