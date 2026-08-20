@@ -44,3 +44,4 @@ build_number.txt
 /logs/
 ga*.json
 nm*.json
+**/build_q/

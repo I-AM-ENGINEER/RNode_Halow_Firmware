@@ -264,3 +264,13 @@ enforces the 50 KB RAM cap. Window = inflight gate over the pool (no semaphore,
 no resize migration). Bundle bodies stage at data[6..]; legacy header written at
 data[3] on flush, envelope at data[0] -- no memmove, no second copy. SENDING
 state guards a buf against free/claim while halow_tx runs unlocked.
+
+## Test running (tests/ack)
+
+Host: `make` (gcc). Target ISA: `make qemu` — cross-builds the same suite for
+ck803 and runs it in the T-Head simulator (CDKRepo/Simulator cskysim = QEMU 9
+fork, board soccfg/cskyv2/smartl_803_cfg.xml: ck803efr3, unaligned_access=off,
+UART 0x40015000 console, write to 0x10002000 exits). qemu/support.c carries the
+bare-metal runtime (mini-printf, memcpy, bump malloc); startup.s + qemu/test.ld
+place everything in D-SRAM 0x20000000. Target RAM budget measured on-target:
+40872 B of the 51200 B cap.
