@@ -32,9 +32,9 @@
 #define HALOW_ACK_BC_REPEAT_MAX         3u
 
 #define HALOW_ACK_DEFAULT_WINDOW        10u
-#define HALOW_ACK_DEFAULT_ACK_FIDS      32u
-#define HALOW_ACK_SLOTS_MAX             32u
-#define HALOW_ACK_ACK_FIDS_MAX          32u
+#define HALOW_ACK_DEFAULT_ACK_FIDS      16u
+#define HALOW_ACK_SLOTS_MAX             16u
+#define HALOW_ACK_ACK_FIDS_MAX          16u
 
 /* envelope v1: [A5][5A][ver:4|type:4][body]; ver<=7 keeps byte2 < 0x80 */
 #define HALOW_ENV_MAGIC0                 0xA5u

@@ -29,6 +29,7 @@ static const uint8_t PEER_HI[6] = {0x88,0x88,0x88,0x88,0x88,0x88};
 
 #define EVM_M10 ((int8_t)(-10))
 #define EVM_M25 ((int8_t)(-25))
+#define EVM_M30 ((int8_t)(-30))
 
 static uint32_t fnv1a( const uint8_t *p, uint16_t len ){
     uint32_t h = 2166136261u;
@@ -75,25 +76,28 @@ static bool rx_frame( const uint8_t *src, const uint8_t *payload, uint16_t len, 
     return delivered;
 }
 
+static void rx_ack_frame( const uint8_t *src, const uint8_t *ack, uint16_t len ){
+    const uint8_t *out = NULL;
+    uint16_t out_len = 0;
+    (void)halow_ack_on_rx(ack, len, src, MAC_ME, 0, &out, &out_len);
+}
+
 static uint16_t build_legacy_ack( uint8_t *buf, int8_t evm, uint16_t fid ){
     buf[0] = 0xA5; buf[1] = 0x5A; buf[2] = (uint8_t)evm;
     buf[3] = (uint8_t)(fid & 0xFF); buf[4] = (uint8_t)(fid >> 8);
     return 5;
 }
 
-static uint16_t build_env_ack( uint8_t *buf, int8_t evm, uint16_t base, uint8_t bit ){
+static uint16_t build_env_ack( uint8_t *buf, int8_t evm, uint16_t base ){
     buf[0] = 0xA5; buf[1] = 0x5A; buf[2] = 0x11;
     buf[3] = (uint8_t)evm;
     buf[4] = (uint8_t)(base & 0xFF); buf[5] = (uint8_t)(base >> 8);
     memset(&buf[6], 0, 8);
-    buf[6 + bit / 8] |= (uint8_t)(1u << (bit % 8));
     return 14;
 }
 
-static void rx_ack_frame( const uint8_t *src, const uint8_t *ack, uint16_t len ){
-    const uint8_t *out = NULL;
-    uint16_t out_len = 0;
-    (void)halow_ack_on_rx(ack, len, src, MAC_ME, 0, &out, &out_len);
+static void env_ack_bit( uint8_t *buf, uint8_t bit ){
+    buf[6 + bit / 8] |= (uint8_t)(1u << (bit % 8));
 }
 
 static int count_ack_frames( void ){
@@ -119,6 +123,18 @@ static void fill_payload( uint8_t *p, uint16_t len, uint8_t seed ){
     for( uint16_t i = 0; i < len; i++ ) p[i] = (uint8_t)(seed + i);
 }
 
+static void peer_mac( uint8_t *m, uint8_t id ){
+    memset(m, id, 6);
+}
+
+static void env_peer_ready( const uint8_t *mac ){
+    uint8_t data[16];
+    uint8_t env[12] = {0xA5, 0x5A, 0x10, 0x05, 0x00, 0x01, 0x04, 0x00, 'A', 'B', 'C', 'D'};
+    fill_payload(data, sizeof(data), 1);
+    CHECK( rx_frame(mac, data, sizeof(data), 0) );
+    CHECK( rx_frame(mac, env, sizeof(env), 0) );
+}
+
 /* ============================== tests ============================== */
 
 static void t_init_defaults( void ){
@@ -137,11 +153,12 @@ static void t_init_defaults( void ){
     CHECK( live.max_retries == 3 );
     CHECK( live.timeout_ms == 100 );
     CHECK( live.window == 10 );
-    CHECK( live.ack_fids == 32 );
+    CHECK( live.ack_fids == 16 );
     CHECK( live.agg == 1 );
     CHECK( live.env == 1 );
+    CHECK( live.agg_bytes == 2048 );
 
-    CHECK( test_kv_get("cfg.hack.ver", &v) == 0 && v == 2 );
+    CHECK( test_kv_get("cfg.hack.ver", &v) == 0 && v == 3 );
     CHECK( test_kv_get("cfg.hack.retry", &v) == 0 && v == 3 );
     CHECK( test_task_inits() == 1 );
 }
@@ -166,8 +183,8 @@ static void t_config_clamp( void ){
     halow_ack_config_get_live(&live);
     CHECK( live.timeout_ms == 300 );
     CHECK( live.max_retries == 8 );
-    CHECK( live.window == 32 );
-    CHECK( live.ack_fids == 32 );
+    CHECK( live.window == 16 );
+    CHECK( live.ack_fids == 16 );
     CHECK( live.agg_hold_ms == 100 );
     CHECK( live.ack_hold_ms == 100 );
     CHECK( live.bc_repeat == 3 );
@@ -199,7 +216,7 @@ static void t_broadcast_noack( void ){
     CHECK( st.bc_repeats == 1 );
 }
 
-static void t_bundle_flush_and_fid_ack( void ){
+static void t_bundle_flush_fid_ack( void ){
     halow_ack_config_t cfg;
     halow_ack_stats_t st;
     halow_ack_peer_stats_t ps;
@@ -376,18 +393,12 @@ static void t_env_compat_upgrade( void ){
 static void t_env_blockack_roundtrip( void ){
     halow_ack_config_t cfg;
     halow_ack_stats_t st;
-    halow_ack_peer_stats_t ps;
-    uint8_t data[16];
-    uint8_t env[12] = {0xA5, 0x5A, 0x10, 0x05, 0x00, 0x01, 0x04, 0x00, 'A', 'B', 'C', 'D'};
     uint8_t frame[300];
     uint8_t ack[14];
 
     cfg_base(&cfg);
     node_start(&cfg);
-
-    fill_payload(data, sizeof(data), 1);
-    CHECK( rx_frame(PEER_D, data, sizeof(data), 0) );
-    CHECK( rx_frame(PEER_D, env, sizeof(env), 0) );
+    env_peer_ready(PEER_D);
 
     fill_payload(frame, sizeof(frame), 11);
     CHECK( halow_ack_tx(frame, sizeof(frame), PEER_D) == 0 );
@@ -399,20 +410,21 @@ static void t_env_blockack_roundtrip( void ){
         CHECK( b->buf[0] == 0xA5 && b->buf[1] == 0x5A && b->buf[2] == 0x10 );
         CHECK( b->buf[3] == 0x00 && b->buf[4] == 0x00 );
         CHECK( b->buf[5] == 0x01 );
+        CHECK( b->len == 6 + 2 + 300 );
     }
     halow_ack_stats_get(&st);
     CHECK( st.outstanding == 1 );
     CHECK( st.env_tx_bundles == 1 );
 
-    rx_ack_frame(PEER_D, ack, build_env_ack(ack, EVM_M10, (uint16_t)(0 - 63), 63));
+    (void)build_env_ack(ack, EVM_M10, (uint16_t)(0 - 63));
+    env_ack_bit(ack, 63);
+    rx_ack_frame(PEER_D, ack, 14);
 
     halow_ack_stats_get(&st);
     CHECK( st.acked == 1 );
     CHECK( st.env_rx_acks == 1 );
     CHECK( st.outstanding == 0 );
-    CHECK( halow_ack_peer_stats_by_mac(PEER_D, &ps) && ps.acked == 1 );
 }
-
 static void t_env_probe_8th_ack( void ){
     halow_ack_config_t cfg;
     halow_ack_stats_t st;
@@ -433,7 +445,7 @@ static void t_env_probe_8th_ack( void ){
     CHECK( st.env_tx_acks == 1 );
 }
 
-static void t_env_unknown_and_malformed( void ){
+static void t_env_unknown_malformed( void ){
     halow_ack_stats_t st;
     uint8_t ext[6] = {0xA5, 0x5A, 0x1F, 0x00, 0x01, 0x02};
 
@@ -445,7 +457,7 @@ static void t_env_unknown_and_malformed( void ){
     CHECK( st.rx_env_unk == 2 );
 }
 
-static void t_l0_downgrade_and_magic_recovery( void ){
+static void t_l0_downgrade_magic_recovery( void ){
     halow_ack_config_t cfg;
     halow_ack_stats_t st;
     halow_ack_peer_stats_t ps;
@@ -477,7 +489,7 @@ static void t_l0_downgrade_and_magic_recovery( void ){
 static void t_throttle_pend_park_drain( void ){
     halow_ack_config_t cfg;
     halow_ack_stats_t st;
-    uint8_t f[1500];
+    uint8_t f[700];
 
     cfg_base(&cfg);
     node_start(&cfg);
@@ -504,7 +516,7 @@ static void t_throttle_pend_park_drain( void ){
     CHECK( st.outstanding == 2 );
 }
 
-static void t_window_resize_tokens( void ){
+static void t_window_gate( void ){
     halow_ack_config_t cfg;
     halow_ack_stats_t st;
     uint8_t f[100];
@@ -617,8 +629,8 @@ static void t_agg_size_per_mcs( void ){
     halow_ack_peer_stats_t ps;
     uint8_t data[16];
     uint8_t ack[5];
-    uint8_t big[2500];
-    uint8_t two[1500];
+    uint8_t big[1800];
+    uint8_t two[800];
     int tx_before;
 
     cfg_base(&cfg);
@@ -636,7 +648,7 @@ static void t_agg_size_per_mcs( void ){
     CHECK( halow_ack_peer_stats_by_mac(PEER_HI, &ps) && ps.tx_mcs == 7 );
 
     fill_payload(data, sizeof(data), 2);
-    CHECK( rx_frame(PEER_LO, data, sizeof(data), EVM_M25) );
+    CHECK( rx_frame(PEER_LO, data, sizeof(data), EVM_M30) );
     test_advance_ms(3000);
     for( uint8_t cycle = 0; cycle < 5; cycle++ ){
         uint8_t small[100];
@@ -645,18 +657,17 @@ static void t_agg_size_per_mcs( void ){
         run_ticks(8, 5);
     }
     CHECK( halow_ack_peer_stats_by_mac(PEER_LO, &ps) );
-    CHECK( ps.tx_mcs <= 2 );
+    CHECK( ps.tx_mcs == 1 );
 
     fill_payload(big, sizeof(big), 0x42);
     CHECK( halow_ack_tx(big, sizeof(big), PEER_LO) == 0 );
     CHECK( test_tx_count() >= 1 );
     {
         const test_tx_cap_t *t = test_tx_at(test_tx_count() - 1);
-        CHECK( t->len == 2500 );
-        CHECK( !(t->buf[0] == 0xA5 && t->buf[1] == 0xAD) );
-        CHECK( memcmp(t->buf, big, 2500) == 0 );
+        CHECK( t->len == 1800 );
+        CHECK( memcmp(t->buf, big, 1800) == 0 );
         rx_ack_frame(PEER_LO, ack,
-                     build_legacy_ack(ack, EVM_M25,
+                     build_legacy_ack(ack, EVM_M30,
                                       (uint16_t)(fnv1a(t->buf, t->len) & 0xFFFF)));
     }
 
@@ -673,31 +684,266 @@ static void t_agg_size_per_mcs( void ){
         const test_tx_cap_t *t = test_tx_at(test_tx_count() - 1);
         CHECK( t->buf[0] == 0xA5 && t->buf[1] == 0xAD );
         CHECK( t->buf[2] == 2 );
-        CHECK( t->len == 3 + 2 * 2 + 2 * 1500 );
+        CHECK( t->len == 3 + 2 * 2 + 2 * 800 );
     }
+}
+
+static void t_ack_evm_zero_encoding( void ){
+    halow_ack_config_t cfg;
+    uint8_t f[24];
+    int acks;
+
+    cfg_base(&cfg);
+    node_start(&cfg);
+
+    fill_payload(f, sizeof(f), 1);
+    CHECK( rx_frame(PEER_E, f, sizeof(f), 0) );
+    acks = count_ack_frames();
+    CHECK( acks == 1 );
+    {
+        const test_tx_cap_t *a = test_tx_at(0);
+        CHECK( a->buf[0] == 0xA5 && a->buf[1] == 0x5A );
+        CHECK( a->buf[2] == 0x80 );
+    }
+}
+
+static void t_sixteen_peers_evict_lru( void ){
+    halow_ack_config_t cfg;
+    halow_ack_stats_t st;
+    halow_ack_peer_stats_t ps;
+    uint8_t m[6];
+    uint8_t f[16];
+
+    cfg_base(&cfg);
+    cfg.window = 16;
+    node_start(&cfg);
+
+    for( uint8_t id = 1; id <= 16; id++ ){
+        peer_mac(m, id);
+        fill_payload(f, sizeof(f), id);
+        CHECK( rx_frame(m, f, sizeof(f), 0) );
+    }
+    halow_ack_stats_get(&st);
+    CHECK( st.peers == 16 );
+
+    peer_mac(m, 1);
+    CHECK( halow_ack_peer_stats_by_mac(m, &ps) );
+
+    peer_mac(m, 0x80);
+    fill_payload(f, sizeof(f), 0x80);
+    CHECK( rx_frame(m, f, sizeof(f), 0) );
+
+    halow_ack_stats_get(&st);
+    CHECK( st.peers == 16 );
+    peer_mac(m, 1);
+    CHECK( !halow_ack_peer_stats_by_mac(m, &ps) );
+    peer_mac(m, 0x80);
+    CHECK( halow_ack_peer_stats_by_mac(m, &ps) );
+}
+
+static void t_peer_evict_protected_by_buf( void ){
+    halow_ack_config_t cfg;
+    halow_ack_stats_t st;
+    halow_ack_peer_stats_t ps;
+    uint8_t m[6];
+    uint8_t f[16];
+    uint8_t frame[100];
+
+    cfg_base(&cfg);
+    cfg.window = 16;
+    node_start(&cfg);
+
+    fill_payload(frame, sizeof(frame), 1);
+    CHECK( halow_ack_tx(frame, sizeof(frame), PEER_A) == 0 );
+    run_ticks(2, 5);
+    halow_ack_stats_get(&st);
+    CHECK( st.outstanding == 1 );
+
+    for( uint8_t id = 2; id <= 16; id++ ){
+        peer_mac(m, id);
+        fill_payload(f, sizeof(f), id);
+        CHECK( rx_frame(m, f, sizeof(f), 0) );
+    }
+
+    peer_mac(m, 0x90);
+    fill_payload(f, sizeof(f), 0x90);
+    CHECK( rx_frame(m, f, sizeof(f), 0) );
+
+    CHECK( halow_ack_peer_stats_by_mac(PEER_A, &ps) );
+    peer_mac(m, 2);
+    CHECK( !halow_ack_peer_stats_by_mac(m, &ps) );
+    peer_mac(m, 0x90);
+    CHECK( halow_ack_peer_stats_by_mac(m, &ps) );
+}
+
+static void t_pool_exhaustion( void ){
+    halow_ack_config_t cfg;
+    halow_ack_stats_t st;
+    uint8_t m[6];
+    uint8_t f[100];
+
+    cfg_base(&cfg);
+    cfg.agg = 0;
+    cfg.window = 8;
+    node_start(&cfg);
+
+    for( uint8_t id = 1; id <= 8; id++ ){
+        peer_mac(m, id);
+        fill_payload(f, sizeof(f), id);
+        CHECK( halow_ack_tx(f, sizeof(f), m) == 0 );
+    }
+    CHECK( test_tx_count() == 8 );
+
+    halow_ack_stats_get(&st);
+    CHECK( st.outstanding == 8 );
+    CHECK( !halow_ack_tx_ready() );
+
+    peer_mac(m, 9);
+    fill_payload(f, sizeof(f), 9);
+    CHECK( halow_ack_tx(f, sizeof(f), m) == 0 );
+    CHECK( halow_ack_tx(f, sizeof(f), m) == 0 );
+    CHECK( halow_ack_tx(f, sizeof(f), m) == HALOW_ACK_TX_THROTTLE );
+    CHECK( test_tx_count() == 8 );
+
+    halow_ack_stats_get(&st);
+    CHECK( st.dropped == 0 );
+}
+
+static void t_window_runtime_change( void ){
+    halow_ack_config_t cfg;
+    uint8_t f[100];
+
+    cfg_base(&cfg);
+    cfg.window = 4;
+    cfg.timeout_ms = 500;
+    node_start(&cfg);
+
+    for( uint8_t i = 0; i < 4; i++ ){
+        fill_payload(f, sizeof(f), i);
+        CHECK( halow_ack_tx(f, sizeof(f), PEER_A) == 0 );
+        run_ticks(2, 5);
+    }
+    CHECK( test_tx_count() == 4 );
+
+    fill_payload(f, sizeof(f), 9);
+    CHECK( halow_ack_tx(f, sizeof(f), PEER_A) == 0 );
+    run_ticks(3, 5);
+    CHECK( test_tx_count() == 4 );
+
+    cfg.window = 8;
+    halow_ack_config_apply(&cfg);
+    run_ticks(3, 5);
+    CHECK( test_tx_count() == 5 );
+
+    cfg.window = 3;
+    halow_ack_config_apply(&cfg);
+    fill_payload(f, sizeof(f), 0x0A);
+    CHECK( halow_ack_tx(f, sizeof(f), PEER_A) == 0 );
+    run_ticks(3, 5);
+    CHECK( test_tx_count() == 5 );
+}
+
+static void t_dedup_ring_wrap( void ){
+    halow_ack_config_t cfg;
+    uint8_t x[32];
+    uint8_t y[32];
+
+    cfg_base(&cfg);
+    node_start(&cfg);
+
+    fill_payload(x, sizeof(x), 1);
+    CHECK( rx_frame(PEER_B, x, sizeof(x), 0) );
+    CHECK( !rx_frame(PEER_B, x, sizeof(x), 0) );
+
+    for( uint8_t i = 0; i < 16; i++ ){
+        fill_payload(y, sizeof(y), (uint8_t)(i + 2));
+        CHECK( rx_frame(PEER_B, y, sizeof(y), 0) );
+    }
+    CHECK( rx_frame(PEER_B, x, sizeof(x), 0) );
+    CHECK( !rx_frame(PEER_B, x, sizeof(x), 0) );
+}
+
+static void t_blockack_partial_bitmap( void ){
+    halow_ack_config_t cfg;
+    halow_ack_stats_t st;
+    uint8_t frame[300];
+    uint8_t ack[14];
+
+    cfg_base(&cfg);
+    cfg.window = 16;
+    node_start(&cfg);
+    env_peer_ready(PEER_D);
+
+    for( uint8_t i = 0; i < 3; i++ ){
+        fill_payload(frame, sizeof(frame), i);
+        CHECK( halow_ack_tx(frame, sizeof(frame), PEER_D) == 0 );
+        run_ticks(2, 5);
+    }
+    halow_ack_stats_get(&st);
+    CHECK( st.outstanding == 3 );
+    CHECK( st.env_tx_bundles == 3 );
+
+    (void)build_env_ack(ack, EVM_M10, (uint16_t)(0 - 61));
+    env_ack_bit(ack, 61);
+    env_ack_bit(ack, 63);
+    rx_ack_frame(PEER_D, ack, 14);
+
+    halow_ack_stats_get(&st);
+    CHECK( st.acked == 2 );
+    CHECK( st.outstanding == 1 );
+}
+
+static void t_config_migration_reseed( void ){
+    halow_ack_config_t live;
+    int16_t v = 0;
+
+    test_time_reset();
+    configdb_reset();
+    test_tx_reset();
+    test_vacancy_set(100000);
+    test_kv_set("cfg.hack.ver", 2);
+    test_kv_set("cfg.hack.retry", 8);
+    halow_ack_init();
+
+    halow_ack_config_get_live(&live);
+    CHECK( live.max_retries == 3 );
+    CHECK( live.timeout_ms == 100 );
+    CHECK( live.window == 10 );
+    CHECK( live.ack_fids == 16 );
+
+    CHECK( test_kv_get("cfg.hack.ver", &v) == 0 && v == 3 );
+    CHECK( test_kv_get("cfg.hack.retry", &v) == 0 && v == 3 );
 }
 
 int main( void ){
     struct { const char *name; void (*fn)(void); } tests[] = {
-        {"init_defaults",              t_init_defaults},
-        {"config_clamp",               t_config_clamp},
-        {"broadcast_noack_bc_repeat",  t_broadcast_noack},
-        {"bundle_flush_fid_ack",       t_bundle_flush_and_fid_ack},
-        {"retry_exhaust",              t_retry_exhaust},
-        {"slot_lifetime_deadline",     t_slot_lifetime_deadline},
-        {"rx_dedup",                   t_rx_dedup},
-        {"cumulative_ack_coalesce",    t_cumulative_ack_coalesce},
-        {"env_compat_upgrade",         t_env_compat_upgrade},
-        {"env_blockack_roundtrip",     t_env_blockack_roundtrip},
-        {"env_probe_8th_ack",          t_env_probe_8th_ack},
-        {"env_unknown_malformed",      t_env_unknown_and_malformed},
-        {"l0_downgrade_magic_recovery",t_l0_downgrade_and_magic_recovery},
-        {"throttle_pend_park_drain",   t_throttle_pend_park_drain},
-        {"window_resize_tokens",       t_window_resize_tokens},
-        {"tx_ready_gating",            t_tx_ready_gating},
-        {"ra_upshift",                 t_ra_upshift},
-        {"is_internal_frame",          t_is_internal_frame},
-        {"agg_size_per_mcs",           t_agg_size_per_mcs},
+        {"init_defaults",               t_init_defaults},
+        {"config_clamp",                t_config_clamp},
+        {"broadcast_noack_bc_repeat",   t_broadcast_noack},
+        {"bundle_flush_fid_ack",        t_bundle_flush_fid_ack},
+        {"retry_exhaust",               t_retry_exhaust},
+        {"slot_lifetime_deadline",      t_slot_lifetime_deadline},
+        {"rx_dedup",                    t_rx_dedup},
+        {"cumulative_ack_coalesce",     t_cumulative_ack_coalesce},
+        {"env_compat_upgrade",          t_env_compat_upgrade},
+        {"env_blockack_roundtrip",      t_env_blockack_roundtrip},
+        {"env_probe_8th_ack",           t_env_probe_8th_ack},
+        {"env_unknown_malformed",       t_env_unknown_malformed},
+        {"l0_downgrade_magic_recovery", t_l0_downgrade_magic_recovery},
+        {"throttle_pend_park_drain",    t_throttle_pend_park_drain},
+        {"window_gate",                 t_window_gate},
+        {"tx_ready_gating",             t_tx_ready_gating},
+        {"ra_upshift",                  t_ra_upshift},
+        {"is_internal_frame",           t_is_internal_frame},
+        {"agg_size_per_mcs",            t_agg_size_per_mcs},
+        {"ack_evm_zero_encoding",       t_ack_evm_zero_encoding},
+        {"sixteen_peers_evict_lru",     t_sixteen_peers_evict_lru},
+        {"peer_evict_protected_by_buf", t_peer_evict_protected_by_buf},
+        {"pool_exhaustion",            t_pool_exhaustion},
+        {"window_runtime_change",       t_window_runtime_change},
+        {"dedup_ring_wrap",             t_dedup_ring_wrap},
+        {"blockack_partial_bitmap",     t_blockack_partial_bitmap},
+        {"config_migration_reseed",     t_config_migration_reseed},
     };
 
     printf("halow_ack host tests: %d scenarios\n", (int)(sizeof(tests) / sizeof(tests[0])));

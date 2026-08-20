@@ -222,7 +222,7 @@ pause" stalls and 100%-loss windows. Max payload per MCS (1 MHz):
 `halow_max_msdu[0][mcs] = {700,1450,2200,3000,4500,6050,6800,7600}`, MCS10≈500.
 `halow_tx_p` bumps the per-frame MCS to the lowest rate whose max MSDU fits the
 frame (+32 B margin, 802.11 hdr) — counters `tx_mcs_bump`/`tx_drop_oversize` in
-`/api/tx_dbg`. ACK-layer agg sizing (`halow_ack_eff_agg_bytes`) uses the same
+`/api/tx_dbg`. ACK-layer agg sizing (`eff_agg_bytes` in halow_ack.c) uses the same
 table. Any new TX entry point MUST NOT bypass this check. RX decodes each frame
 at its own rate, so a per-frame upshift is transparent to the peer.
 
@@ -246,7 +246,7 @@ traps to remember:
   sampled per 10 ms tick (false purge -> false reboot of a live node).
 - Gain pilot: never switch RX gain while a session is active; STABLE4 needs
   the prod-collapse exit; healthy prod base must be captured in clean air.
-- Never park a frame in g_pend_buf without len <= HALOW_ACK_FRAME_MAX (BSS
+- Never park a frame in g_pend_buf without len <= ACK_WIRE_MAX 2048 (BSS
   smash); the binary lmac-rx task stack (1024 B) has ~zero headroom under
   halow_ack_on_rx -> SHA256 -- no logs/locals there.
 
@@ -255,3 +255,12 @@ traps to remember:
 ACK/reliability layer lives in `src/halow_ack.c` (slots, peers, RA, envelope v1,
 pend FIFO, acktk task; public API in `inc/halow_ack.h`). `src/halow_pkg_handler.c`
 is only the RNS<->TCP bridge (rf_to_tcp / tcp_to_rf / MTU clamp).
+
+## ACK module budget (2026-08-20 rewrite)
+
+Static pool only, zero heap: 16 bufs x 2048 B wire frames (states FREE/STAGING/
+INFLIGHT/SENDING), 16 peers, pend 2x2048. Host size test (tests/ack/size_test.c)
+enforces the 50 KB RAM cap. Window = inflight gate over the pool (no semaphore,
+no resize migration). Bundle bodies stage at data[6..]; legacy header written at
+data[3] on flush, envelope at data[0] -- no memmove, no second copy. SENDING
+state guards a buf against free/claim while halow_tx runs unlocked.

@@ -12,19 +12,18 @@
 
 #define ACK_CFG_PREFIX  CONFIGDB_ADD_MODULE("hack")
 #define ACK_CFG(k)      ACK_CFG_PREFIX "." k
-#define ACK_CFG_VER     2
+#define ACK_CFG_VER     3
 
-#define ACK_MAX_PEERS   4u
-#define ACK_FRAME_MAX   4000u
+#define ACK_BUF_N       16u
+#define ACK_WIRE_MAX    2048u
+#define ACK_MAX_PEERS   16u
 #define ACK_DEDUP_WIN   HALOW_ACK_ACK_FIDS_MAX
 #define ACK_TICK_MS     10u
 
+#define ACK_AGG_RESERVE 6u
 #define ACK_TX_VACANCY_LOW    8000u
 #define ACK_SLOT_LIFE_MAX_MS  6000u
 #define ACK_AGG_MAX_HOLD_MS   1000u
-
-#define ACK_RETIRE_Q          2u
-#define ACK_SLOTS_RETIRE_MS   2000u
 
 #define ACK_PEND_N            2u
 #define ACK_PEND_MAX_TRIES    1500u
@@ -47,17 +46,25 @@ enum halow_l1_compat {
     HALOW_COMPAT_ENVELOPE = 2,
 };
 
+enum ack_buf_state {
+    ACK_BUF_FREE     = 0,
+    ACK_BUF_STAGING  = 1,
+    ACK_BUF_INFLIGHT = 2,
+    ACK_BUF_SENDING  = 3,
+};
+
 typedef struct {
-    uint8_t  in_use;
+    uint8_t  state;
     uint8_t  retries_used;
-    uint64_t tx_jiff;
-    uint64_t born_jiff;
-    uint16_t frame_len;
+    uint8_t  ofs;             /* frame starts at data[ofs] */
+    uint16_t len;
     uint16_t fid;
     uint16_t seq;
+    uint64_t born_jiff;
+    uint64_t tx_jiff;
     uint8_t  dest_mac[6];
-    uint8_t  frame[ACK_FRAME_MAX + 4u];
-} ack_slot_t;
+    uint8_t  data[ACK_WIRE_MAX];
+} ack_buf_t;
 
 typedef struct {
     uint8_t  in_use;
@@ -66,7 +73,7 @@ typedef struct {
     uint8_t  tx_mcs;            /* HALOW_MCS_DEFAULT = global config MCS */
     int8_t   evm_ewma;
     int8_t   evm_ewma_slow;
-    uint16_t loss_ewma_q8;      /* /256 == 0..1 */
+    uint16_t loss_q8;           /* /256 == 0..1 */
     uint32_t tx;
     uint32_t acked;
     uint32_t dropped;
@@ -74,7 +81,6 @@ typedef struct {
     uint32_t retransmitted;
     int32_t  last_tx_s;
     uint64_t last_ack_jiff;
-    uint64_t cooldown_until;
     uint16_t acks_since_step;
     uint64_t next_step_allowed;
     uint64_t last_seen;
@@ -84,7 +90,8 @@ typedef struct {
     bool     ack_due;
     uint64_t ack_due_jiff;
     int8_t   last_rx_evm;
-    uint16_t agg_len;
+    uint8_t  agg_idx;           /* staging buf index + 1, 0 = none */
+    uint16_t agg_len;           /* staged bytes incl. ACK_AGG_RESERVE */
     uint8_t  agg_nsub;
     uint64_t agg_first_jiff;
     uint8_t  compat;
@@ -93,33 +100,22 @@ typedef struct {
     uint64_t rx_seq_win;        /* bit i == seq (rx_seq_last - i) received */
     bool     rx_seq_seen;
     uint32_t l0_strikes;
-    uint32_t samp_acked, samp_dropped;
-    uint32_t pend_res, pend_fail;
-    uint32_t loss_ev_n;
-    uint16_t loss_iir_pct;
     uint8_t  ack_probe_cnt;
     uint32_t l0_falls;
     uint64_t created_jiff;
-    uint8_t *agg_buf;           /* os_malloc'd on first coalesce */
 } ack_peer_t;
 
 static halow_ack_config_t g_ack_cfg;
 static halow_ack_stats_t  g_ack_stats;
 static struct os_mutex    g_ack_mutex;
-static struct os_semaphore g_ack_slot_sem;
-static uint32_t           g_ack_sem_debt;
 
-static ack_slot_t *g_slots;
-static uint32_t    g_slot_count;
+static ack_buf_t   g_bufs[ACK_BUF_N];
+static uint8_t     g_window;
 static ack_peer_t  g_peers[ACK_MAX_PEERS];
 
 static uint64_t g_last_data_tx_jiff;
 
-static ack_slot_t *g_retire_q[ACK_RETIRE_Q];
-static uint64_t    g_retire_jiff[ACK_RETIRE_Q];
-static uint32_t    g_retire_n;
-
-static uint8_t  g_pend_buf[ACK_PEND_N][ACK_FRAME_MAX];
+static uint8_t  g_pend_buf[ACK_PEND_N][ACK_WIRE_MAX];
 static uint16_t g_pend_len[ACK_PEND_N];
 static uint8_t  g_pend_mac[ACK_PEND_N][6];
 static uint32_t g_pend_head, g_pend_count;
@@ -171,114 +167,72 @@ void halow_ack_env_malformed( void ){
     g_ack_stats.rx_env_unk++;
 }
 
-/* ================= slot pool ================= */
+/* ================= buffer pool ================= */
 
-static void token_return( void ){
-    if( g_ack_sem_debt > 0u ){
-        g_ack_sem_debt--;
-    }else{
-        os_sema_up(&g_ack_slot_sem);
-    }
+static uint32_t inflight_count( void ){
+    uint32_t n = 0;
+    for( uint32_t i = 0; i < ACK_BUF_N; i++ )
+        if( g_bufs[i].state >= ACK_BUF_INFLIGHT ) n++;
+    return n;
 }
 
-static ack_slot_t *slot_alloc( void ){
-    for( uint32_t i = 0; i < g_slot_count; i++ )
-        if( !g_slots[i].in_use ) return &g_slots[i];
+static uint32_t free_buf_count( void ){
+    uint32_t n = 0;
+    for( uint32_t i = 0; i < ACK_BUF_N; i++ )
+        if( g_bufs[i].state == ACK_BUF_FREE ) n++;
+    return n;
+}
+
+static ack_buf_t *buf_alloc( uint8_t state, const uint8_t mac[6] ){
+    for( uint32_t i = 0; i < ACK_BUF_N; i++ ){
+        ack_buf_t *b = &g_bufs[i];
+        if( b->state != ACK_BUF_FREE ) continue;
+        b->state        = state;
+        b->retries_used = 0;
+        b->seq          = 0xFFFFu;
+        b->born_jiff    = os_jiffies();
+        memcpy(b->dest_mac, mac, 6);
+        return b;
+    }
     return NULL;
 }
 
-static ack_slot_t *slot_claim_locked( void ){
-    if( os_sema_down(&g_ack_slot_sem, 0) != 0 ) return NULL;
-    ack_slot_t *s = slot_alloc();
-    if( s == NULL ){
-        token_return();
-        return NULL;
+static void buf_free( ack_buf_t *b ){
+    b->state = ACK_BUF_FREE;
+}
+
+static ack_buf_t *buf_claim_inflight( const uint8_t mac[6] ){
+    if( inflight_count() >= g_window ) return NULL;
+    return buf_alloc(ACK_BUF_INFLIGHT, mac);
+}
+
+static ack_buf_t *buf_match( const uint8_t mac[6], uint16_t fid ){
+    for( uint32_t i = 0; i < ACK_BUF_N; i++ ){
+        ack_buf_t *b = &g_bufs[i];
+        if( b->state == ACK_BUF_INFLIGHT &&
+            b->fid == fid &&
+            memcmp(b->dest_mac, mac, 6) == 0 )
+            return b;
     }
-    s->in_use    = 1;
-    s->born_jiff = os_jiffies();
-    s->seq       = 0xFFFFu;
-    return s;
-}
-
-static void slot_free_locked( ack_slot_t *s ){
-    s->in_use = 0;
-    token_return();
-}
-
-static ack_slot_t *slot_match( const uint8_t mac[6], uint16_t fid ){
-    for( uint32_t i = 0; i < g_slot_count; i++ )
-        if( g_slots[i].in_use &&
-            g_slots[i].fid == fid &&
-            memcmp(g_slots[i].dest_mac, mac, 6) == 0 )
-            return &g_slots[i];
     return NULL;
 }
 
-static ack_slot_t *slot_for_peer( const uint8_t mac[6] ){
-    for( uint32_t i = 0; i < g_slot_count; i++ )
-        if( g_slots[i].in_use && memcmp(g_slots[i].dest_mac, mac, 6) == 0 )
-            return &g_slots[i];
+static ack_buf_t *buf_for_peer( const uint8_t mac[6] ){
+    for( uint32_t i = 0; i < ACK_BUF_N; i++ ){
+        ack_buf_t *b = &g_bufs[i];
+        if( b->state != ACK_BUF_FREE && memcmp(b->dest_mac, mac, 6) == 0 )
+            return b;
+    }
     return NULL;
 }
 
-static void slots_retire( ack_slot_t *old ){
-    if( old == NULL ) return;
-    if( g_retire_n == ACK_RETIRE_Q ){
-        uint32_t victim = 0u;
-        for( uint32_t i = 1u; i < ACK_RETIRE_Q; i++ ){
-            if( (os_jiffies() - g_retire_jiff[i]) >
-                (os_jiffies() - g_retire_jiff[victim]) ) victim = i;
-        }
-        os_free(g_retire_q[victim]);
-        g_retire_q[victim]    = g_retire_q[g_retire_n - 1u];
-        g_retire_jiff[victim] = g_retire_jiff[g_retire_n - 1u];
-        g_retire_n--;
-    }
-    g_retire_q[g_retire_n]    = old;
-    g_retire_jiff[g_retire_n] = os_jiffies();
-    g_retire_n++;
-}
-
-static bool slots_resize_locked( uint8_t window ){
-    if( window == 0u ) window = HALOW_ACK_DEFAULT_WINDOW;
-    if( window > HALOW_ACK_SLOTS_MAX ) window = HALOW_ACK_SLOTS_MAX;
-    if( window == g_slot_count && g_slots != NULL ) return true;
-
-    ack_slot_t *nw = (ack_slot_t *)os_malloc((uint32_t)window * sizeof(ack_slot_t));
-    if( nw == NULL ){
-        log_warn("ack: slot malloc failed window=%u (keep %lu)",
-                 (unsigned)window, (unsigned long)g_slot_count);
-        return false;
-    }
-    memset(nw, 0, (uint32_t)window * sizeof(ack_slot_t));
-
-    uint32_t dropped_inuse = 0u;
-    for( uint32_t i = 0; i < g_slot_count; i++ )
-        if( g_slots != NULL && g_slots[i].in_use ) dropped_inuse++;
-    g_ack_stats.dropped += dropped_inuse;
-
-    bool had_old  = ( g_slots != NULL );
-    uint8_t old_count = (uint8_t)g_slot_count;
-    if( had_old ) slots_retire(g_slots);
-    g_slots      = nw;
-    g_slot_count = window;
-
-    if( !had_old ){
-        os_sema_init(&g_ack_slot_sem, (int32)g_slot_count);
-        return true;
-    }
-    while( dropped_inuse-- > 0u ) os_sema_up(&g_ack_slot_sem);
-    int32 delta = (int32)window - (int32)old_count;
-    while( delta > 0 ){ os_sema_up(&g_ack_slot_sem); delta--; }
-    while( delta < 0 ){
-        if( os_sema_down(&g_ack_slot_sem, 0) == 0 ){
-            delta++;
-        }else{
-            g_ack_sem_debt++;
-            delta++;
-        }
-    }
-    return true;
+static void buf_tx_send( ack_buf_t *b, uint8_t pmcs ){
+    b->state = ACK_BUF_SENDING;
+    ack_unlock();
+    (void)halow_tx(&b->data[b->ofs], b->len, b->dest_mac, pmcs);
+    g_last_data_tx_jiff = os_jiffies();
+    ack_lock();
+    if( b->state == ACK_BUF_SENDING ) b->state = ACK_BUF_INFLIGHT;
 }
 
 /* ================= peers ================= */
@@ -311,8 +265,7 @@ static ack_peer_t *peer_evict_pick( void ){
     for( uint32_t i = 0; i < ACK_MAX_PEERS; i++ ){
         ack_peer_t *c = &g_peers[i];
         if( !c->in_use ){ victim = c; break; }
-        if( slot_for_peer(c->mac) != NULL ) continue;
-        if( c->agg_nsub > 0u ) continue;
+        if( buf_for_peer(c->mac) != NULL ) continue;
         if( c->last_seen < oldest ){ oldest = c->last_seen; victim = c; }
     }
     return victim;
@@ -321,7 +274,6 @@ static ack_peer_t *peer_evict_pick( void ){
 static ack_peer_t *peer_create( const uint8_t mac[6], uint8_t init_mcs ){
     ack_peer_t *p = peer_evict_pick();
     if( p == NULL ) return NULL;
-    if( p->agg_buf != NULL ) os_free(p->agg_buf);
     memset(p, 0, sizeof(*p));
     p->in_use       = 1;
     memcpy(p->mac, mac, 6);
@@ -342,7 +294,7 @@ static ack_peer_t *peer_get( const uint8_t mac[6] ){
             p->tx_mcs != HALOW_MCS_DEFAULT &&
             peer_is_stale(p) ){
             p->tx_mcs            = init_mcs;
-            p->loss_ewma_q8      = 0;
+            p->loss_q8           = 0;
             p->acks_since_step   = 0;
             p->next_step_allowed = 0;
             p->compat            = HALOW_COMPAT_LEGACY;
@@ -477,7 +429,7 @@ static uint8_t ra_floor( const ack_peer_t *p ){
 }
 
 static void ra_log_mcs( const char *verb, ack_peer_t *p ){
-    uint32_t pct_x100 = (uint32_t)p->loss_ewma_q8 * 100u * 100u / 256u;
+    uint32_t pct_x100 = (uint32_t)p->loss_q8 * 100u * 100u / 256u;
     (void)pct_x100;
     log_info("ack: peer %02x:%02x:%02x:%02x:%02x:%02x MCS %s -> %u (loss=%u.%02u%%)",
              p->mac[0],p->mac[1],p->mac[2],p->mac[3],p->mac[4],p->mac[5],
@@ -487,7 +439,7 @@ static void ra_log_mcs( const char *verb, ack_peer_t *p ){
 
 static void ra_on_ack( ack_peer_t *p ){
     p->last_ack_jiff = os_jiffies();
-    p->loss_ewma_q8 = (uint16_t)(((uint32_t)p->loss_ewma_q8 * (RA_EWMA_W - 1u)) >> 3);
+    p->loss_q8 = (uint16_t)(((uint32_t)p->loss_q8 * (RA_EWMA_W - 1u)) >> 3);
     if( !g_ack_cfg.rate_adapt ) return;
     if( p->tx_mcs == HALOW_MCS_DEFAULT ) return;
 
@@ -497,8 +449,8 @@ static void ra_on_ack( ack_peer_t *p ){
     uint8_t ceil_mcs = ra_ceiling(p);
     if( ceil_mcs > RA_MAX_MCS ) ceil_mcs = RA_MAX_MCS;
     bool ready = ( p->tx_mcs + 1u < ceil_mcs )
-               ? ( p->loss_ewma_q8 <= RA_Q8(g_ack_cfg.ra_loss_down) )
-               : ( p->loss_ewma_q8 <= RA_Q8(g_ack_cfg.ra_loss_up) );
+               ? ( p->loss_q8 <= RA_Q8(g_ack_cfg.ra_loss_down) )
+               : ( p->loss_q8 <= RA_Q8(g_ack_cfg.ra_loss_up) );
 
     if( !ready ){
         g_ack_stats.ra_blocked_loss++;
@@ -520,12 +472,12 @@ static void ra_on_drop( ack_peer_t *p ){
         (os_jiffies() - p->created_jiff) < os_msecs_to_jiffies(RA_GRACE_MS) ){
         return;
     }
-    p->loss_ewma_q8 = (uint16_t)((((uint32_t)p->loss_ewma_q8 * (RA_EWMA_W - 1u)) >> 3)
-                                 + (256u / RA_EWMA_W));
+    p->loss_q8 = (uint16_t)((((uint32_t)p->loss_q8 * (RA_EWMA_W - 1u)) >> 3)
+                            + (256u / RA_EWMA_W));
     p->acks_since_step = 0;
     if( !g_ack_cfg.rate_adapt ) return;
     if( p->tx_mcs == HALOW_MCS_DEFAULT ) return;
-    if( p->loss_ewma_q8 >= RA_Q8(g_ack_cfg.ra_loss_down) ){
+    if( p->loss_q8 >= RA_Q8(g_ack_cfg.ra_loss_down) ){
         uint8_t floor_d = ra_floor(p);
         if( p->tx_mcs > floor_d ){
             p->tx_mcs--;
@@ -543,7 +495,7 @@ static void ra_check_stale( ack_peer_t *p ){
 
     uint8_t init_mcs = peer_init_mcs(p);
     p->tx_mcs            = init_mcs;
-    p->loss_ewma_q8      = 0;
+    p->loss_q8           = 0;
     p->acks_since_step   = 0;
     p->next_step_allowed = os_jiffies() + os_msecs_to_jiffies(HALOW_ACK_RA_COOLDOWN_MS);
     log_info("ack: peer %02x:%02x:%02x:%02x:%02x:%02x MCS stale -> ceiling %u",
@@ -563,7 +515,7 @@ void halow_ack_config_set_default( halow_ack_config_t *cfg ){
     cfg->window        = HALOW_ACK_DEFAULT_WINDOW;
     cfg->ack_fids      = HALOW_ACK_DEFAULT_ACK_FIDS;
     cfg->agg           = 1u;
-    cfg->agg_bytes     = ACK_FRAME_MAX;
+    cfg->agg_bytes     = ACK_WIRE_MAX;
     cfg->agg_hold_ms   = HALOW_ACK_AGG_HOLD_MS_DEF;
     cfg->ack_hold_ms   = HALOW_ACK_ACK_HOLD_MS_DEF;
     cfg->bc_repeat     = HALOW_ACK_BC_REPEAT_DEF;
@@ -587,7 +539,7 @@ static void config_clamp( halow_ack_config_t *cfg ){
     if( cfg->ack_fids == 0u ) cfg->ack_fids = 1u;
     if( cfg->ack_fids > HALOW_ACK_ACK_FIDS_MAX ) cfg->ack_fids = HALOW_ACK_ACK_FIDS_MAX;
     cfg->agg = cfg->agg ? 1u : 0u;
-    cfg->agg_bytes = (uint16_t)ACK_FRAME_MAX;
+    cfg->agg_bytes = (uint16_t)ACK_WIRE_MAX;
     if( cfg->agg_hold_ms == 0u ) cfg->agg_hold_ms = 1u;
     if( cfg->agg_hold_ms > 100u ) cfg->agg_hold_ms = 100u;
     if( cfg->ack_hold_ms > 100u ) cfg->ack_hold_ms = 100u;
@@ -626,7 +578,6 @@ void halow_ack_config_load( halow_ack_config_t *cfg ){
     configdb_get_i8 (ACK_CFG("window"),   (int8_t *)&cfg->window);
     configdb_get_i8 (ACK_CFG("fids"),     (int8_t *)&cfg->ack_fids);
     configdb_get_i8 (ACK_CFG("agg"),      (int8_t *)&cfg->agg);
-    configdb_get_i16(ACK_CFG("aggbytes"), (int16_t *)&cfg->agg_bytes);
     configdb_get_i16(ACK_CFG("agghold"),  (int16_t *)&cfg->agg_hold_ms);
     configdb_get_i16(ACK_CFG("ackhold"),  (int16_t *)&cfg->ack_hold_ms);
     configdb_get_i8 (ACK_CFG("bcrep"),    (int8_t *)&cfg->bc_repeat);
@@ -645,7 +596,6 @@ void halow_ack_config_save( const halow_ack_config_t *cfg ){
     configdb_set_i8 (ACK_CFG("window"),   (int8_t *)&cfg->window);
     configdb_set_i8 (ACK_CFG("fids"),     (int8_t *)&cfg->ack_fids);
     configdb_set_i8 (ACK_CFG("agg"),      (int8_t *)&cfg->agg);
-    configdb_set_i16(ACK_CFG("aggbytes"), (int16_t *)&cfg->agg_bytes);
     configdb_set_i16(ACK_CFG("agghold"),  (int16_t *)&cfg->agg_hold_ms);
     configdb_set_i16(ACK_CFG("ackhold"),  (int16_t *)&cfg->ack_hold_ms);
     configdb_set_i8 (ACK_CFG("bcrep"),    (int8_t *)&cfg->bc_repeat);
@@ -669,31 +619,27 @@ void halow_ack_config_apply( const halow_ack_config_t *cfg ){
 
     ack_lock();
     g_ack_cfg = c;
-    if( c.window != g_slot_count || g_slots == NULL ){
-        (void)slots_resize_locked(c.window);
-        if( g_slot_count != c.window ) g_ack_cfg.window = (uint8_t)g_slot_count;
-    }
+    g_window  = c.window;
     for( uint32_t i = 0; i < ACK_MAX_PEERS; i++ ){
         ack_peer_t *p = &g_peers[i];
         if( !p->in_use ) continue;
         if( p->cur_retries > c.max_retries ) p->cur_retries = c.max_retries;
         if( !c.rate_adapt ){
             p->tx_mcs = HALOW_MCS_DEFAULT;
-            p->loss_ewma_q8 = 0;
+            p->loss_q8 = 0;
         }else if( p->tx_mcs == HALOW_MCS_DEFAULT ){
             p->tx_mcs = peer_init_mcs(p);
-            p->loss_ewma_q8 = 0;
+            p->loss_q8 = 0;
         }
         p->acks_since_step   = 0;
         p->next_step_allowed = 0;
     }
     ack_unlock();
     halow_ack_config_save(&g_ack_cfg);
-    log_info("ack: apply retries=%u tmo=%ums ra=%u up=%u%% down=%u%% window=%lu fids=%u",
+    log_info("ack: apply retries=%u tmo=%ums ra=%u window=%u fids=%u",
              (unsigned)g_ack_cfg.max_retries, (unsigned)g_ack_cfg.timeout_ms,
              (unsigned)g_ack_cfg.rate_adapt,
-             (unsigned)g_ack_cfg.ra_loss_up, (unsigned)g_ack_cfg.ra_loss_down,
-             (unsigned long)g_slot_count, (unsigned)g_ack_cfg.ack_fids);
+             (unsigned)g_window, (unsigned)g_ack_cfg.ack_fids);
 }
 
 /* ================= RTT accounting ================= */
@@ -786,7 +732,7 @@ static void send_fid_ack( int8_t evm, const uint8_t dest_mac[6],
     uint8_t a[HALOW_ACK_ACK_LEN_MAX];
     a[0] = HALOW_ACK_MAGIC0;
     a[1] = HALOW_ACK_MAGIC1;
-    a[2] = (uint8_t)evm;
+    a[2] = (uint8_t)( evm != 0 ? evm : (int8_t)0x80 );   /* 0x00 breaks the peer's classifier */
     for( uint32_t i = 0; i < nfids; i++ ){
         a[3u + 2u*i]      = (uint8_t)(fids[i] & 0xFFu);
         a[3u + 2u*i + 1u] = (uint8_t)((fids[i] >> 8) & 0xFFu);
@@ -815,19 +761,16 @@ static void send_ack( int8_t evm, const uint8_t dest_mac[6],
     else      send_fid_ack(evm, dest_mac, fids, ack_mcs);
 }
 
-/* ================= bundle flush ================= */
+/* ================= bundle staging & flush ================= */
 
 static void agg_reset( ack_peer_t *p ){
+    if( p->agg_idx != 0u ){
+        g_bufs[p->agg_idx - 1u].state = ACK_BUF_FREE;
+        p->agg_idx = 0u;
+    }
     p->agg_len = 0u;
     p->agg_nsub = 0u;
     p->agg_first_jiff = 0u;
-}
-
-static void slot_prepare( ack_slot_t *s, const uint8_t *src, uint16_t flen ){
-    s->frame_len = flen;
-    s->fid = (uint16_t)(fnv1a(src, flen) & 0xFFFFu);
-    if( s->fid == 0u ) s->fid = 0xFFFFu;
-    memcpy(s->frame, src, flen);
 }
 
 static void peer_note_tx( ack_peer_t *p, uint32_t wire_bytes, uint16_t flen ){
@@ -837,73 +780,75 @@ static void peer_note_tx( ack_peer_t *p, uint32_t wire_bytes, uint16_t flen ){
     statistics_radio_register_tx_package(flen);
 }
 
-static void slot_tx_release_locked( ack_slot_t *s, uint8_t pmcs ){
-    ack_unlock();
-    (void)halow_tx(s->frame, s->frame_len, s->dest_mac, pmcs);
-    g_last_data_tx_jiff = os_jiffies();
-    ack_lock();
-}
-
-static void flush_build_envelope( ack_peer_t *p, ack_slot_t *s, uint16_t blen ){
-    uint16_t seq = p->tx_seq++;
-    if( seq == 0xFFFFu ) seq = p->tx_seq++;
-    s->seq = seq;
-    s->frame[0] = HALOW_ENV_MAGIC0;
-    s->frame[1] = HALOW_ENV_MAGIC1;
-    s->frame[2] = (uint8_t)((HALOW_ENV_VER << 4) | HALOW_ENV_TYPE_BUNDLE);
-    s->frame[3] = (uint8_t)(seq & 0xFFu);
-    s->frame[4] = (uint8_t)(seq >> 8);
-    s->frame[5] = p->agg_nsub;
-    s->frame_len = (uint16_t)(HALOW_ENV_BUNDLE_HDR + (blen - 3u));
-    memcpy(&s->frame[HALOW_ENV_BUNDLE_HDR], &p->agg_buf[3], (uint32_t)(blen - 3u));
-    s->fid = (uint16_t)(fnv1a(s->frame, s->frame_len) & 0xFFFFu);
-    if( s->fid == 0u ) s->fid = 0xFFFFu;
-}
-
 static bool agg_flush_locked( ack_peer_t *p ){
-    if( p == NULL || p->agg_nsub == 0u ) return true;
+    if( p == NULL || p->agg_idx == 0u ) return true;
     if( (os_jiffies() - g_last_data_tx_jiff) < os_msecs_to_jiffies(g_ack_cfg.data_gap_ms) ){
         return false;
     }
     if( halow_get_tx_vacancy() < ACK_TX_VACANCY_LOW ) return false;
+    if( inflight_count() >= g_window ) return false;
 
-    ack_slot_t *s = slot_claim_locked();
-    if( s == NULL ) return false;
+    ack_buf_t *b = &g_bufs[p->agg_idx - 1u];
+    uint8_t  pmcs   = p->tx_mcs;
+    uint16_t staged = p->agg_len;
+    uint8_t  nsub   = p->agg_nsub;
+    p->agg_idx        = 0u;
+    p->agg_len        = 0u;
+    p->agg_nsub       = 0u;
+    p->agg_first_jiff = 0u;
 
-    uint16_t blen = p->agg_len;
-    uint8_t  pmcs = p->tx_mcs;
-    s->retries_used = 0u;
-    s->tx_jiff      = os_jiffies();
-    memcpy(s->dest_mac, p->mac, 6);
+    b->retries_used = 0u;
+    b->tx_jiff      = os_jiffies();
+    b->born_jiff    = os_jiffies();
+    b->seq          = 0xFFFFu;
 
     if( p->compat == HALOW_COMPAT_ENVELOPE && g_ack_cfg.env != 0u ){
-        flush_build_envelope(p, s, blen);
-        peer_note_tx(p, blen, s->frame_len);
-        agg_reset(p);
-        slot_tx_release_locked(s, pmcs);
+        uint16_t seq = p->tx_seq++;
+        if( seq == 0xFFFFu ) seq = p->tx_seq++;
+        b->seq    = seq;
+        b->ofs    = 0u;
+        b->len    = staged;
+        b->data[0] = HALOW_ENV_MAGIC0;
+        b->data[1] = HALOW_ENV_MAGIC1;
+        b->data[2] = (uint8_t)((HALOW_ENV_VER << 4) | HALOW_ENV_TYPE_BUNDLE);
+        b->data[3] = (uint8_t)(seq & 0xFFu);
+        b->data[4] = (uint8_t)(seq >> 8);
+        b->data[5] = nsub;
+        b->fid = (uint16_t)(fnv1a(b->data, b->len) & 0xFFFFu);
+        if( b->fid == 0u ) b->fid = 0xFFFFu;
+        peer_note_tx(p, staged, staged);
         g_ack_stats.env_tx_bundles++;
+        buf_tx_send(b, pmcs);
         return true;
     }
 
-    if( p->agg_nsub == 1u ){
-        uint16_t plen = (uint16_t)((uint16_t)p->agg_buf[3] | ((uint16_t)p->agg_buf[4] << 8));
-        agg_reset(p);
-        if( plen == 0u || (uint32_t)plen + 5u > blen ){
-            slot_free_locked(s);
+    if( nsub == 1u ){
+        uint16_t plen = (uint16_t)((uint16_t)b->data[ACK_AGG_RESERVE] |
+                                   ((uint16_t)b->data[ACK_AGG_RESERVE + 1u] << 8));
+        if( plen == 0u || (uint32_t)plen + 2u > staged - ACK_AGG_RESERVE ){
+            buf_free(b);
             g_ack_stats.dropped++;
             p->dropped++;
             return true;
         }
-        slot_prepare(s, &p->agg_buf[5], plen);
+        b->ofs = ACK_AGG_RESERVE + 2u;
+        b->len = plen;
+        b->fid = (uint16_t)(fnv1a(&b->data[b->ofs], plen) & 0xFFFFu);
+        if( b->fid == 0u ) b->fid = 0xFFFFu;
         peer_note_tx(p, plen, plen);
-        slot_tx_release_locked(s, pmcs);
+        buf_tx_send(b, pmcs);
         return true;
     }
 
-    slot_prepare(s, p->agg_buf, blen);
-    peer_note_tx(p, blen, blen);
-    agg_reset(p);
-    slot_tx_release_locked(s, pmcs);
+    b->ofs = ACK_AGG_RESERVE - 3u;
+    b->len = (uint16_t)(staged - (ACK_AGG_RESERVE - 3u));
+    b->data[b->ofs]     = HALOW_ACK_AGG_MAGIC0;
+    b->data[b->ofs + 1] = HALOW_ACK_AGG_MAGIC1;
+    b->data[b->ofs + 2] = nsub;
+    b->fid = (uint16_t)(fnv1a(&b->data[b->ofs], b->len) & 0xFFFFu);
+    if( b->fid == 0u ) b->fid = 0xFFFFu;
+    peer_note_tx(p, b->len, b->len);
+    buf_tx_send(b, pmcs);
     return true;
 }
 
@@ -912,14 +857,10 @@ static bool agg_flush_locked( ack_peer_t *p ){
 bool halow_ack_tx_ready( void ){
     if( g_ack_cfg.max_retries == 0u ) return true;
     if( halow_get_tx_vacancy() < ACK_TX_VACANCY_LOW ) return false;
-
-    uint32_t free_slots = 0;
     ack_lock();
-    for( uint32_t i = 0; i < g_slot_count; i++ ){
-        if( !g_slots[i].in_use ) free_slots++;
-    }
+    bool ok = ( inflight_count() + 2u <= g_window ) && ( free_buf_count() >= 2u );
     ack_unlock();
-    return free_slots >= 2u;
+    return ok;
 }
 
 static int32_t tx_plain_untracked( const uint8_t *payload, uint16_t len,
@@ -950,46 +891,44 @@ static int32_t tx_broadcast( const uint8_t *payload, uint16_t len, const uint8_t
 }
 
 static bool bundle_full_for( ack_peer_t *p, uint16_t len, uint16_t eff_bytes ){
-    return (uint32_t)p->agg_len + 2u + len > eff_bytes ||
-           p->agg_nsub + 1u > HALOW_ACK_AGG_MAX_SUB;
+    uint32_t env_len = (uint32_t)p->agg_len + 2u + len;
+    return env_len > eff_bytes ||
+           p->agg_nsub + 1u > HALOW_ACK_AGG_MAX_SUB ||
+           env_len > ACK_WIRE_MAX;
 }
 
 static int32_t tx_bundle_locked( ack_peer_t *p, const uint8_t *payload,
                                  uint16_t len, const uint8_t dest_mac[6],
                                  uint8_t pmcs, uint16_t eff_bytes ){
-    if( p->agg_nsub > 0u && bundle_full_for(p, len, eff_bytes) ){
+    if( p->agg_idx != 0u && bundle_full_for(p, len, eff_bytes) ){
         (void)agg_flush_locked(p);
     }
-    if( p->agg_nsub > 0u && bundle_full_for(p, len, eff_bytes) ){
+    if( p->agg_idx != 0u && bundle_full_for(p, len, eff_bytes) ){
         ack_unlock();
         return HALOW_ACK_TX_THROTTLE;
     }
 
-    if( p->agg_nsub == 0u ){
-        if( p->agg_buf == NULL ){
-            p->agg_buf = (uint8_t *)os_malloc(ACK_FRAME_MAX);
-            if( p->agg_buf == NULL ){
-                ack_unlock();
-                return tx_plain_untracked(payload, len, dest_mac, pmcs);
-            }
+    if( p->agg_idx == 0u ){
+        ack_buf_t *b = buf_alloc(ACK_BUF_STAGING, dest_mac);
+        if( b == NULL ){
+            ack_unlock();
+            return HALOW_ACK_TX_THROTTLE;
         }
-        p->agg_buf[0] = HALOW_ACK_AGG_MAGIC0;
-        p->agg_buf[1] = HALOW_ACK_AGG_MAGIC1;
-        p->agg_buf[2] = 0u;
-        p->agg_len = 3u;
+        p->agg_idx = (uint8_t)((uint32_t)(b - g_bufs) + 1u);
+        p->agg_len = ACK_AGG_RESERVE;
+        p->agg_nsub = 0u;
         p->agg_first_jiff = os_jiffies();
     }
+    ack_buf_t *sb = &g_bufs[p->agg_idx - 1u];
 
-    uint16_t off = p->agg_len;
-    p->agg_buf[off]     = (uint8_t)(len & 0xFFu);
-    p->agg_buf[off + 1] = (uint8_t)((len >> 8) & 0xFFu);
-    memcpy(&p->agg_buf[off + 2], payload, len);
-    p->agg_len  = (uint16_t)(off + 2u + len);
-    p->agg_nsub = (uint8_t)(p->agg_nsub + 1u);
-    p->agg_buf[2] = p->agg_nsub;
+    sb->data[p->agg_len]     = (uint8_t)(len & 0xFFu);
+    sb->data[p->agg_len + 1] = (uint8_t)((len >> 8) & 0xFFu);
+    memcpy(&sb->data[p->agg_len + 2u], payload, len);
+    p->agg_len  = (uint16_t)(p->agg_len + 2u + len);
+    p->agg_nsub++;
 
     if( p->agg_nsub >= HALOW_ACK_AGG_MAX_SUB ||
-        (uint32_t)p->agg_len + 6u > eff_bytes ){
+        (uint32_t)p->agg_len > eff_bytes ){
         agg_flush_locked(p);
     }
     ack_unlock();
@@ -1002,21 +941,20 @@ static int32_t tx_plain_locked( ack_peer_t *p, const uint8_t *payload,
         ack_unlock();
         return HALOW_ACK_TX_THROTTLE;
     }
-    ack_slot_t *s = slot_claim_locked();
-    if( s == NULL ){
+    ack_buf_t *b = buf_claim_inflight(dest_mac);
+    if( b == NULL ){
         ack_unlock();
         return HALOW_ACK_TX_THROTTLE;
     }
-    s->retries_used = 0;
-    s->tx_jiff      = os_jiffies();
-    memcpy(s->dest_mac, dest_mac, 6);
-    slot_prepare(s, payload, len);
+    b->tx_jiff = os_jiffies();
+    b->ofs = 0u;
+    b->len = len;
+    memcpy(b->data, payload, len);
+    b->fid = (uint16_t)(fnv1a(payload, len) & 0xFFFFu);
+    if( b->fid == 0u ) b->fid = 0xFFFFu;
     peer_note_tx(p, len, len);
-    ack_unlock();
-
-    int32_t pr = halow_tx(payload, len, dest_mac, pmcs);
-    if( pr == 0 ) g_last_data_tx_jiff = os_jiffies();
-    return pr;
+    buf_tx_send(b, pmcs);
+    return 0;
 }
 
 static int32_t ack_tx_uc( const uint8_t *payload, uint16_t len, const uint8_t dest_mac[6] );
@@ -1031,7 +969,7 @@ int32_t halow_ack_tx( const uint8_t *payload, uint16_t len, const uint8_t dest_m
     int32_t r = ack_tx_uc(payload, len, dest_mac);
     if( r == HALOW_ACK_TX_THROTTLE ){
         ack_lock();
-        if( g_pend_count < ACK_PEND_N && len <= ACK_FRAME_MAX ){
+        if( g_pend_count < ACK_PEND_N && len <= ACK_WIRE_MAX ){
             uint32_t idx = (g_pend_head + g_pend_count) % ACK_PEND_N;
             memcpy(g_pend_buf[idx], payload, len);
             g_pend_len[idx] = len;
@@ -1089,7 +1027,7 @@ static void pend_drain( void ){
 static int32_t ack_tx_uc( const uint8_t *payload, uint16_t len, const uint8_t dest_mac[6] ){
     bool noack = ( g_ack_cfg.max_retries == 0u ) ||
                  ( memcmp(dest_mac, mac_broadcast, 6) == 0 ) ||
-                 ( (uint32_t)len > ACK_FRAME_MAX );
+                 ( (uint32_t)len > ACK_WIRE_MAX );
     if( noack ) return tx_broadcast(payload, len, dest_mac);
 
     ack_lock();
@@ -1106,8 +1044,8 @@ static int32_t ack_tx_uc( const uint8_t *payload, uint16_t len, const uint8_t de
 
     uint16_t eff_bytes = eff_agg_bytes(pmcs);
     if( g_ack_cfg.agg != 0u &&
-        (uint32_t)len + 5u <= eff_bytes &&
-        (uint32_t)len + 5u <= ACK_FRAME_MAX ){
+        (uint32_t)len + 8u <= eff_bytes &&
+        (uint32_t)len + 8u <= ACK_WIRE_MAX ){
         return tx_bundle_locked(p, payload, len, dest_mac, pmcs, eff_bytes);
     }
     return tx_plain_locked(p, payload, len, dest_mac, pmcs);
@@ -1134,16 +1072,17 @@ static void rx_env_ack_locked( ack_peer_t *p, const uint8_t *payload ){
     for( uint32_t b = 0u; b < 8u; b++ ){
         bm |= (uint64_t)payload[6u + b] << (8u * b);
     }
-    for( uint32_t i = 0u; i < g_slot_count; i++ ){
-        ack_slot_t *s = &g_slots[i];
-        if( !s->in_use || memcmp(s->dest_mac, p->mac, 6) != 0 ) continue;
-        if( s->seq == 0xFFFFu ) continue;
-        uint16_t diff = (uint16_t)(s->seq - base);
+    for( uint32_t i = 0u; i < ACK_BUF_N; i++ ){
+        ack_buf_t *b = &g_bufs[i];
+        if( b->state != ACK_BUF_INFLIGHT ) continue;
+        if( memcmp(b->dest_mac, p->mac, 6) != 0 ) continue;
+        if( b->seq == 0xFFFFu ) continue;
+        uint16_t diff = (uint16_t)(b->seq - base);
         if( diff < HALOW_ACK_SEQ_WINDOW && ((bm >> diff) & 1u) ){
-            rtt_record( (uint32_t)(os_jiffies() - s->born_jiff),
-                        (uint32_t)(os_jiffies() - s->tx_jiff),
-                        s->retries_used );
-            slot_free_locked(s);
+            rtt_record( (uint32_t)(os_jiffies() - b->born_jiff),
+                        (uint32_t)(os_jiffies() - b->tx_jiff),
+                        b->retries_used );
+            buf_free(b);
             g_ack_stats.acked++;
             p->acked++;
         }
@@ -1202,13 +1141,13 @@ static void rx_ack( const uint8_t *payload, uint16_t len, const uint8_t src_mac[
         uint16_t ack_fid = (uint16_t)((uint16_t)payload[3u + 2u*k]
                                       | ((uint16_t)payload[3u + 2u*k + 1] << 8));
         if( ack_fid == 0u ) continue;
-        ack_slot_t *s = slot_match(src_mac, ack_fid);
-        if( s != NULL ){
+        ack_buf_t *b = buf_match(src_mac, ack_fid);
+        if( b != NULL ){
             if( p != NULL ) p->l0_strikes = 0u;
-            rtt_record( (uint32_t)(os_jiffies() - s->born_jiff),
-                        (uint32_t)(os_jiffies() - s->tx_jiff),
-                        s->retries_used );
-            slot_free_locked(s);
+            rtt_record( (uint32_t)(os_jiffies() - b->born_jiff),
+                        (uint32_t)(os_jiffies() - b->tx_jiff),
+                        b->retries_used );
+            buf_free(b);
             g_ack_stats.acked++;
             if( p != NULL ) p->acked++;
         }else{
@@ -1304,56 +1243,9 @@ bool halow_ack_on_rx( const uint8_t *payload, uint16_t len, const uint8_t src_ma
 
 /* ================= tick ================= */
 
-static void tick_free_retired_slots( void ){
-    if( g_retire_n == 0u ) return;
-    ack_lock();
-    for( uint32_t i = 0u; i < g_retire_n; ){
-        if( (os_jiffies() - g_retire_jiff[i]) >= os_msecs_to_jiffies(ACK_SLOTS_RETIRE_MS) ){
-            ack_slot_t *old = g_retire_q[i];
-            g_retire_q[i]    = g_retire_q[g_retire_n - 1u];
-            g_retire_jiff[i] = g_retire_jiff[g_retire_n - 1u];
-            g_retire_n--;
-            ack_unlock();
-            os_free(old);
-            ack_lock();
-        }else{
-            i++;
-        }
-    }
-    ack_unlock();
-}
-
-static void tick_sample_peer_loss( void ){
-    static uint64_t loss_samp_jiff;
-    if( (os_jiffies() - loss_samp_jiff) < os_msecs_to_jiffies(1000u) ) return;
-    loss_samp_jiff = os_jiffies();
-
-    for( uint32_t i = 0; i < ACK_MAX_PEERS; i++ ){
-        ack_peer_t *p = &g_peers[i];
-        if( !p->in_use ) continue;
-        uint32_t dack = p->acked - p->samp_acked;
-        uint32_t ddrp = p->dropped - p->samp_dropped;
-        p->samp_acked   = p->acked;
-        p->samp_dropped = p->dropped;
-        uint32_t n4 = p->loss_ev_n - (p->loss_ev_n >> 1);
-        p->loss_ev_n = n4;
-        p->pend_res  += dack + ddrp;
-        p->pend_fail += ddrp;
-        if( p->pend_res < 5u ) continue;
-        uint32_t inst = p->pend_fail * 100u / p->pend_res;
-        uint32_t Aw = (p->pend_res > 1000u) ? 1000u : p->pend_res;
-        uint32_t den = Aw + n4 + 10u;
-        p->loss_iir_pct = (uint16_t)(
-            ( (uint32_t)p->loss_iir_pct * (den - Aw) + inst * Aw ) / den );
-        p->loss_ev_n = n4 + Aw;
-        p->pend_res  = 0u;
-        p->pend_fail = 0u;
-    }
-}
-
-static void slot_drop_deadline( ack_slot_t *s ){
-    ack_peer_t *p = peer_find(s->dest_mac);
-    slot_free_locked(s);
+static void buf_drop_deadline( ack_buf_t *b ){
+    ack_peer_t *p = peer_find(b->dest_mac);
+    buf_free(b);
     g_ack_stats.dropped++;
     g_ack_stats.drop_deadline++;
     if( p != NULL ){
@@ -1365,9 +1257,9 @@ static void slot_drop_deadline( ack_slot_t *s ){
     }
 }
 
-static uint64_t slot_backoff_jiffies( ack_slot_t *s, uint64_t timeout_j ){
-    if( s->retries_used > 0u ){
-        uint32_t shift = s->retries_used;
+static uint64_t buf_backoff_jiffies( ack_buf_t *b, uint64_t timeout_j ){
+    if( b->retries_used > 0u ){
+        uint32_t shift = b->retries_used;
         if( shift > ACK_BACKOFF_SHIFT_MAX ) shift = ACK_BACKOFF_SHIFT_MAX;
         return timeout_j << shift;
     }
@@ -1388,14 +1280,14 @@ static uint64_t slot_backoff_jiffies( ack_slot_t *s, uint64_t timeout_j ){
     return (j > timeout_j) ? j : timeout_j;
 }
 
-static void slot_retransmit_or_drop( ack_slot_t *s, uint64_t now ){
-    ack_peer_t *p = peer_find(s->dest_mac);
+static void buf_retransmit_or_drop( ack_buf_t *b, uint64_t now ){
+    ack_peer_t *p = peer_find(b->dest_mac);
     if( p == NULL ){
-        slot_free_locked(s);
+        buf_free(b);
         return;
     }
-    if( s->retries_used >= g_ack_cfg.max_retries ){
-        slot_free_locked(s);
+    if( b->retries_used >= g_ack_cfg.max_retries ){
+        buf_free(b);
         g_ack_stats.dropped++;
         g_ack_stats.drop_exhaust++;
         p->dropped++;
@@ -1404,35 +1296,27 @@ static void slot_retransmit_or_drop( ack_slot_t *s, uint64_t now ){
         return;
     }
 
-    static uint8_t retx_buf[ACK_FRAME_MAX];   /* 4 KB must not sit on the tick stack */
-    s->retries_used++;
-    s->tx_jiff = now;
+    b->retries_used++;
+    b->tx_jiff = now;
     g_ack_stats.retransmitted++;
     p->retransmitted++;
-    uint16_t retx_len = s->frame_len;
-    uint8_t  retx_mac[6];
-    uint8_t  pmcs = p->tx_mcs;
-    memcpy(retx_buf, s->frame, retx_len);
-    memcpy(retx_mac, s->dest_mac, 6);
-    ack_unlock();
-    (void)halow_tx(retx_buf, retx_len, retx_mac, pmcs);
-    ack_lock();
+    buf_tx_send(b, p->tx_mcs);
 }
 
-static void tick_service_slots( uint64_t now ){
+static void tick_service_bufs( uint64_t now ){
     uint64_t timeout_j = os_msecs_to_jiffies(g_ack_cfg.timeout_ms);
     if( timeout_j == 0u ) timeout_j = 1u;
 
-    for( uint32_t i = 0; i < g_slot_count; i++ ){
-        ack_slot_t *s = &g_slots[i];
-        if( !s->in_use ) continue;
-        if( (now - s->born_jiff) >= os_msecs_to_jiffies(slot_life_ms()) ){
-            slot_drop_deadline(s);
+    for( uint32_t i = 0; i < ACK_BUF_N; i++ ){
+        ack_buf_t *b = &g_bufs[i];
+        if( b->state != ACK_BUF_INFLIGHT ) continue;
+        if( (now - b->born_jiff) >= os_msecs_to_jiffies(slot_life_ms()) ){
+            buf_drop_deadline(b);
             continue;
         }
-        if( (now - s->tx_jiff) < slot_backoff_jiffies(s, timeout_j) ) continue;
+        if( (now - b->tx_jiff) < buf_backoff_jiffies(b, timeout_j) ) continue;
         if( halow_get_tx_vacancy() < ACK_TX_VACANCY_LOW ) continue;
-        slot_retransmit_or_drop(s, now);
+        buf_retransmit_or_drop(b, now);
     }
 }
 
@@ -1443,14 +1327,13 @@ static void tick_flush_held_bundles( uint64_t now ){
     if( hold_j == 0u ) hold_j = 1u;
     for( uint32_t i = 0; i < ACK_MAX_PEERS; i++ ){
         ack_peer_t *p = &g_peers[i];
-        if( !p->in_use || p->agg_nsub == 0u ) continue;
+        if( !p->in_use || p->agg_idx == 0u ) continue;
         if( (now - p->agg_first_jiff) < hold_j ) continue;
         if( agg_flush_locked(p) ) continue;
         if( (now - p->agg_first_jiff) >= os_msecs_to_jiffies(ACK_AGG_MAX_HOLD_MS) ){
             g_ack_stats.dropped += p->agg_nsub;
             p->dropped         += p->agg_nsub;
-            p->agg_nsub = 0u;
-            p->agg_len  = 0u;
+            agg_reset(p);
         }
     }
 }
@@ -1477,19 +1360,14 @@ static void tick_flush_deferred_acks( uint64_t now ){
 
 void halow_ack_tick( void ){
     halow_tx_vacancy_watchdog();
-    tick_free_retired_slots();
     pend_drain();
-
-    ack_lock();
-    tick_sample_peer_loss();
-    ack_unlock();
 
     if( g_ack_cfg.max_retries == 0u ) return;
     uint64_t now = os_jiffies();
 
     dflt_mcs_refresh();
     ack_lock();
-    tick_service_slots(now);
+    tick_service_bufs(now);
     tick_flush_held_bundles(now);
     tick_flush_deferred_acks(now);
     for( uint32_t i = 0; i < ACK_MAX_PEERS; i++ ){
@@ -1514,19 +1392,15 @@ static void ack_tick_task_fn( void *arg ){
 /* ================= init & stats ================= */
 
 bool halow_ack_radio_quiet( void ){
-    if( g_slots != NULL ){
-        for( uint32_t i = 0u; i < g_slot_count; i++ ){
-            if( g_slots[i].in_use ) return false;
-        }
+    for( uint32_t i = 0u; i < ACK_BUF_N; i++ ){
+        if( g_bufs[i].state != ACK_BUF_FREE ) return false;
     }
     return (os_jiffies() - g_last_data_tx_jiff) >= os_msecs_to_jiffies(RADIO_QUIET_MS);
 }
 
 bool halow_ack_link_busy( void ){
-    if( g_slots != NULL ){
-        for( uint32_t i = 0u; i < g_slot_count; i++ ){
-            if( g_slots[i].in_use ) return true;
-        }
+    for( uint32_t i = 0u; i < ACK_BUF_N; i++ ){
+        if( g_bufs[i].state != ACK_BUF_FREE ) return true;
     }
     return (os_jiffies() - g_last_data_tx_jiff) < os_msecs_to_jiffies(RADIO_BUSY_MS);
 }
@@ -1534,26 +1408,25 @@ bool halow_ack_link_busy( void ){
 void halow_ack_init( void ){
     dflt_mcs_refresh();
     halow_ack_config_load(&g_ack_cfg);
+    memset(g_bufs, 0, sizeof(g_bufs));
     memset(g_peers, 0, sizeof(g_peers));
     memset(&g_ack_stats, 0, sizeof(g_ack_stats));
-    g_slots = NULL;
-    g_slot_count = 0;
+    g_pend_count = 0;
+    g_pend_head = 0;
+    g_pend_draining = false;
+    g_window = g_ack_cfg.window;
 
     (void)os_mutex_init(&g_ack_mutex);
     os_mutex_unlock(&g_ack_mutex);
-
-    ack_lock();
-    (void)slots_resize_locked(g_ack_cfg.window);
-    ack_unlock();
 
     os_task_init((const uint8 *)"acktk", &g_ack_tick_task, ack_tick_task_fn, 0);
     os_task_set_stacksize(&g_ack_tick_task, 4048);
     os_task_set_priority(&g_ack_tick_task, OS_TASK_PRIORITY_REALTIME);
     os_task_run(&g_ack_tick_task);
 
-    log_info("ack: init retries=%u tmo=%ums window=%lu fids=%u",
+    log_info("ack: init retries=%u tmo=%ums window=%u fids=%u",
              (unsigned)g_ack_cfg.max_retries, (unsigned)g_ack_cfg.timeout_ms,
-             (unsigned long)g_slot_count, (unsigned)g_ack_cfg.ack_fids);
+             (unsigned)g_window, (unsigned)g_ack_cfg.ack_fids);
 }
 
 void halow_ack_stats_get( halow_ack_stats_t *out ){
@@ -1561,8 +1434,10 @@ void halow_ack_stats_get( halow_ack_stats_t *out ){
     ack_lock();
     *out = g_ack_stats;
     uint32_t n = 0, peers = 0;
-    for( uint32_t i = 0; i < g_slot_count; i++ )    if( g_slots[i].in_use ) n++;
-    for( uint32_t i = 0; i < ACK_MAX_PEERS; i++ )   if( g_peers[i].in_use ) peers++;
+    for( uint32_t i = 0; i < ACK_BUF_N; i++ )
+        if( g_bufs[i].state >= ACK_BUF_INFLIGHT ) n++;
+    for( uint32_t i = 0; i < ACK_MAX_PEERS; i++ )
+        if( g_peers[i].in_use ) peers++;
     out->outstanding = (uint8_t)n;
     out->peers       = (uint8_t)peers;
     ack_unlock();
@@ -1587,9 +1462,9 @@ bool halow_ack_peer_stats_by_mac( const uint8_t mac[6], halow_ack_peer_stats_t *
         out->tx_bytes       = p->tx_bytes;
         out->retransmitted  = p->retransmitted;
         out->last_tx_s      = p->last_tx_s;
-        out->loss_pct       = (uint8_t)p->loss_iir_pct;
+        out->loss_pct       = (uint8_t)((uint32_t)p->loss_q8 * 100u / 256u);
         out->acks_since_step = p->acks_since_step;
-        out->loss_q8        = p->loss_ewma_q8;
+        out->loss_q8        = p->loss_q8;
         out->compat         = p->compat;
         out->l0_falls       = p->l0_falls;
         int64_t rem = (int64_t)p->next_step_allowed - (int64_t)os_jiffies();
