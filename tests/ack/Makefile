@@ -92,3 +92,17 @@ $(QBUILD)/test_ack.elf: $(QBUILD)/startup.o $(QBUILD)/support.o $(QBUILD)/main.o
 $(QBUILD)/test_size.elf: $(QBUILD)/startup.o $(QBUILD)/support.o $(QBUILD)/size_test.o $(QBUILD)/harness.o
 	$(CROSS) -mcpu=ck803 -nostdlib -nostartfiles -T qemu/test.ld -Wl,--gc-sections \
 	    -o $@ $^ -lgcc
+
+$(QBUILD)/bench.o: bench.c harness.h stubs/basic_include.h
+	@mkdir -p $(QBUILD)
+	$(CROSS) $(QFLAGS) -c $< -o $@
+
+$(QBUILD)/bench.elf: $(QBUILD)/startup.o $(QBUILD)/support.o $(QBUILD)/bench.o $(QBUILD)/harness.o $(QBUILD)/halow_ack.o
+	$(CROSS) -mcpu=ck803 -nostdlib -nostartfiles -T qemu/test.ld -Wl,--gc-sections \
+	    -o $@ $^ -lgcc
+
+qemu-bench: clean $(QBUILD)/bench.elf
+	PATH="$(QEMU_DIR):$$PATH" timeout 600 $(QEMU_DIR)/cskysim.exe \
+	    -soc $(SOCCFG) -kernel $(QBUILD)/bench.elf -nographic
+
+.PHONY: qemu-bench
