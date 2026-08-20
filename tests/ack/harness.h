@@ -22,6 +22,7 @@ void test_vacancy_set(uint32_t v);
 void test_tx_reset(void);
 int  test_tx_count(void);
 const test_tx_cap_t *test_tx_at(int i);
+const test_tx_cap_t *test_tx_last(void);
 
 void configdb_reset(void);
 int  test_kv_get(const char *key, int16_t *val);
