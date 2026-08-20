@@ -35,9 +35,7 @@ static uint32_t nearby_modem_find_oldest_index( void ){
 }
 
 void nearby_modem_package_register( const nearby_modem_package_info_t *pkg ){
-    /* RX task mutates vs httpd readers: run the whole update under irq-off so
-     * a reader never catches a half-memset'd entry (torn JSON at worst, but
-     * modems_count/index math is also read-modify-write here). */
+    /* RX task mutates vs httpd readers: run the whole update under irq-off. */
     nearby_modem_t *modem;
     uint32_t index;
 

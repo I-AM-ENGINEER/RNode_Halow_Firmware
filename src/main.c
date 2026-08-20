@@ -76,11 +76,8 @@ extern struct hguart uart1;
 // TCP -> RF
 static int32_t rns_tcp_rx_handler( uint8_t *data, uint16_t len ){
     log_trace("rns package received len=%d", len);
-    /* TX radio stats are registered at the RADIO layer (halow_pkg_handler.c,
-     * first-send sites), NOT here: counting TCP-ingress packets made the main
-     * page show pre-aggregation RNS packets (1800) against radio-level RX
-     * frames (454) on the same link -- "TX terrible vs RX". Radio-level TX
-     * (wire frames, retransmits excluded) mirrors RX accounting 1:1. */
+    /* TX radio stats are registered at the RADIO layer (halow_pkg_handler.c),
+     * not here: counting TCP-ingress packets skews TX vs RX accounting. */
     return halow_pkg_handler_tcp_to_rf(data, len);
 }
 
@@ -122,12 +119,9 @@ static void halow_rx_handler(struct hgic_rx_info *info,
     };
     memcpy(modem_pkg_info.mac, hdr->addr2, 6);
 
-    /* ACK frames (legacy fid-list AND envelope Block-ACK) are internal
-     * reliability plumbing, not user data: they must NOT show up in link
-     * statistics (rx packets/bytes/throughput), blink the data LED, appear in
-     * nearby-modem scans, or feed the nearby RX MCS -- ACKs run at their own
-     * robust adaptive rate (often far below the data RA rate), which made a
-     * healthy MCS7 link display as "RX MCS2". Count/deliver only real data. */
+    /* ACK frames are reliability plumbing, not user data: they run at their
+     * own robust MCS and must not feed link stats, the LED, nearby scans or
+     * the displayed RX rate. */
     if (!halow_ack_is_internal_frame(data, (uint16_t)len)) {
         nearby_modem_package_register(&modem_pkg_info);
         indication_led_rx();
@@ -138,12 +132,9 @@ static void halow_rx_handler(struct hgic_rx_info *info,
     }
 
     uint8_t my_mac[6];
-    /* Compare addr3 (the destination, see halow_send_frame) against the node's
-     * TX identity (g_wmac via mac_generator_get, NOT get_mac() (g_efuse): the
-     * peer learns our MAC from our TX addr2 == mac_generator_get, and addresses
-     * us via addr3 with that same value. g_efuse != g_wmac, so the old
-     * get_mac() comparison rejected every unicast-to-us frame (only never
-     * noticed because addr3 was always broadcast). */
+    /* The peer learns our TX identity from addr2 (g_wmac via
+     * mac_generator_get) and addresses us via addr3 with that same value --
+     * NOT the g_efuse MAC get_mac() returns. */
     mac_generator_get(my_mac);
     if ((memcmp(hdr->addr3, mac_broadcast, 6) != 0) &&
         (memcmp(hdr->addr3, my_mac, 6) != 0)) {
@@ -167,11 +158,8 @@ int32_t tcp_to_halow_send(const uint8_t* data, uint32_t len, uint16_t *consumed)
         return -200;
     }
 
-    /* Propagate HALOW_ACK_TX_THROTTLE so tcp_server's recv loop can skip
-     * netconn_recv (TCP backpressure) while still draining the RF->TCP ring.
-     * *consumed tells it exactly how many bytes were taken: the unconsumed
-     * tail of the netbuf must be re-fed after the TX path drains (contract:
-     * bytes accepted from TCP always reach the air). */
+    /* Propagate THROTTLE for TCP backpressure; *consumed tells the caller
+     * exactly how many bytes were taken -- the tail must be re-fed later. */
     return rns_stream_decoder_process(&tcp_rns_decoder, data, (uint16_t)len, NULL, consumed);
 }
 
@@ -281,9 +269,8 @@ static uint32_t firmware_build_hash( void ){
 
 static void boot_counter_update(void){
     int32_t pwr_on_cnt = 0;
-    /* Feed the boot watchdog around the flash write: on a GC-heavy flashdb
-     * sector this can outlast the 3 s timeout and abort the write mid-erase,
-     * dirtying the sector further (reboot-spiral hazard, see halow_ack_config_load). */
+    /* Feed the boot watchdog around the flash write: a GC-heavy sector can
+     * outlast the 3 s timeout and abort the write mid-erase. */
     mcu_watchdog_feed();
     configdb_get_i32("pwr_on_cnt", &pwr_on_cnt);
     pwr_on_cnt++;
@@ -312,7 +299,7 @@ bool boot_recovery_check( void ){
     bool led = false;
 
     if (!button_get()) {
-        return false;   /* was a bare `false;` statement -- a no-op */
+        return false;
     }
 
     while (button_get()) {
@@ -347,11 +334,8 @@ __init int main(void) {
     extern uint32 __sinit, __einit;
     os_sleep_ms(5000);
     log_debug("mcu_watchdog_timeout");
-    /* 10 s, not 3: boot-time flashdb/littlefs mounts can GC a sector dirtied
-     * by an earlier watchdog-aborted write for several seconds. A 3 s budget
-     * aborted the write mid-erase, dirtying it further -> reboot spiral that
-     * never completes (observed after an OTA with a torn config sector). 10 s
-     * lets one boot always finish the GC; runtime hang protection is intact. */
+    /* 10 s, not 3: boot-time flashdb/littlefs mounts can GC a dirtied sector
+     * for several seconds; a mid-erase abort dirties it further and spirals. */
     mcu_watchdog_timeout(10);
     log_debug("sys_event_init");
     sys_event_init(32);

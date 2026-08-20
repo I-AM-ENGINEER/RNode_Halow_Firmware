@@ -576,9 +576,8 @@ int32_t web_api_tcp_server_cfg_post( const cJSON *in, cJSON *out ){
         cfg.port = (uint16_t)port;
     }
 
-    /* Only touch the whitelist when the key was actually present: the old
-     * else-branch wiped a configured whitelist to accept-all (0.0.0.0/0) on
-     * any partial POST that omitted it. */
+    /* Only touch the whitelist when the key was present: a partial POST must
+     * not wipe it to accept-all. */
     if (json_get_string(in, "whitelist", whitelist, sizeof(whitelist)) &&
         whitelist[0] != '\0' &&
         utils_cidr_to_ip(whitelist, &ip) && utils_cidr_to_mask(whitelist, &mask)) {
@@ -810,10 +809,8 @@ int32_t web_api_dev_stat_get( const cJSON *in, cJSON *out ){
     snprintf(s, sizeof(s), "%d C", (int)tsensor_meas(0));
     (void)cJSON_AddStringToObject(out, "chip_temp", s);
 
-    /* Supply/core rail monitor: brownout or a failing PSU shows up here long
-     * before it becomes "the link is flaky". Values come from the throttled
-     * ADC wrappers (real conversion at most once per MEAS_REFRESH_MS, cached
-     * otherwise) so polling the dashboard never deafens the radio. */
+    /* Values come from the throttled ADC wrappers, so polling the dashboard
+     * never deafens the radio. */
     snprintf(s, sizeof(s), "%.2f V", (double)vcc_meas());
     (void)cJSON_AddStringToObject(out, "vcc", s);
     snprintf(s, sizeof(s), "%.2f V", (double)vdd13b_meas());
@@ -895,10 +892,6 @@ int32_t web_api_radio_stat_post( const cJSON *in, cJSON *out ){
     return WEB_API_RC_OK;
 }
 
-/* Diagnostic: TX-path health. Live tx_end/sub_state counters plus the LMAC TX
- * machine snapshot captured the moment a hard wedge was detected (before the
- * purge). The primary tool to root-cause lost TX-completes under saturation
- * without a debugger attached. */
 int32_t web_api_tx_dbg_get( const cJSON *in, cJSON *out ){
     halow_tx_dbg_t d;
     cJSON *subs;
@@ -1061,13 +1054,10 @@ int32_t web_api_rf_dbg_post( const cJSON *in, cJSON *out ){
     return web_api_rf_dbg_get(NULL, out);
 }
 
-/* Diagnostic: per-task runtime breakdown over the interval since the last
- * os_task_runtime read (shared with get_stat via cpu_loading_tick). Used to find
- * which task(s) burn idle CPU so we can target them instead of guessing. */
+/* Per-task runtime breakdown since the last os_task_runtime read. */
 int32_t web_api_cpu_dump_get( const cJSON *in, cJSON *out ){
     extern __bobj uint64 cpu_loading_tick;
-    /* static: 16*28 = 448 B -- a third of the old httpd stack; only this
-     * handler (httpd task) touches it, and pollers hit this endpoint often */
+    /* 448 B: a third of the httpd stack; only this handler touches it */
     static struct os_task_info tsk[16];
     int32_t i, count;
     uint64 jiff = os_jiffies();
@@ -1215,8 +1205,7 @@ int32_t web_api_telemetry_cfg_post( const cJSON *in, cJSON *out ){
 
     telemetry_config_save(&cfg);
 
-    /* Toggling telemetry on must take effect immediately, not after the next
-     * reboot: schedule the worker like telemetry_init does on boot. */
+    /* take effect immediately, not after the next reboot */
     if (cfg.enabled) {
         extern void telemetry_kick( void );
         telemetry_kick();
@@ -1393,15 +1382,9 @@ int32_t web_api_nearby_modems_get( const cJSON *in, cJSON *out ){
     uint8_t default_tx_mcs = hcfg.mcs;
     int32_t now_s = (int32_t)time(NULL);
 
-    /* Each row is a self-describing JSON object describing ONE peer MAC, built
-     * by projecting two complementary MAC-keyed stores into a single view:
-     *   - nearby_modem_db : RX discovery (rssi/snr/rx-mcs + RX counters)
-     *   - halow_ack_peers : TX session   (tx-mcs/evm + TX counters + RA state)
-     * has_rx/has_tx flag which halves are valid so the UI can render "--" for
-     * the missing direction (a heard-only neighbour has no TX stats and vice
-     * versa). Field names use rx_/tx_ prefixes to mirror rns_link_db_link_t
-     * (rx_bytes/tx_bytes/lastrx...); the schema is documented here in one place
-     * so adding a field never requires syncing positional indices. */
+    /* Each row is ONE peer MAC, projecting two MAC-keyed stores into one view:
+     * nearby_modem_db (RX discovery) + halow_ack_peers (TX session, RA state).
+     * has_rx/has_tx flag which halves are valid. */
     arr = cJSON_AddArrayToObject(out, "d");
     if (arr == NULL) {
         return WEB_API_RC_INTERNAL;
@@ -1437,15 +1420,12 @@ int32_t web_api_nearby_modems_get( const cJSON *in, cJSON *out ){
         /* ---- TX half (overlay; absent for a heard-only neighbour) ---- */
         halow_ack_peer_stats_t ps;
         bool has_peer = halow_ack_peer_stats_by_mac(m->mac, &ps);
-        /* has_tx = we have actually transmitted data to this peer (not merely
-         * created an ack_peer slot by hearing them, which the RX path also
-         * does for ACK coalescing). Without this distinction every heard
-         * neighbour would show a misleading "TX Loss 0% / 0 bytes" row. */
+        /* has_tx = actually transmitted, not merely heard (the RX path also
+         * creates ack_peer slots for ACK coalescing). */
         bool has_tx = has_peer && (ps.tx_frames > 0u || ps.last_tx_s > 0);
         cJSON_AddBoolToObject(row, "has_tx", has_tx ? 1 : 0);
-        /* Always emit the TX keys so the UI has stable shape; zeros/-- when the
-         * peer has no TX session. tx_mcs resolves the RA "default" sentinel to
-         * the configured default so the UI can render a concrete number. */
+        /* Always emit the TX keys so the UI shape is stable; tx_mcs resolves
+         * the RA "default" sentinel to the configured default. */
         uint8_t tx_mcs = has_tx ? ((ps.tx_mcs == HALOW_MCS_DEFAULT) ? default_tx_mcs : ps.tx_mcs)
                                 : default_tx_mcs;
         cJSON_AddNumberToObject(row, "tx_mcs",          (double)tx_mcs);
@@ -1460,11 +1440,8 @@ int32_t web_api_nearby_modems_get( const cJSON *in, cJSON *out ){
         cJSON_AddNumberToObject(row, "tx_last_age",
                                 (double)((has_tx && ps.last_tx_s > 0)
                                          ? (now_s - ps.last_tx_s) : -1));
-        /* TX loss AFTER retries (windowed IIR): share of resolved frames
-         * (ACKed or retry-exhausted) that ultimately failed. The per-attempt
-         * RF loss stays derivable via tx_retransmitted/(tx_frames+
-         * tx_retransmitted); the RA EWMA (loss_q8) is the MCS-tuning
-         * counter, separate by design. */
+        /* TX loss AFTER retries (windowed IIR); per-attempt loss stays
+         * derivable from tx_retransmitted/(tx_frames+tx_retransmitted). */
         cJSON_AddNumberToObject(row, "tx_loss_pct", (double)(has_tx ? ps.loss_pct : 0));
 
         cJSON_AddItemToArray(arr, row);
@@ -1492,8 +1469,7 @@ int32_t web_api_rns_mtu_cfg_get( const cJSON *in, cJSON *out ){
 int32_t web_api_rns_mtu_cfg_post( const cJSON *in, cJSON *out ){
     int v;
     if (json_get_int(in, "mtu", &v)) {
-        /* Server-side clamp mirroring the UI: a scripted mtu=0 advertised 0 to
-         * the peer and a negative value wrapped to ~65535 (limit disabled). */
+        /* clamp mirroring the UI */
         if (v >= 500 && v <= 2048) {
             rns_mtu_limit_set((int16_t)v);
         }else{
@@ -1571,21 +1547,13 @@ int32_t web_api_ack_cfg_post( const cJSON *in, cJSON *out ){
     int v;
     if (in == NULL) return WEB_API_RC_BAD_REQUEST;
     halow_ack_config_get_live(&cfg);
-    /* Deliberately narrow surface: only user-meaningful knobs are settable
-     * (retries, aggregation on/off, RA). Timing/window/ACK-shape parameters are
-     * firmware-tuned internals -- accepting them here once let a debug POST
-     * (ra=0/tmo=200/window=4/aggbytes=2000) silently live in configdb and pin
-     * MCS to 1 for days. agg_bytes is always max; the per-MCS runtime cap in
-     * halow_ack_eff_agg_bytes does the real sizing. */
+    /* Only user-meaningful knobs are settable; timing/window internals are
+     * firmware-tuned (agg sizing is done by halow_ack_eff_agg_bytes). */
     if (json_get_int(in, "retries",  &v)) { if (v >= 0 && v <= 8) cfg.max_retries = (uint8_t)v; }
     if (json_get_int(in, "rate_adapt", &v)) { cfg.rate_adapt = (uint8_t)(v ? 1u : 0u); }
     if (json_get_int(in, "ra_loss_up",   &v)) { if (v >= 0 && v <= 100) cfg.ra_loss_up   = (uint8_t)v; }
     if (json_get_int(in, "ra_loss_down", &v)) { if (v >= 0 && v <= 100) cfg.ra_loss_down = (uint8_t)v; }
     if (json_get_int(in, "agg",    &v)) { cfg.agg = (uint8_t)(v ? 1u : 0u); }
-    /* window: accepted again (clamped hard) -- the measured ACK RTT under
-     * bidir load is ~220 ms, so window 8 caps acceptance at ~36 fps and the
-     * THROTTLE losses scale with offered load. 10-12 slots break the
-     * self-sustaining backlog; heap allows ~16 max (7.7 KB/slot). */
     if (json_get_int(in, "window", &v)) { if (v >= 4 && v <= 16) cfg.window = (uint8_t)v; }
     if (json_get_int(in, "fids",   &v)) { if (v >= 1 && v <= 32) cfg.ack_fids  = (uint8_t)v; }
     if (json_get_int(in, "bc_repeat", &v)) { if (v >= 1 && v <= HALOW_ACK_BC_REPEAT_MAX) cfg.bc_repeat = (uint8_t)v; }
@@ -1668,7 +1636,7 @@ int32_t web_api_reticulum_links_get( const cJSON *in, cJSON *out ){
       cJSON_AddNumberToObject(out, "tx_parse_fail", (double)g_dbg_rns_tx_parse_fail); }
 
     /* RX-chain debug: gain field ([7:4], 5=high/weak, 4=low/strong), AGC
-     * thresholds, AGC flags (bit3 = dynamic adjust enable), FSM state. */
+     * thresholds/flags (bit3 = dynamic adjust), FSM state. */
     {
         uint32_t rg = 0, fsm = 0;
         int8_t ah = 0, al = 0;
@@ -1682,19 +1650,14 @@ int32_t web_api_reticulum_links_get( const cJSON *in, cJSON *out ){
         cJSON_AddNumberToObject(out, "fsm_stat", (double)fsm);
     }
 
-    /* Dump every known Reticulum link with the learned neighbour MAC, state and
-     * per-direction counters — the primary way to verify (over HTTP, without
-     * UART) that links are registered and peer MACs are being learned. */
+    /* Dump every known Reticulum link with the learned neighbour MAC. */
     count = rns_link_db_link_count_get();
     for (i = 0; i < count; i++) {
         if (!rns_link_db_link_snapshot_by_index(i, &link)) {
             continue;
         }
 
-        /* Skip links that never learned a neighbour MAC. These are
-         * unanswered outbound LINKREQUESTs (state REQUEST_SENT, never seen
-         * on RX): the TX path already falls back to broadcast for them, so
-         * they carry no useful peer info and only clutter the table. */
+        /* Skip unanswered outbound LINKREQUESTs: no learned MAC, no peer info. */
         bool mac_unknown = true;
         for (j = 0; j < 6; j++) {
             if (link.remote_mac[j] != RNS_LINK_MAC_UNKNOWN_BYTE) {

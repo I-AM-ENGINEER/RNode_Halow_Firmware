@@ -53,11 +53,9 @@ void trap_c(uint32_t *regs)
     trap_err("epsr: %08x\r\n", regs[17]);
     trap_err("epc : %08x\r\n", regs[18]);
     csi_kernel_task_dump(g_active_task[0], (void *)regs[14]);
-    /* Reboot instead of dead-looping: other tasks (acktk) keep feeding the
-     * hardware watchdog, so a while(1) here leaves a faulted node alive in an
-     * exception loop forever (observed: exception-loop until power cycle).
-     * The dump above has already gone out over UART; give the UART fifo a
-     * moment to drain, then reset. */
+    /* Reboot instead of dead-looping: other tasks keep feeding the hardware
+     * watchdog, so a while(1) here leaves a faulted node stuck forever.
+     * Give the UART fifo a moment to drain, then reset. */
     for (volatile uint32_t w = 0; w < 2000000u; w++){}
     mcu_reset();
     while (1){}

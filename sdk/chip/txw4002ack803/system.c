@@ -180,9 +180,8 @@ __init void malloc_init(void)
 #ifdef MEM_TRACE
     flags |= SYSHEAP_FLAGS_MEM_LEAK_TRACE | SYSHEAP_FLAGS_MEM_OVERFLOW_CHECK;
 #endif
-    /* Guard against pathological firmware growth: if .bss is so large that the
-     * auto-computed heap underflows (wraps huge) or is implausibly tiny, split
-     * whatever SRAM remains 50/50 between heap and skb pool. */
+    /* Guard against pathological firmware growth: an underflowed (or
+     * implausibly tiny) heap splits the remaining SRAM 50/50. */
     if (heap_size > (512u * 1024u) || heap_size < (32u * 1024u)) {
         heap_size = SRAM_POOL_SIZE / 2u;
     }

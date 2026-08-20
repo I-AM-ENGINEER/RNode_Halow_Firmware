@@ -28,13 +28,9 @@ extern void lmac_partial_aid_update(void *txd);
 extern void halow_tx_skb_complete(struct sk_buff *skb);   /* halow.c: budget+free */
 lmac_tx_ctx_t ah_lmac_tx;
 
-/* Hard-wedge recovery request (see halow_tx_vacancy_watchdog). Deliberately a
- * standalone global, NOT a struct field: lmac_tx_ctx_t is a frozen ABI -- the
- * precompiled LMAC binaries address its packed fields at hard-coded offsets,
- * so even appending a field shifts/changes it and breaks the binary side
- * (verified the hard way: an inserted byte moved every queue and crashed boot
- * with a misaligned access inside skb_list_init). Set from the watchdog
- * (workqueue), consumed by lmac_tx_task below. */
+/* Hard-wedge recovery request (see halow_tx_vacancy_watchdog). Standalone
+ * global, NOT a struct field: lmac_tx_ctx_t is a frozen ABI -- the precompiled
+ * LMAC binaries address its packed fields at hard-coded offsets. */
 volatile uint8_t lmac_tx_purge_request = 0u;
 
 
@@ -54,25 +50,17 @@ typedef struct skb_list skb_list;
 #define LMAC_TX_AC_COUNT 4
 
 /* Hard-wedge purge (see halow_tx_vacancy_watchdog tier 2). Runs in tx_task
- * context: the AC queues' only producers are tx_task itself (reload) and their
- * only consumer is the LMAC IRQ, so brief irq-off windows around the drains
- * make the purge race-free without touching any other task. tx_pending/
- * tx_status/tx_frames_pending are NOT purged -- their consumer tasks are alive
- * and drain them normally; only the IRQ-owned AC queues can hold
- * permanently-stuck skbs. Purged skbs complete through the normal accounting
- * path so the TX-vacancy budget and the heap stay consistent.
- * No fixed cap on the number of completed skbs: a full 29200-byte budget can
- * hold ~110 small frames -- the old dead[64] array silently leaked everything
- * past 64, so the purge could never clear the wedge and ate heap each cycle. */
+ * context: the AC queues' only producers are tx_task itself and their only
+ * consumer is the LMAC IRQ, so brief irq-off windows make the purge
+ * race-free. tx_pending/tx_status are NOT purged -- their consumer tasks
+ * are alive. No fixed cap on completed skbs: a full budget holds ~110
+ * small frames. */
 static void lmac_tx_purge_ac_queues(void){
     uint32_t total = 0;
 
-    /* If the HW TX FSM is armed it owns the selected aggregate (DMA may be
-     * reading skb->data right now): abort it exactly like lmac_irq_tx_tmo
-     * before completing those skbs, or the free races the DMA engine.
-     * IRQ-guarded: a tx_end landing between the check and the abort would
-     * restart RX/TDMA itself, and the second abort would then kill the fresh
-     * FSM -- the same abort-inside-live-TXOP damage reverted in b51. */
+    /* An armed FSM owns the selected aggregate (DMA may be reading skb->data
+     * right now): abort it like lmac_irq_tx_tmo before completing those skbs.
+     * IRQ-guarded so a tx_end landing mid-abort cannot restart the FSM. */
     if( ah_lmac.bo_frame_type != 0u ){
         uint32_t pflag = disable_irq();
         if( ah_lmac.bo_frame_type != 0u ){
@@ -84,9 +72,8 @@ static void lmac_tx_purge_ac_queues(void){
         enable_irq(pflag);
     }
 
-    /* Drain the AC queues in small batches: the irq-off window stays short and
-     * completion (sema_up + kfree_skb, which may reschedule) runs with IRQs
-     * back on. */
+    /* Small batches: the irq-off window stays short and completion
+     * (sema_up + kfree_skb) runs with IRQs back on. */
     for( uint32_t ac = 0; ac < LMAC_TX_AC_COUNT; ac++ ){
         for(;;){
             struct sk_buff *batch[8];
@@ -106,20 +93,13 @@ static void lmac_tx_purge_ac_queues(void){
         }
     }
 
-    /* Complete the per-AC in-flight aggregates the same way. Their skbs were
-     * already dequeued from the AC queues by gen_tx_agglist -- the old code
-     * just memset the list and leaked them together with their budget bytes.
-     * Ordering rules this loop obeys (learned the hard way):
+    /* Complete the per-AC in-flight aggregates the same way. Ordering rules:
      *  - queued_count must be reset in the SAME irq-off window that NULLs the
      *    last skb_list entry: lmac_reorder_tx_agglist (ac_pd IRQ) reads
-     *    queued_count then indexes skb_list[] -- a window with a stale count
-     *    and NULLed entries is a NULL deref in IRQ context (hard fault; the
-     *    "purge then permanent wedge" signature).
-     *  - re-abort the FSM inside each window: producers (fast_tx from tcps /
-     *    acktk / RX-ACK) re-arm AC_PD while the purge runs, so ac_pd can
-     *    re-enter an aggregate between batches and arm a TXOP whose skbs we
-     *    are about to free. Aborting under the window (idempotent re-check,
-     *    same as tier-0) keeps the free from ever racing live DMA. */
+     *    queued_count then indexes skb_list[].
+     *  - re-abort the FSM inside each window: producers re-arm AC_PD while
+     *    the purge runs, so ac_pd can re-enter an aggregate and arm a TXOP
+     *    whose skbs we are about to free. */
     for( uint32_t ac = 0; ac < LMAC_TX_AC_COUNT; ac++ ){
         struct lmac_tx_ctx_buff *aggr = &ah_lmac_tx.pTx_ac_aggr_data[ac];
         for(;;){
@@ -294,11 +274,8 @@ int32 lmac_fast_tx(struct sk_buff *skb, uint8_t mcs)
     skb->acked    = 0;
 
     {
-        /* 802.1d tid -> AC: ACK frames (tid 7, set by halow_tx_p) go to the
-         * priority AC3 queue so they are not buried behind a saturated data
-         * AC0 -- retransmit timers outran the ACKs and both directions
-         * collapsed under load (bench build 44: thousands of dup-ACKs, 75% RF
-         * loss on the starved side). */
+        /* 802.1d tid -> AC: ACK frames (tid 7) go to the priority AC3 queue
+         * so they are not buried behind a saturated data AC0. */
         uint8_t acq = ieee802_1d_to_ac_tbl[skb->priority & 7u];
         if (acq > 3u) acq = 0u;
         skb->priority = 0;
@@ -404,11 +381,9 @@ static void lmac_tx_task(void *_arg) {
         int sema_result;
 
         loop_iter++;
-        /* Every enqueue already os_sema_up()'s tx_sem (lmac_ah_tx / kick), so the
-         * timeout here is only a defensive reload poll. 1 tick (1ms) made the task
-         * wake 1000x/s and call lmac_tx_data_reload() on every idle tick — a large
-         * share of the ~22% idle CPU. Stretching to 50 ticks cuts that by ~50x
-         * with zero added TX latency: real frames still wake the task instantly. */
+        /* Every enqueue already up()'s tx_sem; the timeout is only a defensive
+         * reload poll. 50 ticks cut the idle wakeups ~50x with zero added
+         * TX latency. */
         sema_result = os_sema_down(&ah_lmac_tx.tx_sem, 50);
 //
 //        log_trace("tx_task: wake iter=%u sema=%d pending=%u",
@@ -420,9 +395,7 @@ static void lmac_tx_task(void *_arg) {
             continue;
         }
 
-        /* Hard-wedge recovery: the vacancy watchdog detected pending TX with
-         * zero TX-complete progress. Purge the stuck AC queues now (we are
-         * their only producer; IRQs are off for the drain). */
+        /* Hard-wedge recovery: purge the stuck AC queues. */
         if (lmac_tx_purge_request) {
             lmac_tx_purge_request = 0u;
             lmac_tx_purge_ac_queues();

@@ -26,14 +26,11 @@ bool halow_init(uint32_t rxbuf, uint32_t rxbuf_size,
 
 void halow_set_rx_cb(halow_rx_cb cb);
 int32_t halow_tx(const uint8_t *data, uint32_t len, const uint8_t destination_mac[6], uint8_t mcs);
-/* Same, with an 802.1d tid (0..7) so the frame lands in a priority AC queue
- * (tid 6/7 -> AC3): ACK frames must not queue behind a saturated data AC or
- * retransmit timers outrun the ACKs (dup-ACK storms, bench build 44). */
+/* With an 802.1d tid (0..7): tid 6/7 -> AC3, so ACK frames never queue
+ * behind a saturated data AC. */
 int32_t halow_tx_p(const uint8_t *data, uint32_t len, const uint8_t destination_mac[6], uint8_t mcs, uint8_t tid);
-/* Refresh the TX-path MCS/BW config cache from configdb. Runs the KV reads
- * (flash mutexes -- can stall seconds behind a config-save GC): call ONLY
- * from a low-stakes context such as the statistics task, never from the TX
- * path or with the ack mutex held. */
+/* Refresh the TX-path MCS/BW config cache from configdb. Flash mutexes
+ * inside: call only from a low-stakes context (statistics task). */
 void halow_cfg_mcs_bw_refresh(void);
 uint8_t halow_cfg_mcs_get_cached(void);   /* statistics-warmed config cache */
 
@@ -45,16 +42,13 @@ void halow_gain_pilot_dbg(int32_t *debris_x, int32_t *prod_x, int32_t *base_x);
 
 uint32_t halow_get_tx_vacancy(void);   /* free bytes in the bounded LMAC TX buffer (non-blocking) */
 void halow_tx_vacancy_watchdog(void);  /* self-heal the TX budget after lost TX-complete events */
-/* Run one skb through the TX-complete accounting: give its bytes back to the
- * TX budget, wake a blocked sender, free it. Used by the normal TX-complete
- * callback AND by the hard-wedge purge (frames that will never complete). */
+/* TX-complete accounting (budget, sender wakeup, free); also used by the
+ * hard-wedge purge for frames that will never complete. */
 struct sk_buff;
 void halow_tx_skb_complete(struct sk_buff *skb);
 
-/* TX-path diagnostics: live counters + a snapshot of the LMAC TX machine
- * captured at the moment a hard wedge was detected (before the purge destroys
- * the evidence). Exposed over HTTP as /api/tx_dbg -- the way to root-cause
- * why TX-completes stop under saturation without a debugger attached. */
+/* TX diagnostics: live counters + the LMAC machine snapshot at the last hard
+ * wedge. Exposed as /api/tx_dbg. */
 typedef struct {
     /* live counters */
     uint32_t tx_end_count;      /* lmac_irq_tx_end invocations */
@@ -64,7 +58,7 @@ typedef struct {
     uint32_t bo_tmo_recov;      /* tier-0 fast armed-TX timeouts (FSM abort + retry) */
     uint32_t complete_seq;      /* TX-complete budget operations */
     uint32_t wedge_count;       /* hard-wedge purges so far */
-    /* loss counters (invariant: no frame vanishes without a number moving) */
+    /* loss counters (no frame vanishes without a number moving) */
     uint32_t tx_drop_budget;    /* halow_send_frame -6: LMAC TX budget full */
     uint32_t tx_drop_alloc;     /* halow_send_frame -5: alloc_tx_skb failed */
     uint32_t tx_drop_lmac;      /* LMAC enqueue rejected (lmac_tx/fast_tx err) */
@@ -89,8 +83,7 @@ typedef struct {
     uint32_t snap_comn;         /* LMAC_HW->COMN_CTRL at wedge (RF gates) */
     uint32_t snap_irqpd;        /* LMAC_HW->IRQ_PD at wedge */
     uint32_t snap_bocnt;        /* LMAC_HW->BO_CNT0 at wedge (CCA/backoff) */
-    /* live machine state (not only at wedge time) -- the detailed view for
-     * soak monitoring: tells a live CCA/LBT loop from a keyed-radio hang */
+    /* live machine state */
     uint32_t ac_pd;             /* live lmac_ac_pd_count (ac_pd IRQ fires) */
     uint32_t budget_live;       /* live g_tx_vacated_bytes */
     uint32_t q_live[4];         /* live pTx_ac_queues[] depths */

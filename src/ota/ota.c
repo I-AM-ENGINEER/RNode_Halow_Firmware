@@ -284,10 +284,8 @@ static int ota_cmd_firmware_data(struct netif* nif, uint8_t* data, uint32_t len)
     }
 
     int32 r = 0;
-    /* Arm the same OTA guard the web path uses (s_fw_ota.active): the TX-wedge
-     * watchdog's last-resort reboot and the ota_fw_active() checks must stay
-     * suppressed during an eth flash session too -- a reboot mid-session (the
-     * first chunk already erased the whole firmware partition) bricks the
+    /* Arm the OTA guard for eth flash sessions too: a reboot mid-session
+     * (the first chunk already erased the firmware partition) bricks the
      * node. Cleared on the final chunk or any write error. */
     if (fw_off == 0) {
         s_fw_ota.active = true;

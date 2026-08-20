@@ -11,27 +11,15 @@ extern uint16_t ah_rfspi_read(uint16_t addr);
 extern uint16_t ah_rfspi_write_and_read(uint32_t addr, uint32_t data);
 extern void delay_us(uint32_t us);
 
-/* ---- ADC measurement throttling ------------------------------------------
- * The binary lmac_chip_monitor (the periodic event engine, ah_lmac.
- * event3_7_period = 500 ms) measures tsensor/vcc/vdd13b/vdd13c every period.
- * Each measurement is a SAR-ADC read with analog-mux/PMU switching that
- * deafens the radio long enough to kill one in-flight frame: broadcast probes
- * lose EXACTLY one frame per 500 ms (every 10th at 20 fps, every 20th at
- * 40 fps). Temperature/supply compensation does not need sub-minute cadence,
- * so throttle the real conversions to one per 60 s and serve cached values
- * in between. The lmac_send_bss_announcement arm of the same engine is
- * already suppressed via its own --wrap, so this closes the 500 ms hole. */
+/* ---- ADC measurement throttling ----
+ * Each SAR-ADC read (analog-mux/PMU switching) deafens the radio long enough
+ * to kill one in-flight frame, and the binary lmac_chip_monitor asks for all
+ * four measurements every 500 ms. Throttle the real conversions to one per
+ * 60 s under traffic (15 s when idle) and serve cached values in between. */
 #define MEAS_REFRESH_BUSY_MS 60000u
 #define MEAS_REFRESH_IDLE_MS 15000u
-/* Policy: the binary lmac_chip_monitor IS the thermal recalibration engine
- * (xo_set_cs_sec crystal tracking + tx digi gain + pmu vref + rx dcoc). It
- * runs every 500 ms but only compensates as fresh as its INPUT: these
- * wrappers guarantee a real ADC pass at least every 60 s under traffic and
- * every 15 s on a quiet channel -- far tighter than the "tens of minutes"
- * baseline asked for, at a cost of at most one frame per refresh (~0.08% at
- * 20 fps). On top of the periodic rule, a temperature jump of >=10 C since
- * the last calibration forces one coherent fresh snapshot of ALL FOUR
- * measurements on the same monitor pass (instead of mixed-age cache). */
+/* A temperature jump of >=10 C since the last calibration forces one coherent
+ * fresh snapshot of all four measurements on the same monitor pass. */
 #define MEAS_DELTA_FORCE_C 10u
 extern bool halow_ack_radio_quiet( void );
 
@@ -51,9 +39,6 @@ int32_t __wrap_tsensor_meas(uint8_t sensor_idx)
             int32_t d = fresh - g_meas_temp_last_cal;
             if (d < 0) d = -d;
             if ((uint32_t)d >= MEAS_DELTA_FORCE_C) {
-                /* >=10 C since the previous calibration: force a full fresh
-                 * snapshot (vcc/vdd re-read this pass too, not stale cache)
-                 * so the compensation acts on one coherent thermal state. */
                 g_meas_force_full = true;
                 log_warn("recal: temp jump %d -> %d C, forcing full refresh",
                          (int)g_meas_temp_last_cal, (int)fresh);
@@ -112,13 +97,8 @@ float __wrap_vdd13c_meas(void)
 static int pll_calibrate(void)
 {
     /* Original (mars_ahrf.S ah_rf_lo_freq_set): kick the PLL calib up to 5
-     * times UNTIL status bit 0x200 SETS, then 0x400 set means "locked" (NOT
-     * an error); the calib word is ALWAYS written to 0x603 and 0 is returned
-     * (nonzero returns are factory-test-mode only). The old wrapper polled in
-     * the opposite direction and returned -1 on the LOCKED case -- any unit
-     * where 0x400 latches aborted runtime LO re-tables after the first entry
-     * (lmac_lo_table_kick skips the active-frequency registers, and
-     * lmac_cfg_set_freq_range skips channel programming on nonzero). */
+     * times UNTIL status bit 0x200 SETS; 0x400 set means "locked" (NOT an
+     * error); the calib word is ALWAYS written to 0x603 and 0 is returned. */
     for (int i = 5; i != 0; i--) {
         ah_rfspi_write(0x810, 0x30);
         ah_rfspi_write(0x810, 0x31);

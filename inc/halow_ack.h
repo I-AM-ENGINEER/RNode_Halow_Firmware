@@ -9,93 +9,44 @@
 #define HALOW_ACK_MAGIC1           0x5Au
 #define HALOW_ACK_ACK_LEN_MIN      5u
 #define HALOW_ACK_ACK_LEN_MAX      (3u + 2u * HALOW_ACK_ACK_FIDS_MAX)
-/* ACK frame rate: ADAPTIVE, scaled from the link quality the same way data RA
- * is -- the peer's EVM ceiling (how well THAT peer hears us). Empirically on
- * this HW/link: MCS10 (S1G-DUP) ACKs lost ~70%, MCS0 ~50%, while MCS6/7 DATA
- * delivers >90% both ways; but on a genuinely weak/distant link 64QAM ACKs
- * would collapse the whole retry layer. Bounds: [HALOW_ACK_ACK_MCS_MIN..
- * HALOW_ACK_ACK_MCS_MAX]; the live choice is exposed as "ack_mcs" in ack_cfg. */
+/* ACK rate follows the peer's EVM ceiling; a fixed high MCS kills weak links. */
 #define HALOW_ACK_ACK_MCS_MIN      1u
 #define HALOW_ACK_ACK_MCS_MAX      6u
 
-/* A-MSDU-style software aggregation bundle. Wire format (interleaved, so the
- * per-peer coalesce buffer IS the wire frame):
- *   [0xA5][0xAD][nsub] ( [len0_le16][payload0] [len1_le16][payload1] ... )
- * 0xA5 0xAD != ACK (0xA5 0x5A) and cannot begin a decoded RNS frame (FLAG=0x7E).
- * The whole bundle is one MPDU -> one TXOP, one ACK, one retry slot, amortising
- * the 1MHz S1G preamble/IFS/ACK overhead across N RNS frames so a 1MHz channel
- * can reach ~1 Mbit/s instead of stalling at ~250 kbit/s. The bundle is opaque to
- * the ACK layer (hashed/deduped/acked as one data frame); only rf_to_tcp splits
- * it. agg=0 (live API kill-switch) disables coalescing with no reflash. */
+/* Bundle: [0xA5][0xAD][nsub]([len_le16][payload])* -- one MPDU, one TXOP, one ACK. */
 #define HALOW_ACK_AGG_MAGIC0          0xA5u
 #define HALOW_ACK_AGG_MAGIC1          0xADu
-/* Bundle subframe cap. 16 let bundles grow to the full MCS eff-size (14x480B
- * at MCS6): with the ACK window pinned full, a full-size HELD bundle turns
- * every incoming frame into a consumed-then-dropped THROTTLE loss (measured
- * 20% at 40 fps offered). Small bundles flush early and often, keeping slot
- * recycling steady; 4x480B ~= 8 ms air at MCS6 still amortizes preamble 4x. */
-#define HALOW_ACK_AGG_MAX_SUB         8u/* agg_bytes is not configured anymore: always the frame max; the per-MCS
- * runtime cap (halow_ack_eff_agg_bytes) sizes bundles for the current link. */
+#define HALOW_ACK_AGG_MAX_SUB         8u
 #define HALOW_ACK_AGG_HOLD_MS_DEF     2u
-/* ACK coalescing: instead of one ACK TXOP per received bundle, defer the ACK and
- * send one every ack_fids frames (filling the cumulative ACK) or every
- * ack_hold_ms, whichever is first. ack_hold_ms MUST stay < timeout_ms/2 so the
- * sender gets its ACK well before the retry timer. 0 = ACK every frame (legacy).
- * On a 1MHz link the per-bundle ACK turnaround ate ~half the TXOPs; batching
- * recovers that airtime and is the main lever toward 1 Mbit/s. */
-/* ack_hold default 20ms: validated with timeout=100 on the real link (see the
- * timeout comment below); still well under timeout/2 so the sender's ACK
- * always beats its retry timer. */
+/* One ACK per ack_fids frames or ack_hold_ms, whichever is first; keep
+ * ack_hold_ms < timeout_ms/2 so the ACK beats the sender's retry timer. */
 #define HALOW_ACK_ACK_HOLD_MS_DEF     20u
 
 #define HALOW_ACK_DEFAULT_MAX_RETRIES   3u
-/* Retry timeout 100ms, validated end-to-end (1 MB Channel transfer 17-20s at
- * 420-490 kbit/s). At 40ms the ACK path (ack_hold + MCS10 ACK airtime + LBT
- * turnaround, ~30-50ms under load) raced the retransmit timer and a peer
- * retransmitted EVERY frame -> dup storms and drops. 100ms clears the race;
- * the cost is +60ms first-retransmit latency per genuinely lost frame. */
+/* Must clear the ACK turnaround (ack_hold + ACK airtime + LBT) or peers
+ * retransmit every frame. */
 #define HALOW_ACK_DEFAULT_TIMEOUT_MS    100u
 #define HALOW_ACK_DEFAULT_RATE_ADAPT    1u
 #define HALOW_ACK_DEFAULT_RA_LOSS_UP    5u
 #define HALOW_ACK_DEFAULT_RA_LOSS_DOWN  30u
 #define HALOW_ACK_RA_STALE_MS           60000u
 #define HALOW_ACK_RA_COOLDOWN_MS        500u
-/* Proactive rate-climb: STEP_AFTER consecutive clean ACKs (or a loss estimate
- * at/below ra_loss_up) earns one MCS step up, no faster than every STEP_GAP_MS.
- * Lifts the link from the conservative startup MCS (0) toward the channel's real
- * ceiling (MCS3..4 = 1.2..1.8 Mbit/s on a 1MHz channel). Replaces the old 60s
- * entry cooldown that blocked every up-shift and stranded MCS at 0. */
 #define HALOW_ACK_RA_STEP_AFTER         10u
 #define HALOW_ACK_RA_STEP_GAP_MS        250u
 
-/* Broadcast repeat: broadcast frames can never be ACKed (nobody answers a
- * broadcast), so the retry machinery gives them zero loss protection -- one
- * faded preamble and the announce/bootstrap frame is gone forever. Instead each
- * broadcast frame is transmitted bc_repeat times back-to-back (the LMAC queues
- * the copies). The RX side deliberately skips broadcast dedup (RNS above dedups
- * by packet hash), so the copies arrive as harmless duplicates. 1 = single TX
- * (off), default 2, hard max 3 (each extra copy costs full airtime on 1MHz). */
+/* Broadcast gets no ACK: bc_repeat back-to-back copies are its only loss protection. */
 #define HALOW_ACK_BC_REPEAT_DEF         2u
 #define HALOW_ACK_BC_REPEAT_MAX         3u
 
 #define HALOW_ACK_DEFAULT_WINDOW        10u
 #define HALOW_ACK_DEFAULT_ACK_FIDS      32u
 #define HALOW_ACK_SLOTS_MAX             32u
-/* Cumulative-ACK / dedup capacity. Was 8: under bidir contention a coalesced ACK
- * (ack_hold_ms) is delayed long enough that the rolling dedup window advances
- * PAST the still-in-flight bundles, so the ACK carries fresh fids instead of the
- * outstanding ones -> the sender never sees its ACK -> spurious retransmit storm
- * (looked like ~60% per-attempt loss, really an ACK-coverage bug; ack_hold=0
- * dropped the retransmit ratio ~2.5x). 32 keeps every recent bundle in the
- * window so a coalesced ACK covers all outstanding bundles even with delay. */
+/* Must cover every bundle still in flight plus the rolling dedup window. */
 #define HALOW_ACK_ACK_FIDS_MAX          32u
 
-/* ==== L1 envelope v1 (PROTOCOL_DESIGN.md 4-5) ====
- * [0xA5][0x5A][ver:4|type:4][body...]
- * Two types only: 0 BUNDLE, 1 ACK. Ver is per-type; ver<=7 keeps byte2<0x80,
- * which never collides with the legacy ACK's evm byte (int8 dB, >=0x80) --
- * that byte-range split is what makes one dispatch table serve all three
- * firmware generations (G0 plain / G1 legacy magics / G2 envelope). */
+/* ==== L1 envelope v1 ====
+ * [0xA5][0x5A][ver:4|type:4][body] -- type 0 BUNDLE, 1 ACK. ver<=7 keeps
+ * byte2<0x80, clear of the legacy ACK's int8 evm byte. */
 #define HALOW_ENV_MAGIC0                 0xA5u
 #define HALOW_ENV_MAGIC1                 0x5Au
 #define HALOW_ENV_VER                    1u

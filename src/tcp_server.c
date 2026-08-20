@@ -176,11 +176,8 @@ bool tcp_server_get_client_info( ip4_addr_t *addr, uint16_t *port ){
         return false;
     }
 
-    /* Snapshot the pcb pointer ONCE: err_tcp (tcpip thread) can NULL it at any
-     * instant; re-reading g_client_nc->pcb.tcp between the check and each use
-     * could pass the test on one load and fault on the next. A stale non-NULL
-     * (freed-between) pointer can still yield a garbage IP read -- harmless
-     * here (display only), never a wild write. */
+    /* Snapshot the pcb pointer ONCE: err_tcp (tcpip thread) can NULL it at
+     * any instant; re-reading it between check and use could fault. */
     struct tcp_pcb *pcb = ( g_client_nc != NULL ) ? g_client_nc->pcb.tcp : NULL;
     if( pcb != NULL ){
 
@@ -217,10 +214,9 @@ static void tcp_server_tx_queue_clear( void ){
 }
 
 /* Feed the netbuf's bytes to the TX decoder starting at (*chunk, *ofs).
- * Returns 0 when the whole netbuf was consumed (caller may free it), or the
- * g_rx_cb status: HALOW_ACK_TX_THROTTLE stops at the exact resume position
- * (cursor updated); other negatives mean the frame owns a retry slot already
- * -- the chunk is fully consumed, caller just paces. */
+ * Returns 0 when the whole netbuf was consumed, or the g_rx_cb status:
+ * HALOW_ACK_TX_THROTTLE stops at the exact resume position (cursor
+ * updated); other negatives own a retry slot already -- fully consumed. */
 static int32_t tcp_server_feed_netbuf( struct netbuf *nb, uint16_t *chunk, uint16_t *ofs ){
     netbuf_first(nb);
     uint16_t ci = 0u;
@@ -250,12 +246,9 @@ static int32_t tcp_server_feed_netbuf( struct netbuf *nb, uint16_t *chunk, uint1
 static void tcp_client_loop( struct netconn *client ){
     err_t err;
     struct netbuf *nb = NULL;
-    /* TX backpressure: when the RF/ACK TX path is saturated, g_rx_cb returns
-     * HALOW_ACK_TX_THROTTLE. We then SKIP netconn_recv so lwIP closes the TCP
-     * recv window and the blasting TCP sender paces itself -- while STILL
-     * draining the RF->TCP ring above every iteration (RX delivery to the app
-     * never stalls). This is the only way to absorb a full TCP blast without
-     * dropping frames or starving the receive direction. */
+    /* THROTTLE = the RF/ACK TX path is saturated: skip netconn_recv so lwIP
+     * closes the TCP recv window and the sender paces itself, while still
+     * draining the RF->TCP ring every iteration. */
     uint32_t tx_throttle_ms = 0u;
 #define TCP_SERVER_TX_THROTTLE_MS  5u
     struct netbuf *held_nb = NULL;
@@ -267,12 +260,8 @@ static void tcp_client_loop( struct netconn *client ){
             break;
         }
 
-        /* Pop ONE package under the mutex, then write it to the client with
-         * the mutex RELEASED. The old code held g_tx_rb_mutex across the whole
-         * blocking write-retry loop (up to the 10 s stall limit): any period
-         * where the host read side was slow-but-alive made every producer's
-         * try-lock fail -> RF->TCP frames were dropped while up to 31 of 32
-         * ring slots sat free. */
+        /* Pop ONE package under the mutex, write with the mutex RELEASED:
+         * holding it across the blocking write starved the producers. */
         struct rb_tx_package tx_package;
 
         for( uint32_t burst = 0u; burst < 4u; burst++ ){
@@ -324,23 +313,16 @@ static void tcp_client_loop( struct netconn *client ){
             os_free(tx_package.data);
 
             if( offset < tx_package.len ){
-                /* Partial/failed host write: the undelivered tail is lost --
-                 * count it, or RF->TCP loss stays invisible (invariant 3). */
+                /* Partial/failed host write: the undelivered tail is lost. */
                 g_tx_dbg.rf_tcp_dropped++;
                 break;
             }
         }
 
-        /* TX backpressure: while the RF/ACK TX path is saturated, g_rx_cb returns
-         * HALOW_ACK_TX_THROTTLE. Parked netbufs wait in a bounded FIFO; we KEEP
-         * draining netconn_recv while the FIFO has room so lwIP's recvmbox can
-         * never overflow (mbox overflow -> sys_mbox_trypost fails inside the
-         * recv event callback -> lwIP aborts the connection with ERR_ABRT --
-         * the blast-kill measured as recv err=-15 after ~140 frames). With
-         * FIFO 8 + recvmbox 16 netbufs of parking versus a 4*MSS window the
-         * reader always stays ahead: full FIFO just means we stop reading, the
-         * recv window closes, the blasting sender parks in its own kernel
-         * buffers -- lossless pacing instead of an abort. */
+        /* TX backpressure: parked netbufs wait in a bounded FIFO. Keep
+         * draining netconn_recv while the FIFO has room or lwIP aborts with
+         * ERR_ABRT on recvmbox overflow; a full FIFO just closes the recv
+         * window and the sender parks in its own kernel buffers. */
         if( tx_throttle_ms > 0u ){
             tx_throttle_ms--;
             os_sleep_ms(1);
@@ -409,8 +391,8 @@ static void tcp_client_loop( struct netconn *client ){
 }
 
 /* Runs in the tcpip thread via tcpip_callback(): the only context allowed to
- * touch pcb fields with core locking disabled. If the connection died before
- * the callback ran, err_tcp has already NULLed pcb.tcp -- just skip. */
+ * touch pcb fields. If the connection died before the callback ran,
+ * err_tcp has already NULLed pcb.tcp -- skip. */
 static void tcp_server_cfg_keepalive( void *arg ){
     struct netconn *nc = (struct netconn *)arg;
     if( nc == NULL || nc->pcb.tcp == NULL ) return;
@@ -470,13 +452,9 @@ static void tcp_server_task( void *arg ){
             continue;
         }
 
-        /* NEVER touch client->pcb.* directly here: err_tcp() can NULL/free the
-         * pcb while the netconn still sits in the accept mbox (lwIP 2.1.2
-         * api_msg.c), and a RST can free it between a NULL check and a raw
-         * field write -- the store then lands on freed memory or address ~0
-         * and faults (the historical exception-loop crash PC was exactly this
-         * keepalive block). Netconn-level option setters exist for everything
-         * and are serialized in the tcpip thread. */
+        /* NEVER touch client->pcb.* directly here: err_tcp() can NULL/free
+         * the pcb while the netconn still sits in the accept mbox. Use the
+         * netconn-level setters, serialized in the tcpip thread. */
         struct tcp_pcb *cpcb = client->pcb.tcp;   /* snapshot once */
         if( cpcb == NULL ){
             log_warn("accept: null pcb, drop client");
@@ -504,11 +482,8 @@ static void tcp_server_task( void *arg ){
             rns_tcp_session_reset();
         }
 
-        /* Keepalive/nagle config must run in the tcpip thread (LWIP core
-         * locking is disabled in this build, so only that thread may touch
-         * pcb fields): err_tcp can free the pcb at any moment from tcpip
-         * context, and a raw write here lands on freed memory or address ~0
-         * -- the exact PC of the historical exception-loop crash. */
+        /* Keepalive/nagle config runs in the tcpip thread (only it may touch
+         * pcb fields; err_tcp can free the pcb at any moment). */
         tcpip_callback(tcp_server_cfg_keepalive, client);
 
         os_mutex_lock(&g_clinet_mutex, OS_MUTEX_WAIT_FOREVER);
@@ -528,10 +503,8 @@ static void tcp_server_task( void *arg ){
         netconn_close(client);
         netconn_delete(client);
 
-        /* Bound the accept/close cycle rate: a client that connects and dies
-         * instantly (bench: scripted reconnect storms) spins this loop at
-         * full speed, and the tight accept->raw-pcb-config->delete churn is
-         * exactly the window where lwIP pcb/netconn lifetimes race. */
+        /* Bound the accept/close cycle rate: reconnect storms spin this loop
+         * at full speed inside the pcb/netconn lifetime race window. */
         os_sleep_ms(50);
     }
 }
@@ -557,11 +530,8 @@ int32_t tcp_server_send( const uint8_t *data, uint32_t len ){
     struct rb_tx_package pkg;
     uint32_t writen;
 
-    /* Check free space INSIDE the mutex: reading it before locking is a TOCTOU
-     * -- the consumer only grows free space today, but any second producer (or
-     * a consumer change) could shrink it in between, and lwrb_write would then
-     * do a PARTIAL write, leaving a torn rb_tx_package in the ring whose
-     * os_free() later detonates on a garbage pointer. */
+    /* Check free space INSIDE the mutex: a TOCTOU here could let lwrb_write
+     * do a PARTIAL write, leaving a torn rb_tx_package in the ring. */
     res = os_mutex_lock(&g_tx_rb_mutex, 0);
     if( res != 0 ){
         return -3;

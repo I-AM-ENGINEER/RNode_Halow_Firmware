@@ -243,6 +243,11 @@ typedef struct {
 #define LMAC_FSM_BO_BYPASS          (1U << 8)  /* Backoff bypass control. */
 #define LMAC_FSM_RX_POST_CLEAR      (1U << 13) /* Cleared after RX start sequence. */
 
+#define LMAC_FSM_MAC_MSK            (7U << 8)  /* FSM_STAT[10:8] MAC engine state. */
+#define LMAC_FSM_MAC_IDLE           (0U << 8)
+#define LMAC_FSM_RX_MSK             (7U << 24) /* FSM_STAT[26:24] RX path state. */
+#define LMAC_FSM_RX_ARMED           (1U << 24) /* RX armed/listening; TX starts only in this state. */
+
 #define LMAC_RF_EN                  (1U << 8)  /* RF frontend enable. */
 #define LMAC_RF_SW_CTRL             (1U << 9)  /* 1 = software RF control, 0 = hardware control. */
 #define LMAC_RF_TX_EN               (1U << 10) /* RF TX enable gate. */

@@ -28,10 +28,8 @@ void rns_stream_decoder_init( rns_stream_decoder_t *decoder, rns_stream_frame_cb
 void rns_stream_decoder_reset( rns_stream_decoder_t *decoder );
 int32_t rns_stream_decoder_retry_held( rns_stream_decoder_t *decoder, void *user );
 /* Returns 0 normally, or HALOW_ACK_TX_THROTTLE if a decoded frame was rejected
- * by the TX path -- in which case processing stops (the frame is HELD inside
- * the decoder, *consumed reports how many input bytes were taken) and the
- * caller must re-feed the unconsumed tail later. A frame accepted from TCP is
- * never silently dropped here. */
+ * by the TX path: processing stops, the frame is HELD inside the decoder,
+ * *consumed reports the taken bytes -- the caller must re-feed the tail. */
 int32_t rns_stream_decoder_process( rns_stream_decoder_t *decoder, const uint8_t *data, uint16_t data_len, void *user, uint16_t *consumed );
 
 int32_t rns_stream_encode_alloc(

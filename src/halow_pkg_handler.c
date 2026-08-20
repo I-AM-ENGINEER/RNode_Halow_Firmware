@@ -27,19 +27,12 @@ volatile uint32_t g_dbg_rns_tx_parse_fail;
 
 #define HALOW_ACK_CFG_PREFIX   CONFIGDB_ADD_MODULE("hack")
 #define HALOW_ACK_CFG(k)       HALOW_ACK_CFG_PREFIX "." k
-/* Config-generation marker. Bump whenever code defaults change semantics: on
- * the first boot after upgrade the stale configdb "hack.*" keys (left over
- * from debug-session POSTs of a previous fw generation) are re-seeded with
- * the current defaults exactly once, then user-tuned values persist again. */
+/* Bump when code defaults change semantics: stale configdb "hack.*" keys re-seed once. */
 #define HALOW_ACK_CFG_VER      2
 
 #define HALOW_ACK_MAX_PEERS    4u
-/* 4000, not 7600: every slot frame copy, the pend FIFO, the retx scratch and
- * each peer agg_buf are FRAME_MAX-sized -- at 7600 that is ~100 KB of RAM on
- * a chip where the CODE also lives in RAM. The 1 MHz bundle caps by MCS are
- * 700..7600, but RA realistically settles at MCS2-4 (<=3000); capping at
- * 4000 only trims per-PPDU efficiency at MCS5-7 (bundle 4000 instead of
- * 6050-7600) and frees ~40 KB. */
+/* Every slot copy, pend FIFO, retx scratch and peer agg_buf is FRAME_MAX-sized;
+ * 7600 would cost ~100 KB of RAM on a chip where code shares RAM with data. */
 #define HALOW_ACK_FRAME_MAX    4000u
 #define HALOW_ACK_DEDUP_WIN    HALOW_ACK_ACK_FIDS_MAX
 #define HALOW_ACK_TICK_MS      10u
@@ -47,41 +40,16 @@ volatile uint32_t g_dbg_rns_tx_parse_fail;
 #define HALOW_ACK_RA_MAX_MCS     7u
 #define HALOW_ACK_RA_EWMA_WEIGHT 8u
 #define HALOW_ACK_RA_Q8(pct)     ((uint16_t)((uint32_t)(pct) * 256u / 100u))
-/* TX flow-control: when the bounded LMAC TX buffer has fewer free bytes than
- * this, the ACK layer applies backpressure (hold a bundle / drop a frame) INSTEAD
- * of calling halow_tx -- because halow_send_frame would block on the vacancy
- * semaphore in the TCP RX handler, stalling the connection. The threshold is set
- * just above the largest possible skb (a 2 KB A-MSDU bundle + headroom) so we
- * ONLY shed load at the very edge of blocking -- normal drain variance does NOT
- * trigger drops (a tighter value was tested and needlessly turned latency into
- * loss). */
+/* Below this the ACK layer holds instead of calling halow_tx; set just above
+ * the largest possible skb so normal drain variance never sheds load. */
 #define HALOW_ACK_TX_VACANCY_LOW 8000u
-/* ACK-window-gated TX flow control. Data-path sends BLOCK on g_ack_slot_sem
- * (counting semaphore of free retry slots) instead of fire-and-forget/drop when
- * the window is full. halow_ack_tx runs only in the tcps thread, so blocking it
- * stops netconn_recv -> lwIP closes the TCP recv window -> the blasting sender
- * is paced by real TCP flow control. Meanwhile halow_ack_tick (separate
- * workqueue) keeps freeing slots (ACK clears / retry-exhaustion drops) and
- * os_sema_up's, so the block is bounded and deadlock-free. This is the
- * "send a batch <= window, wait ACK, send next batch" pacer the link needs:
- * no frame leaves the data path without a retry slot, so every frame is either
- * delivered or retried to exhaustion -- never silently lost. Cap only bounds
- * the dead-link case (the tick drops exhausted slots well within this). */
+/* Block cap for the data-path slot claim; only the dead-link case ever hits it. */
 #define HALOW_ACK_SLOT_WAIT_MS  2000u
-/* Hard lifetime of one frame in a retry slot. Above this the slot is dropped
- * regardless of remaining retries: the TCP layer above retransmits end-to-end,
- * so a stale frame is worth less than a free slot. Without a bound, overload
- * turned the whole window into 6-second zombies and bidir acceptance collapsed
- * to ~1 frame/s (bench 2026-08-17: 96-98% loss at MAX blast).
- *
- * The effective lifetime is computed from the configured retry schedule
- * (halow_ack_slot_life_ms) so every paid-for retry actually fires: with the old
- * fixed 1100 ms and retries=5/timeout=100 the schedule 100+200+400+800+800
- * reached only 3 attempts -- deadline kills were the ENTIRE residual A->B loss
- * on a 1 dBm link (420/420 lost frames were drop_deadline, 2 retries unused). */
+/* Hard lifetime: past it the slot drops regardless of retries (TCP above
+ * retransmits end-to-end). Effective lifetime follows the retry schedule
+ * (halow_ack_slot_life_ms) so every paid-for retry fires. */
 #define HALOW_ACK_SLOT_LIFE_MAX_MS  6000u
-/* Max age of a coalesced bundle before the tick drops it (frames inside are
- * stale; TCP retransmits). Bounds end-to-end latency under saturation. */
+/* Max age of a coalesced bundle before the tick drops it; bounds latency. */
 #define HALOW_ACK_AGG_MAX_HOLD_MS   1000u
 
 typedef struct {
@@ -102,22 +70,15 @@ typedef struct {
     uint8_t  cur_retries;
     uint8_t  tx_mcs;            /* 0xFF = global default */
     int8_t   evm_ewma;
-    /* slow (tau ~32 samples) EVM for RA ceiling decisions: the fast ewma is
-     * bimodal on this link (swings -17..-25 dB) and the RA corridor chased it,
-     * oscillating the rate every few seconds -- each rate change disturbs the
-     * very measurement that caused it. The ceiling must move on sustained
-     * trends only. */
+    /* slow (tau ~32) EVM for the RA ceiling: the fast ewma is bimodal on this
+     * link and made RA oscillate every few seconds. */
     int8_t   evm_ewma_slow;
     uint16_t loss_ewma_q8;      /* /256 == 0..1 */
     uint32_t tx;
     uint32_t acked;
     uint32_t dropped;
-    /* Per-peer TX accounting for the Nearby/peer stats view. tx_bytes is
-     * cumulative wire bytes of unicast frames (matches how RX counts wire
-     * bytes); retransmitted counts PHY re-send attempts; last_tx_s is the unix
-     * ts of the most recent TX to this peer. Broadcast/NOACK/plain sends bypass
-     * these (no per-peer feedback), which is the intended scope: "TX stats
-     * only on the unicast path". */
+    /* Per-peer TX accounting for the stats view; broadcast/NOACK/plain sends
+     * bypass it (no per-peer feedback exists on those paths). */
     uint32_t tx_bytes;
     uint32_t retransmitted;
     int32_t  last_tx_s;
@@ -128,25 +89,19 @@ typedef struct {
     uint64_t last_seen;
     uint32_t dedup[HALOW_ACK_DEDUP_WIN];
     uint8_t  dedup_idx;
-    /* ACK coalescing. rx_since_ack counts frames received since the last ACK was
-     * sent; ack_due/ack_due_jiff mark a deferred ACK waiting for the time trigger
-     * or the ack_fids-frame count trigger. last_rx_evm is the evm carried by the
-     * (possibly deferred) ACK. */
+    /* ACK coalescing: rx_since_ack counts frames since the last ACK;
+     * ack_due/ack_due_jiff mark a deferred ACK; last_rx_evm rides the ACK. */
     uint16_t rx_since_ack;
     bool     ack_due;
     uint64_t ack_due_jiff;
     int8_t   last_rx_evm;
-    /* A-MSDU coalescing. agg_buf holds the in-progress wire-format bundle
-     * ([0xA5][0xAD][nsub] then [len_le16][payload] per subframe); agg_len is its
-     * current total length, agg_nsub the subframe count. agg_first_jiff marks the
-     * first subframe so the tick can flush partial bundles past agg_hold_ms. */
+    /* A-MSDU coalescing: agg_buf holds the in-progress wire bundle,
+     * agg_first_jiff marks the first subframe for the agg_hold_ms flush. */
     uint16_t agg_len;
     uint8_t  agg_nsub;
     uint64_t agg_first_jiff;
-    /* ---- L1 protocol compatibility level (PROTOCOL_DESIGN.md §7.3) ----
-     * 2 = envelope v1, 1 = legacy magics, 0 = plain-only (G0 peer, no MSDU,
-     * no ACK layer at all). Raised by the capability beacon (any received
-     * v1 frame); lowered by the dead-bundle heuristic or link re-init. */
+    /* L1 compatibility: 2 = envelope v1, 1 = legacy magics, 0 = plain-only.
+     * Raised by a received v1 frame; lowered by the dead-bundle heuristic. */
     uint8_t  compat;
     uint16_t tx_seq;          /* next bundle seq we will send to this peer */
     /* RX seq window for Block-ACK: bit i of rx_seq_win == seq (rx_seq_last-i)
@@ -155,84 +110,44 @@ typedef struct {
     uint64_t rx_seq_win;
     bool     rx_seq_seen;
     uint32_t l0_strikes;      /* consecutive un-ACKed bundle deaths (L0 heur) */
-    /* Windowed TX-loss display -- evidence-weighted IIR (algorithm tested in
-     * utils/test_loss_iir.py BEFORE this implementation):
-     *   n *= 0.5 per second (confidence decay, idle included);
-     *   per 1 s window, resolved frames (dacked+ddropped) ACCUMULATE into
-     *   pend_res/pend_fail; once the merged evidence reaches 5 (capped at
-     *   1000 when applied): alpha = A/(A + n + N0), N0 = 10;
-     *   y = y*(1-alpha) + inst*alpha;  n += A;  pend cleared.
-     * TWO loss counters by design:
-     *   - THIS one is the STATISTICS counter: loss AFTER retries -- the share
-     *     of frames whose final fate was decided (ACKed or retry-exhausted)
-     *     that ultimately failed. A frame rescued by a retransmit is NOT a
-     *     loss here; "TX Loss" must show what the user actually lost.
-     *   - loss_ewma_q8 is the MCS-TUNING counter (halow_ack_ra_on_ack/
-     *     on_drop): event-driven EWMA feeding the RA stepping logic.
-     * Speed requirements (user): converge within a couple dozen seconds
-     * under traffic. The earlier 0.75 decay pinned alpha at ~0.2 (30 s+
-     * settling, minutes after a heavy-blast n inflation), and discarding
-     * sub-5 windows froze the display under sparse resolution rates
-     * (bundle-level accounting under aggregation) -- hence 0.5 decay +
-     * pending-evidence carry-over. Idle still HOLDS the last estimate (no
-     * new evidence != zero loss). */
+    /* Windowed TX-loss display, loss AFTER retries (what the user lost).
+     * Evidence-weighted IIR: n *= 0.5/s decay, per-second resolved frames
+     * accumulate in pend_res/pend_fail, alpha = A/(A + n + 10) once the merged
+     * evidence reaches 5. loss_ewma_q8 above is the separate MCS-tuning signal. */
     uint32_t samp_acked, samp_dropped;
     uint32_t pend_res, pend_fail;   /* sub-threshold evidence carry-over */
     uint32_t loss_ev_n;
     uint16_t loss_iir_pct;
-    uint8_t  ack_probe_cnt;   /* envelope bootstrap: every 8th ACK to a peer
-                               * still below L2 is sent as an envelope probe.
-                               * Safe: an ACK carries no user data; a G1/G0
-                               * peer just fails its RNS parse and drops it.
-                               * Without the probe two G2 peers start at L1,
-                               * nobody beacons, nobody ever switches. */
+    /* Envelope bootstrap: every 8th ACK to a peer still below L2 is sent as an
+     * envelope probe; a G1/G0 peer just fails the parse and drops it. */
+    uint8_t  ack_probe_cnt;
     uint32_t l0_falls;        /* times we downgraded this peer to L0 */
-    /* RA grace: drops within the first moments of a peer's life (RNS link
-     * negotiation, announce floods) must not feed the loss estimator -- they
-     * once walked a freshly-booted peer 7->0 before any real traffic. */
+    /* RA grace: a fresh peer's first drops are negotiation noise. */
     uint64_t created_jiff;
-    /* Lazily os_malloc'd (HALOW_ACK_FRAME_MAX) on the peer's first coalesce and
-     * kept for the peer's lifetime so flushes don't churn the heap under
-     * saturation; freed on eviction (halow_ack_peer_get). NULL when no bundle
-     * is in flight or aggregation was never used for this peer. Replaces a
-     * fixed 4x7600 B static BSS hog with ~0 bytes when idle. */
+    /* Lazily os_malloc'd on first coalesce, kept for the peer's lifetime,
+     * freed on eviction. NULL when no bundle is in flight. */
     uint8_t *agg_buf;
 } halow_ack_peer_t;
 
-/* Pending-frame FIFO: when the agg guard / slot window / TX vacancy can't take
- * a frame RIGHT NOW, park it here instead of dropping it (the measured TX loss
- * at moderate offered rates was ~20% pure queue-shedding). Drained by the acktk
- * tick and opportunistically before each new frame. Two frames deep: enough to
- * ride out a ~20 ms burst; deeper is pointless because the TCP recv-window
- * probe (halow_ack_tx_ready) throttles further consumption. */
+/* Park frames here instead of dropping them when the guards are full;
+ * drained by the tick and opportunistically before each new frame. */
 #define HALOW_ACK_PEND_N 2u
-/* Parking patience: drain attempts (tick runs ~100/s) before a parked frame is
- * declared undeliverable and dropped loudly. ~5 s. */
-/* 1500 ticks (~15 s): a control-frame flood (e.g. a node joining a mesh and
- * receiving hundreds of LINKREQUESTs) holds the RF for multiple seconds;
- * data frames parked behind it used to hit the old 5 s patience and die
- * (bench: 260-link flood -> 100% data loss during the following 10 s).
- * Genuine undeliverable frames (dead peer) still drop loudly, just later. */
+/* ~15 s of drain attempts: control-frame floods can hold the RF for seconds. */
 #define HALOW_ACK_PEND_MAX_TRIES  1500u
 static uint8_t  g_pend_buf[HALOW_ACK_PEND_N][HALOW_ACK_FRAME_MAX];
 static uint16_t g_pend_len[HALOW_ACK_PEND_N];
 static uint8_t  g_pend_mac[HALOW_ACK_PEND_N][6];
 static uint32_t g_pend_head, g_pend_count;
 static uint16_t g_pend_tries[HALOW_ACK_PEND_N];   /* failed drain attempts */
-static bool     g_pend_draining;   /* tcps and tick drain concurrently: a flag
-                                    * under g_ack_mutex prevents double-sending
-                                    * the head element */
+static bool     g_pend_draining;   /* tcps and tick drain concurrently */
 
 static uint64_t g_last_data_tx_jiff;
 
 static halow_ack_slot_t  *g_ack_slots;
 static uint32_t           g_ack_slot_count;
 
-/* True when nothing is in flight and no data TX happened in the last second:
- * the radio is quiet enough that an ADC conversion (which briefly deafens
- * the RX) cannot kill a frame. The measurement throttle in halow_debug.c
- * uses this to run temp/supply compensation at 15 s cadence when idle
- * instead of 60 s under traffic. */
+/* Nothing in flight and no data TX for 1 s: an ADC conversion (which briefly
+ * deafens the RX) cannot kill a frame. Drives the 15 s measurement cadence. */
 bool halow_ack_radio_quiet( void ){
     if( g_ack_slots == NULL ) return true;
     for( uint32_t i = 0u; i < g_ack_slot_count; i++ ){
@@ -257,11 +172,9 @@ static uint64_t           g_ack_last_match_jiff;
 static halow_ack_peer_t   g_ack_peers[HALOW_ACK_MAX_PEERS];
 static halow_ack_stats_t  g_ack_stats;
 static struct os_mutex    g_ack_mutex;
-/* Counting semaphore of FREE retry slots (== window at init). Every slot
- * claim takes one token; every slot free returns one (halow_ack_token_return).
- * Claims are non-blocking (tmo=0) -- a full window means THROTTLE backpressure
- * to the TCP recv loop, not a blocked thread. halow_ack_slots_resize_locked
- * adjusts the count by up/down deltas so it stays exact across resizes. */
+/* Counting semaphore of FREE retry slots (== window at init). Claims are
+ * non-blocking (a full window means THROTTLE, not a blocked thread);
+ * halow_ack_slots_resize_locked adjusts the count by deltas to keep it exact. */
 static struct os_semaphore g_ack_slot_sem;
 /* Shrink-resize debt: tokens that must leave the semaphore but were in
  * flight when the window shrank; collected by swallowing a token return. */
@@ -320,10 +233,8 @@ static bool halow_ack_slots_resize_locked( uint8_t window ){
     g_ack_stats.dropped += dropped_inuse;
     bool had_old = ( g_ack_slots != NULL );
     uint8_t old_count = g_ack_slot_count;
-    /* The tick / agg-flush paths drop g_ack_mutex around halow_tx() while still
-     * holding a slot pointer INTO the old array -- freeing it here is a
-     * use-after-free window. Retire it instead; the tick frees it after a
-     * grace period far longer than any halow_tx call can run. */
+    /* Freeing here is a use-after-free window: callers that dropped the mutex
+     * still hold slot pointers into the old array -- retire instead. */
     if( had_old ){
         halow_ack_slots_retire(g_ack_slots);
     }
@@ -333,15 +244,10 @@ static bool halow_ack_slots_resize_locked( uint8_t window ){
         os_sema_init(&g_ack_slot_sem, (int32)g_ack_slot_count);
         return true;
     }
-    /* Adjust the token count instead of re-initializing the semaphore. A
-     * wholesale os_sema_init here races a claimer that already took a token
-     * from the old sem and is only waiting to re-lock: the new sem would hold
-     * `window` tokens while that claimer also holds one -> a permanent +1
-     * phantom token (window overcommit, one spurious THROTTLE/drop per
-     * saturation cycle, forever). Exact bookkeeping instead:
-     *  - every dropped in-use old slot conceptually frees -> return its token
-     *  - grow: up() the delta;  shrink: try down(), remember unreclaimable
-     *    tokens as debt collected at the next slot-free (halow_ack_token_return) */
+    /* Adjust the token count instead of re-initializing: a wholesale
+     * os_sema_init races a claimer that already took a token, leaving a
+     * permanent phantom token. Grow: up() the delta; shrink: try down(),
+     * remembering unreclaimable tokens as debt collected at the next return. */
     while( dropped_inuse-- > 0u ) os_sema_up(&g_ack_slot_sem);
     int32 delta = (int32)window - (int32)old_count;
     while( delta > 0 ){ os_sema_up(&g_ack_slot_sem); delta--; }
@@ -356,22 +262,14 @@ static bool halow_ack_slots_resize_locked( uint8_t window ){
     return true;
 }
 
-/* Cached default MCS. The real lookup is halow_config_load() which reads
- * configdb (flash) -- calling that from the 10ms tick (and per-frame in
- * halow_ack_peer_get) meant ~100+ flash reads/sec and was the bulk of the MAIN
- * workqueue's idle CPU. The configured MCS changes rarely, so cache it with a
- * coarse TTL (refresh at most once per few seconds). 0xFF = not loaded yet. */
+/* Cached default MCS: the real lookup is a configdb read; cache it with a
+ * coarse TTL. 0xFF = not loaded yet. */
 #define HALOW_ACK_DFLT_MCS_TTL_MS   5000u
 static uint8_t g_dflt_mcs_cache = 0xFFu;
 static uint64_t g_dflt_mcs_jiff = 0;
 
-/* Refresh the default-MCS cache from configdb. MUST NOT be called while
- * holding g_ack_mutex (or anywhere on the tick's locked path): the KV reads
- * take the configdb/flash mutexes with WAIT_FOREVER and can stall behind a
- * config-save GC chain for seconds -- with the tick (the hardware-watchdog
- * feeder) blocked, that is a silent node reset (observed twice, both <5 min
- * after an OTA + heavy blast). Refreshed from the tick preamble (before the
- * lock) and at init. */
+/* MUST NOT run under g_ack_mutex: the flash mutexes can stall for seconds
+ * behind a config-save GC, and the tick feeds the hardware watchdog. */
 static void halow_ack_default_mcs_refresh( void ){
     uint64_t now = os_jiffies();
     if( g_dflt_mcs_cache != 0xFFu &&
@@ -384,18 +282,14 @@ static void halow_ack_default_mcs_refresh( void ){
     g_dflt_mcs_jiff  = now;
 }
 
-/* Pure cached read -- safe under g_ack_mutex and inside the tick body.
- * 7 = conservative mid-table default until the first refresh lands. */
+/* Pure cached read, safe under the mutex. 7 = mid-table default until the
+ * first refresh. */
 static uint8_t halow_ack_default_mcs( void ){
     return (g_dflt_mcs_cache != 0xFFu) ? g_dflt_mcs_cache : 7u;
 }
 
-/* 802.11ah S1G 1 MHz max PPDU payload (data bytes) per MCS, set by the
- * maximum allowed TX time of a 1 MHz S1G PPDU.  A bundle that exceeds this
- * limit for the current MCS is physically untransmittable — the LMAC TX path
- * rejects it (or truncates), the frame is endlessly retried, and the channel
- * drowns in retransmissions with zero delivery.  This table MUST be consulted
- * whenever deciding the A-MSDU bundle size so aggregation scales with RA. */
+/* 802.11ah S1G 1 MHz max PPDU payload per MCS: a bundle above this is
+ * physically untransmittable at that rate. Bundle sizing MUST consult it. */
 static uint16_t halow_ack_max_payload_mcs( uint8_t mcs ){
     switch( mcs ){
         case 0u:  return 700u;
@@ -406,17 +300,15 @@ static uint16_t halow_ack_max_payload_mcs( uint8_t mcs ){
         case 5u:  return 6050u;
         case 6u:  return 6800u;
         case 7u:  return 7600u;
-        case 10u: return 500u;   /* ENVELOPE-bundle cap at MCS10, NOT the PPDU limit: the
-                                * single-PPDU ceiling is ~344B (duplicate mode halves the
-                                * MCS0 budget); halow_tx_mcs10_frag splits at 340B */
+        case 10u: return 500u;   /* envelope-bundle cap; halow_tx_mcs10_frag
+                                  * splits at the ~344B single-PPDU ceiling */
         default:  return 700u;   /* conservative */
     }
 }
 
-/* Effective A-MSDU bundle limit: min(configured agg_bytes, max payload for
- * the MCS that will actually be used for this peer).  Resolves HALOW_MCS_DEFAULT
- * to the cached global default so the cap tracks reality even before RA assigns
- * a per-peer MCS. */
+/* Effective bundle limit: min(configured agg_bytes, max payload for the MCS
+ * this peer will actually use). HALOW_MCS_DEFAULT resolves to the cached
+ * global default. */
 static uint32_t halow_ack_slot_life_ms( void ){
     uint32_t tmo  = g_ack_cfg.timeout_ms;
     uint32_t life = 150u;
@@ -449,19 +341,14 @@ static void halow_ack_log_mcs( const char *verb, halow_ack_peer_t *p ){
              (unsigned)(pct_x100 / 100u), (unsigned)(pct_x100 % 100u));
 }
 
-/* EVM-driven MCS ceiling. The peer's ACKs carry the EVM at which IT hears OUR
- * signal (tx-side link quality we cannot measure ourselves). Loss-driven RA
- * alone oscillates into 64QAM rates the EVM cannot sustain: on this link
- * (EVM -16..-24 dB) MCS7 data lost 50-67% per attempt and survived only via
- * retries, while QPSK/16QAM rates deliver cleanly. Climb is capped by the
- * EVM headroom; loss-driven downshifts still work below it. */
+/* EVM-driven MCS ceiling: the peer's ACKs carry the EVM at which it hears us
+ * (TX-side quality we cannot measure ourselves). Climb is capped by the EVM
+ * headroom; loss-driven downshifts still work below it. */
 static uint8_t halow_ack_ra_evm_ceiling( const halow_ack_peer_t *p ){
     int8_t e = p->evm_ewma_slow;
     if( e == 0 ) e = p->evm_ewma;                             /* warming up */
     if( e == 0 && p->last_rx_evm != 0 ) e = p->last_rx_evm;   /* pre-first-ACK */
-    if( e == 0 ) return 4u;   /* unknown (fresh peer): start mid, EVM arrives
-                               * with the first ACK; low rates are the least
-                               * reliable TX regime on this HW, don't start there */
+    if( e == 0 ) return 4u;   /* fresh peer: start mid, EVM arrives with the first ACK */
     if( e >= -14 ) return 7u;
     if( e >= -17 ) return 6u;
     if( e >= -19 ) return 5u;
@@ -471,11 +358,8 @@ static uint8_t halow_ack_ra_evm_ceiling( const halow_ack_peer_t *p ){
     return 1u;
 }
 
-/* Loss-driven descent floor: EVM ceiling minus 2 steps of hysteresis (>=1).
- * Below this rate the per-attempt loss on this HW is dominated by the broken
- * low-rate TX regime (long frames), not by channel quality -- descending
- * further only makes loss worse and strands RA (the <=5% climb gate can never
- * open at 60-80% loss). The EVM floor tracks the channel as it degrades. */
+/* Loss-driven descent floor: EVM ceiling minus 2 (>=1). Below it the broken
+ * low-rate TX regime dominates the loss and strands RA. */
 static uint8_t halow_ack_ra_evm_floor( const halow_ack_peer_t *p ){
     uint8_t c = halow_ack_ra_evm_ceiling(p);
     return ( c >= 3u ) ? (uint8_t)(c - 2u) : 1u;
@@ -487,15 +371,9 @@ static void halow_ack_ra_on_ack( halow_ack_peer_t *p ){
     p->loss_ewma_q8 = (uint16_t)(((uint32_t)p->loss_ewma_q8 * (HALOW_ACK_RA_EWMA_WEIGHT - 1u)) >> 3);
     if( !g_ack_cfg.rate_adapt ) return;
     if( p->tx_mcs == HALOW_MCS_DEFAULT ) return;
-    /* Proactive climb: STEP_AFTER clean ACKs in a row (or a near-zero loss
-     * estimate) earns one MCS step up, gated by STEP_GAP_MS so a clean link ramps
-     * from the conservative startup MCS up to the channel ceiling in ~1s without
-     * banging on the PHY ceiling every ACK. No global entry cooldown anymore.
-     * NOTE: an up-step requires BOTH STEP_AFTER clean ACKs AND a near-zero loss
-     * estimate. The earlier "OR" let RA keep climbing on a lossy direction (where
-     * the ACK path is clean but the data path loses ~half the frames) and strand
-     * the peer at an unsustainable MCS with huge loss -- so it never reached the
-     * low-loss operating point. Requiring low loss makes RA throughput-aware. */
+    /* Proactive climb: an up-step requires BOTH STEP_AFTER clean ACKs AND a
+     * near-zero loss estimate -- climbing on a lossy direction strands the
+     * peer at an unsustainable MCS. */
     g_ack_stats.ra_ack_calls++;
     if( p->acks_since_step != 0xFFFFu ) p->acks_since_step++;
     uint8_t ceil_mcs = halow_ack_ra_evm_ceiling(p);
@@ -519,9 +397,8 @@ static void halow_ack_ra_on_ack( halow_ack_peer_t *p ){
 }
 
 static void halow_ack_ra_on_drop( halow_ack_peer_t *p ){
-    /* Grace: a fresh peer's first drops are link-negotiation noise, not channel
-     * quality. Feeding them walked a just-booted peer 7->0 within a second
-     * (LINKREQUEST retries), stranding it in the worst-TX-regime trap. */
+    /* Grace: a fresh peer's first drops are link-negotiation noise, not
+     * channel quality. */
     if( p->created_jiff != 0u &&
         (os_jiffies() - p->created_jiff) < os_msecs_to_jiffies(2000u) ){
         return;
@@ -539,9 +416,7 @@ static void halow_ack_ra_on_drop( halow_ack_peer_t *p ){
             g_ack_stats.ra_downshifts++;
             halow_ack_log_mcs("down", p);
         }
-        /* at/below floor: hold the rate -- descending into the broken low-rate
-         * regime would only raise loss and strand RA (climb-out gate cannot
-         * open there). The soft climb gate in ra_on_ack recovers the rate. */
+        /* at/below floor: hold the rate, the soft climb gate recovers it. */
     }
 }
 
@@ -572,11 +447,9 @@ static uint32_t halow_ack_fnv1a( const uint8_t *p, uint16_t len ){
 }
 
 bool halow_ack_is_ack_frame( const uint8_t *data, uint16_t len ){
-    /* LEGACY fid-list ACK: [A5][5A][evm>=0x80][fid16 x n]. The evm byte is an
-     * int8 dB value -- always >= 0x80 on the wire -- which is exactly what
-     * distinguishes it from the envelope (whose byte 2 = ver|type is always
-     * < 0x80 while versions stay <= 7). PROTOCOL_DESIGN.md section 7.1/7.2.
-     * Length must match the wire format and stay within capacity. */
+    /* Legacy fid-list ACK: [A5][5A][evm>=0x80][fid16 x n]. The int8 dB evm
+     * byte is always >= 0x80 on the wire -- disjoint from the envelope, whose
+     * byte 2 (ver|type) stays < 0x80. */
     return (data != NULL &&
             len >= HALOW_ACK_ACK_LEN_MIN &&
             len <= HALOW_ACK_ACK_LEN_MAX &&
@@ -599,23 +472,18 @@ static bool halow_ack_is_env_frame( const uint8_t *data, uint16_t len ){
 static uint8_t halow_env_ver( const uint8_t *d ){ return (uint8_t)(d[2] >> 4); }
 static uint8_t halow_env_type( const uint8_t *d ){ return (uint8_t)(d[2] & 0x0Fu); }
 
-/* True for any internal reliability-plumbing frame (legacy fid-ACK or
- * envelope Block-ACK) that must stay out of user-facing RX accounting:
- * nearby-table mcs/rssi/rx counters, the RX LED and the radio rx stats.
- * ACKs deliberately run at their own robust adaptive MCS (see
- * halow_ack_send_ack), so letting them update nearby.mcs made the display
- * read the ACK rate (e.g. MCS2) while data frames go at the RA rate (MCS7)
- * -- "TX MCS7 here, RX MCS2 there" on a perfectly healthy link. */
+/* Internal reliability plumbing (fid-ACK or Block-ACK): stays out of user-
+ * facing RX accounting -- ACKs run at their own robust MCS and would fake
+ * the displayed RX rate. */
 bool halow_ack_is_internal_frame( const uint8_t *data, uint16_t len ){
     if( halow_ack_is_ack_frame(data, len) ) return true;
     return (halow_ack_is_env_frame(data, len) &&
             halow_env_type(data) == HALOW_ENV_TYPE_ACK);
 }
 
-/* Record a received bundle seq into the peer's Block-ACK window.
- * bit 0 of rx_seq_win == rx_seq_last (newest); retransmitted dups keep the
- * bit set (idempotent). Jumps beyond the window reset it. Caller holds the
- * mutex. */
+/* Record a received bundle seq into the Block-ACK window: bit 0 of rx_seq_win
+ * == rx_seq_last (newest); dups keep their bit set. Jumps beyond the window
+ * reset it. Caller holds the mutex. */
 static void halow_ack_peer_rx_seq( halow_ack_peer_t *p, uint16_t seq ){
     if( !p->rx_seq_seen ){
         p->rx_seq_seen = true;
@@ -644,9 +512,8 @@ void halow_ack_config_set_default( halow_ack_config_t *cfg ){
     cfg->window        = HALOW_ACK_DEFAULT_WINDOW;
     cfg->ack_fids      = HALOW_ACK_DEFAULT_ACK_FIDS;
     cfg->agg           = 1u;
-    /* always max: bundles fill as large as the current MCS allows anyway
-     * (halow_ack_eff_agg_bytes caps per-MCS at runtime); a smaller configured
-     * value only throttles throughput and is no longer user-settable. */
+    /* agg_bytes is always the frame max: halow_ack_eff_agg_bytes caps per-MCS
+     * at runtime. */
     cfg->agg_bytes     = HALOW_ACK_FRAME_MAX;
     cfg->agg_hold_ms   = HALOW_ACK_AGG_HOLD_MS_DEF;
     cfg->ack_hold_ms   = HALOW_ACK_ACK_HOLD_MS_DEF;
@@ -658,9 +525,8 @@ void halow_ack_config_set_default( halow_ack_config_t *cfg ){
 static void halow_ack_config_clamp( halow_ack_config_t *cfg ){
     if( cfg->max_retries > 8u )    cfg->max_retries = 8u;
     if( cfg->timeout_ms < 5u )     cfg->timeout_ms = 5u;
-    /* The slot lifetime scales with the retry schedule (halow_ack_slot_life_ms),
-     * so any timeout/retries combination is internally consistent now; 300 ms
-     * stays as a plain sanity bound on a single wait. */
+    /* The slot lifetime scales with the retry schedule; 300 ms is a plain
+     * sanity bound on a single wait. */
     if( cfg->timeout_ms > 300u )   cfg->timeout_ms = 300u;
     if( cfg->ra_loss_up   > 100u ) cfg->ra_loss_up   = HALOW_ACK_DEFAULT_RA_LOSS_UP;
     if( cfg->ra_loss_down > 100u ) cfg->ra_loss_down = HALOW_ACK_DEFAULT_RA_LOSS_DOWN;
@@ -680,8 +546,7 @@ static void halow_ack_config_clamp( halow_ack_config_t *cfg ){
     cfg->agg_bytes = (uint16_t)HALOW_ACK_FRAME_MAX;
     if( cfg->agg_hold_ms == 0u ) cfg->agg_hold_ms = 1u;
     if( cfg->agg_hold_ms > 100u ) cfg->agg_hold_ms = 100u;
-    /* ack_hold must stay well under the retry timeout or batching would cause
-     * spurious retransmits; cap at half the timeout (after timeout is clamped). */
+    /* ack_hold must stay well under the retry timeout; cap at half of it. */
     if( cfg->ack_hold_ms > 100u ) cfg->ack_hold_ms = 100u;
     if( cfg->timeout_ms > 2u && cfg->ack_hold_ms > (uint16_t)(cfg->timeout_ms / 2u) )
         cfg->ack_hold_ms = (uint16_t)(cfg->timeout_ms / 2u);
@@ -697,23 +562,15 @@ void halow_ack_config_load( halow_ack_config_t *cfg ){
     if( cfg == NULL ) return;
     halow_ack_config_set_default(cfg);
 
-    /* One-time migration: configdb keys written by an older fw generation (or
-     * by debug-session POSTs) silently override the code defaults and have
-     * bricked throughput before (ra=0/tmo=200/window=4/aggbytes=2000 left in
-     * configdb pinned MCS to 1 and throttled the window). If the generation
-     * marker doesn't match, ignore the stale keys, re-seed configdb with the
-     * current defaults and stamp the marker. Called only from halow_ack_init
-     * (boot), so this runs exactly once per fw upgrade. */
+    /* One-time migration: stale configdb keys from an older fw generation
+     * silently override the defaults. On a marker mismatch, re-seed with the
+     * current defaults and stamp it. Boot-only. */
     if( configdb_get_i16(HALOW_ACK_CFG("ver"), &ver) != 0 ||
         ver != (int16_t)HALOW_ACK_CFG_VER ){
         log_info("ack: cfg gen %d -> %d, re-seeding defaults (stale overrides dropped)",
                  (int)ver, HALOW_ACK_CFG_VER);
-        /* The re-seed rewrites every ack key; on a flashdb sector dirtied by an
-         * earlier watchdog-aborted save, the GC erase/rewrite chain can run
-         * longer than the 3 s boot watchdog -> reset mid-save -> dirtier sector
-         * -> longer GC next boot: a permanent reboot spiral (observed after
-         * OTA: device never finished booting until the sector got wiped).
-         * Feed the watchdog around every write so one boot always completes. */
+        /* Feed the watchdog around every write: a flashdb GC chain can
+         * outlast the 3 s boot timeout. */
         mcu_watchdog_feed();
         halow_ack_config_save(cfg);
         mcu_watchdog_feed();
@@ -820,8 +677,7 @@ static halow_ack_slot_t *halow_ack_slot_for_peer( const uint8_t mac[6] ){
     return NULL;
 }
 
-/* Find the outstanding slot for (mac, fid). Used to free the exact frame the
- * incoming ACK is confirming. Replaces the old "free the single peer slot". */
+/* Find the outstanding slot for (mac, fid). */
 static halow_ack_slot_t *halow_ack_slot_match( const uint8_t mac[6], uint16_t fid ){
     for( uint32_t i = 0; i < g_ack_slot_count; i++ )
         if( g_ack_slots[i].in_use &&
@@ -832,20 +688,13 @@ static halow_ack_slot_t *halow_ack_slot_match( const uint8_t mac[6], uint16_t fi
 }
 
 static halow_ack_peer_t *halow_ack_peer_get( const uint8_t mac[6] ){
-    /* RA startup: begin at the RA ceiling and let real retry-exhaustion loss
-     * walk the rate down. Starting at the global default (MCS0 here) is a
-     * death spiral on a contended half-duplex channel: an MCS0 frame is ~10x
-     * longer on air than MCS6 for the same payload, so it collides with the
-     * peer's traffic far more often; the collision loss then pins RA at MCS0
-     * forever (observed: 80% per-attempt loss at MCS0 with SNR 17 while the
-     * same link ran MCS6 at <10%). Down-shifts need ~30% ewma loss, so a
-     * genuinely bad link settles to its sustainable rate within a few
-     * hundred ms. */
+    /* RA startup: begin at the EVM ceiling and let real retry-exhaustion walk
+     * the rate down. Starting at MCS0 is a death spiral on a half-duplex
+     * channel: an MCS0 frame is ~10x longer on air and collides far more. */
     halow_ack_peer_t *p = halow_ack_peer_find(mac);
     uint8_t init_mcs;
     if( g_ack_cfg.rate_adapt ){
-        /* known peer: EVM ceiling from its own feedback; fresh victim below
-         * starts mid (helper returns 4 for unknown EVM -- see evm_ceiling) */
+        /* known peer: EVM ceiling from its own feedback; unknown starts mid */
         init_mcs = ( p != NULL ) ? halow_ack_ra_evm_ceiling(p) : 4u;
         if( init_mcs > HALOW_ACK_RA_MAX_MCS ) init_mcs = HALOW_ACK_RA_MAX_MCS;
     }else{
@@ -860,8 +709,7 @@ static halow_ack_peer_t *halow_ack_peer_get( const uint8_t mac[6] ){
             p->loss_ewma_q8      = 0;
             p->acks_since_step   = 0;
             p->next_step_allowed = 0;   /* re-heard: allow immediate climb */
-            p->compat            = 1u;  /* link re-init: fall back to legacy,
-                                          * the beacon re-raises G2 if due */
+            p->compat            = 1u;  /* re-init: legacy until the beacon re-raises G2 */
             p->rx_seq_seen       = false;
             p->rx_seq_win        = 0u;
             log_info("ack: peer %02x:%02x:%02x:%02x:%02x:%02x re-heard after stale -> MCS %u",
@@ -883,10 +731,8 @@ static halow_ack_peer_t *halow_ack_peer_get( const uint8_t mac[6] ){
     }
     if( victim == NULL ) return NULL;
 
-    /* free the evicted peer's coalesce buffer before zeroing the slot
-     * (memset would otherwise drop the pointer and leak the allocation).
-     * A partial bundle's subframes were already consumed from TCP: count them
-     * as drops or the loss stays invisible (invariant 3). */
+    /* Free the evicted peer's agg_buf before zeroing the slot; a partial
+     * bundle's frames count as drops. */
     if( victim->agg_nsub > 0u ){
         g_ack_stats.dropped += victim->agg_nsub;
     }
@@ -899,11 +745,8 @@ static halow_ack_peer_t *halow_ack_peer_get( const uint8_t mac[6] ){
     victim->cur_retries = g_ack_cfg.max_retries;
     victim->tx_mcs      = init_mcs;
     victim->created_jiff = os_jiffies();
-    victim->compat      = 1u;   /* assume G1 (legacy magics) until a received
-                                 * v1 frame beacons G2 or the dead-bundle
-                                 * heuristic falls it to G0 */
-    /* fresh peer: start at the conservative default MCS and climb immediately as
-     * ACKs arrive (gated only by STEP_GAP_MS). memset above zeroed the counters. */
+    victim->compat      = 1u;   /* assume G1 until a v1 beacon or the G0 heuristic */
+    /* fresh peer: default MCS, climb gated by STEP_GAP_MS. */
     victim->last_seen   = os_jiffies();
     return victim;
 }
@@ -925,20 +768,11 @@ static halow_ack_slot_t *halow_ack_slot_alloc( void ){
     return NULL;
 }
 
-/* Claim a retry slot, BLOCKING (tcps thread) until one frees -- i.e. until an
- * ACK clears a slot (halow_ack_on_rx) or a retry-exhausted slot is dropped
- * (halow_ack_tick), both of which os_sema_up g_ack_slot_sem.
- *
- * Caller MUST hold g_ack_mutex; the mutex is RELEASED across os_sema_down so the
- * tick/ACK-RX can run and free slots -> no deadlock, then reacquired before
- * returning. sema-down-FIRST ordering keeps the count == free-slots exactly
- * (every claim consumes a token, every free returns one), so the post-wait
- * halow_ack_slot_alloc() always finds a slot. While the mutex is released no
- * other flush can proceed (it would need its own slot/token, and none is free
- * while we wait), so caller-held state (e.g. agg_buf) is safe across the wait.
- * tmo_ms==0 -> non-blocking try (used by the tick flush). Returns the slot
- * reserved (in_use==1) with the lock held, or NULL on timeout/non-blocking
- * failure. */
+/* Claim a retry slot. Caller MUST hold g_ack_mutex; it is RELEASED across
+ * os_sema_down so the tick/ACK-RX can free slots, then reacquired. The
+ * token-then-alloc ordering keeps the count exact, so the post-wait
+ * halow_ack_slot_alloc() always finds a slot. tmo_ms==0 -> non-blocking try.
+ * Returns the reserved slot (in_use==1) with the lock held, or NULL. */
 static halow_ack_slot_t *halow_ack_slot_claim_locked( uint32_t tmo_ms ){
     halow_ack_unlock();
     int32 r = os_sema_down(&g_ack_slot_sem, (int32)tmo_ms);
@@ -957,12 +791,8 @@ static halow_ack_slot_t *halow_ack_slot_claim_locked( uint32_t tmo_ms ){
 
 static void halow_ack_send_ack( int8_t evm, const uint8_t dest_mac[6],
                                 const uint16_t fids[HALOW_ACK_ACK_FIDS_MAX] ){
-    /* Rate-scale the ACK like the data RA does: the peer's EVM ceiling is a
-     * direct measure of how well THIS peer hears our signal, which is exactly
-     * what governs whether OUR ACK frame reaches it. Fixed-rate ACKs (first
-     * MCS10, then a fixed 6) each broke a link regime: fast modes die on weak
-     * links, and on this HW the very low modes are their own broken regime.
-     * Callers hold no lock here (both drop g_ack_mutex before send_ack). */
+    /* Rate-scale the ACK by the peer's EVM ceiling: it measures how well THIS
+     * peer hears our signal, which is what governs whether our ACK reaches it. */
     uint8_t ack_mcs = HALOW_ACK_ACK_MCS_MAX;
     bool env_ack = false;
     uint16_t base = 0u;
@@ -974,18 +804,14 @@ static void halow_ack_send_ack( int8_t evm, const uint8_t dest_mac[6],
         if( c > HALOW_ACK_ACK_MCS_MAX ) c = HALOW_ACK_ACK_MCS_MAX;
         if( c < HALOW_ACK_ACK_MCS_MIN ) c = HALOW_ACK_ACK_MCS_MIN;
         ack_mcs = c;
-        /* Envelope Block-ACK when the peer is G2 and we have a seq window:
-         * [evm][base:2][bitmap:8], bit i == seq base+i received. base is the
-         * OLDEST seq in the window (rx_seq_last-63); window bit0 == newest,
-         * so bitmap bit i mirrors window bit (63-i). */
+        /* Envelope Block-ACK: [evm][base:2][bitmap:8], bit i == seq base+i
+         * received; base is the OLDEST seq, so bitmap bit i mirrors window
+         * bit (63-i). */
         bool probe = (ap->compat < 2u) && (g_ack_cfg.env != 0u)
                      && (++ap->ack_probe_cnt >= 8u);
         if( probe ) ap->ack_probe_cnt = 0u;
-        /* rx_seq_seen not required: an empty window (base 0, bitmap 0) is a
-         * valid probe/beacon frame -- it announces "we speak envelope" and
-         * frees nothing. Requiring it here deadlocked the bootstrap: the
-         * window only fills from env bundles, which nobody sends until the
-         * beacon works. */
+        /* An empty window (base 0, bitmap 0) is a valid probe: requiring
+         * rx_seq_seen deadlocked the bootstrap. */
         if( ((ap->compat == 2u) || probe) && g_ack_cfg.env != 0u ){
             env_ack = true;
             base = (uint16_t)(ap->rx_seq_last - (HALOW_ACK_SEQ_WINDOW - 1u));
@@ -1036,16 +862,11 @@ static void halow_ack_send_ack( int8_t evm, const uint8_t dest_mac[6],
     }
 }
 
-/* Emit a peer's accumulated coalesce buffer as one A-MSDU bundle: claim a
- * single retry slot keyed by fnv1a(bundle), hand it to halow_tx, reset the
- * buffer. Caller MUST hold g_ack_mutex; it is released across the slot wait
- * (claim_locked) and across halow_tx (mirrors the retry path). A 1-subframe
- * bundle is unwrapped to a plain frame so a lone frame pays no bundle overhead.
- *
- * can_block=true (data path, tcps thread): BLOCKS on the slot semaphore when the
- * ACK window is full, so the window paces TX and TCP recv-window backpressure
- * engages -- no frame is ever fire-and-forget. can_block=false (tick): holds the
- * bundle (returns false) when no slot is free, retrying next tick. */
+/* Emit a peer's coalesce buffer as one bundle: claim one retry slot keyed by
+ * fnv1a(bundle), send, reset. Caller holds g_ack_mutex; it is released across
+ * the slot wait and across halow_tx. A 1-subframe bundle is unwrapped to a
+ * plain frame. can_block=true (tcps) blocks on the slot semaphore when the
+ * window is full; can_block=false (tick) holds the bundle and returns false. */
 static bool halow_ack_agg_flush_locked( halow_ack_peer_t *p, bool can_block ){
     (void)can_block;   /* reserved for the decoupled-TX-backpressure path */
     if( p == NULL || p->agg_nsub == 0u ) return true;
@@ -1053,25 +874,19 @@ static bool halow_ack_agg_flush_locked( halow_ack_peer_t *p, bool can_block ){
     if( (os_jiffies() - g_last_data_tx_jiff) < os_msecs_to_jiffies(g_ack_cfg.data_gap_ms) ){
         return false;   /* held; tick/next frame retries after the gap */
     }
-    /* flow control: hold the bundle (don't enqueue, don't reset agg_buf) if the
-     * LMAC TX buffer is nearly full. The tick / next-frame call retries once the
-     * queue drains. Returns false when held. */
+    /* flow control: hold the bundle when the LMAC TX buffer is nearly full. */
     if( halow_get_tx_vacancy() < HALOW_ACK_TX_VACANCY_LOW ) return false;
 
-    halow_ack_slot_t *s = halow_ack_slot_claim_locked( 0u );   /* non-blocking: the tcps
-     * thread drains the RF->TCP ring too, so blocking it here would starve RX
-     * delivery (verified: a blocking claim turned B->A into 98% loss). */
+    halow_ack_slot_t *s = halow_ack_slot_claim_locked( 0u );   /* non-blocking: tcps
+     * also drains the RF->TCP ring and must not block here */
     if( s == NULL ){
-        /* ACK window full: HOLD the bundle (return false, leave agg_buf intact).
-         * The caller (halow_ack_tx) then returns HALOW_ACK_TX_THROTTLE so the TCP
-         * recv loop skips netconn_recv -> the blasting sender paces itself; the
-         * tick (or the next frame once a slot frees) flushes this bundle. No
-         * fire-and-forget -- every bundle keeps its delivery guarantee. */
+        /* ACK window full: HOLD the bundle (return false, leave agg_buf
+         * intact) -> the caller returns THROTTLE for TCP backpressure; the
+         * tick or the next frame flushes it. No fire-and-forget. */
         return false;
     }
-    /* Re-validate under the lock: a racing flush for the same peer may have sent
-     * this bundle while we waited for the slot (two flushers each claimed a
-     * token when the window had room). If so, release our slot and leave. */
+    /* Re-validate under the lock: a racing flush may have sent this bundle
+     * while we waited for the slot. */
     if( p->agg_nsub == 0u ){
         s->in_use = 0;
         halow_ack_token_return();
@@ -1085,11 +900,9 @@ static bool halow_ack_agg_flush_locked( halow_ack_peer_t *p, bool can_block ){
     memcpy(s->dest_mac, p->mac, 6);
 
     if( p->compat == 2u && g_ack_cfg.env != 0u ){
-        /* Envelope v1 bundle: [A5][5A][ver|type][seq:2][nsub:1]{len,payload}.
-         * agg_buf body (offset 3 onward) is layout-identical to the legacy
-         * body, so we just re-prefix. Single-sub bundles stay wrapped -- the
-         * type byte discriminates, no unwrap needed (G2 peers parse nsub=1).
-         * s->seq feeds the Block-ACK match on our side of the retx path. */
+        /* Envelope v1 bundle: [A5][5A][ver|type][seq:2][nsub:1]{len,payload};
+         * the agg_buf body is layout-identical to the legacy body, so we just
+         * re-prefix. Single-sub bundles stay wrapped (G2 peers parse nsub=1). */
         uint16_t seq = p->tx_seq++;
         if( seq == 0xFFFFu ) seq = p->tx_seq++;
         s->seq      = seq;
@@ -1164,21 +977,9 @@ bool halow_ack_tx_ready( void ){
     if( halow_get_tx_vacancy() < HALOW_ACK_TX_VACANCY_LOW ) return false;
     halow_ack_lock();
     /* Accept only when a retry slot is (or is about to be) free: the ACK
-     * window IS the pacer. The previous extra branch ("agg buffer can absorb
-     * one more frame") let the recv loop keep consuming while the window was
-     * pinned full -- bundles piled into agg_buf, flushes held, and every
-     * over-capacity frame was consumed-then-THROTTLE-dropped (measured: ACK
-     * RTT ~220 ms under bidir load, window 8 -> ~36 fps capacity, 40 fps
-     * offered -> ~20% loss). With slot-gated acceptance the TCP recv loop
-     * skips instead, the sender's TCP window closes, offered rate tracks the
-     * ACK recycling rate, the TX backlog drains, RTT falls and capacity
-     * rises: no frame is consumed without a delivery guarantee behind it. */
-    /* Require TWO free slots: the probe passing with exactly one free slot
-     * let the recv loop consume a chunk whose 4th frame flushed the coalesce
-     * bundle into that last slot; the NEXT frame then hit a full window and
-     * was consumed-then-THROTTLE-dropped (measured: ~10% loss at 40 fps with
-     * RTT 150-220 ms). One spare slot covers the pending agg bundle; frames
-     * beyond that stay in the TCP socket and the sender paces. */
+     * window IS the pacer. */
+    /* Require TWO free slots: one spare covers the pending agg bundle, so a
+     * full window THROTTLEs instead of consuming-then-dropping. */
     uint32_t free_slots = 0;
     for( uint32_t i = 0; i < g_ack_slot_count; i++){
         if( !g_ack_slots[i].in_use ) free_slots++;
@@ -1210,9 +1011,7 @@ int32_t halow_ack_tx( const uint8_t *payload, uint16_t len, const uint8_t dest_m
         }
         halow_ack_unlock();
         /* CONTRACT: a frame consumed from TCP must reach the air. Parking is
-         * full -> return THROTTLE and let the caller HOLD the frame (the
-         * tcps stash): TCP recv pauses, the window closes, the sender paces
-         * itself while the tick drains parking. NEVER drop here. */
+         * full -> THROTTLE so the caller holds the frame. NEVER drop here. */
         return HALOW_ACK_TX_THROTTLE;
     }
     g_ack_stats.tx_frames++;
@@ -1231,11 +1030,8 @@ static void halow_ack_pend_drain( void ){
         uint32_t idx = g_pend_head % HALOW_ACK_PEND_N;
         int32_t r = halow_ack_tx_uc(g_pend_buf[idx], g_pend_len[idx], g_pend_mac[idx]);
         if( r == HALOW_ACK_TX_THROTTLE ){
-            /* Still saturated. Bounded patience: a frame that can NEVER leave
-             * (peer gone, frame permanently rejected) must not head-of-line
-             * block the FIFO forever -- after ~5 s of failed ticks, drop it
-             * loudly. Normal saturation never gets close: slots free within
-             * one retry cycle (~100 ms). */
+            /* Still saturated: bounded patience, then a loud drop so a frame
+             * that can never leave does not head-of-line block the FIFO. */
             if( ++g_pend_tries[idx] >= HALOW_ACK_PEND_MAX_TRIES ){
                 log_warn("pend: frame to %02x:%02x:%02x:%02x:%02x:%02x undeliverable "
                          "(%u tries), len=%u -- dropping",
@@ -1268,16 +1064,11 @@ static int32_t halow_ack_tx_uc( const uint8_t *payload, uint16_t len, const uint
         memcmp(dest_mac, mac_broadcast, 6) == 0 ||
         (uint32_t)len > HALOW_ACK_FRAME_MAX ){
 
-        /* Broadcast (or plain-path) send. Broadcast frames can never be ACKed,
-         * so no retry slot can cover them: one faded preamble and the frame is
-         * gone forever. Poor-conditions mitigation: transmit each broadcast
-         * bc_repeat times back-to-back (the LMAC TX queue serialises the
-         * copies). RX deliberately skips broadcast dedup -- RNS above dedups by
-         * packet hash -- so the copies arrive as harmless duplicates. Repeats
-         * are strictly best-effort: stop at the first failed send or when the
-         * LMAC TX budget runs low, so the extra copies never displace live
-         * unicast/ACK traffic. Unicast NOACK (max_retries==0) and oversized
-         * frames keep a single copy. */
+        /* Broadcast can never be ACKed, so no retry slot covers it: transmit
+         * each copy bc_repeat times back-to-back (RX skips broadcast dedup,
+         * RNS dedups by hash). Repeats are best-effort: stop at the first
+         * failed send or when the TX budget runs low. Unicast NOACK and
+         * oversized frames keep a single copy. */
         uint8_t copies = (memcmp(dest_mac, mac_broadcast, 6) == 0 &&
                           g_ack_cfg.bc_repeat > 1u)
                        ? g_ack_cfg.bc_repeat : 1u;
@@ -1290,17 +1081,12 @@ static int32_t halow_ack_tx_uc( const uint8_t *payload, uint16_t len, const uint
             if( r >= 0 ){
                 g_ack_stats.tx_frames++;   /* keep tx_frames == wire frames */
                 g_ack_stats.bc_repeats++;
-                /* RX counts every broadcast copy it hears; mirror it on TX or
-                 * the main-page TX/RX numbers skew apart on announce-heavy
-                 * links (user-exempted from strict matching, keep symmetric). */
+                /* RX counts every broadcast copy it hears; mirror it on TX. */
                 statistics_radio_register_tx_package(len);
             }
         }
-        /* The frame was delivered if the FIRST copy left; a failed extra copy
-         * (budget ran out mid-repeat) must not be reported as a drop of a
-         * frame that actually went out. A failed FIRST copy is THROTTLE, not
-         * a loss: the caller parks/stashes the frame and we retry (contract:
-         * anything consumed from TCP must reach the air). */
+        /* First copy out = delivered; a failed FIRST copy is THROTTLE, not a
+         * loss: the caller parks the frame and we retry. */
         return first_ok ? 0 : HALOW_ACK_TX_THROTTLE;
     }
 
@@ -1314,8 +1100,8 @@ static int32_t halow_ack_tx_uc( const uint8_t *payload, uint16_t len, const uint
         return r;
     }
     uint8_t pmcs = p->tx_mcs;
-    /* NOACK peer (cur_retries slid to 0): don't bundle -- a lost bundle would
-     * lose every frame in it with no retry. Send plain. */
+    /* NOACK peer (cur_retries slid to 0): a lost bundle would lose every
+     * frame in it with no retry -- send plain. */
     if( p->cur_retries == 0u ){
         halow_ack_unlock();
         int32_t r = halow_tx(payload, len, dest_mac, pmcs);
@@ -1324,11 +1110,9 @@ static int32_t halow_ack_tx_uc( const uint8_t *payload, uint16_t len, const uint
         return r;
     }
 
-    /* ---- A-MSDU coalescing: pack per-peer frames into one bundle/MPDU/ACK ----
-     * Guard ensures the frame (hdr3+len2+payload) fits a bundle and the fixed
-     * agg_buf/FRAME_MAX; otherwise fall through to the plain per-frame path.
-     * The bundle limit is MCS-aware: capped to the 802.11ah max payload for the
-     * peer's current MCS so the LMAC can actually transmit the resulting MPDU. */
+    /* ---- A-MSDU coalescing: pack per-peer frames into one bundle/MPDU/ACK.
+     * The bundle limit is MCS-aware (max payload for the peer's current MCS);
+     * frames that cannot fit fall through to the plain per-frame path. */
     uint16_t eff_bytes = halow_ack_eff_agg_bytes(pmcs);
     if( g_ack_cfg.agg != 0u &&
         (uint32_t)len + 5u <= eff_bytes &&
@@ -1340,15 +1124,9 @@ static int32_t halow_ack_tx_uc( const uint8_t *payload, uint16_t len, const uint
               p->agg_nsub + 1u > HALOW_ACK_AGG_MAX_SUB ) ){
             (void)halow_ack_agg_flush_locked(p, true);
         }
-        /* flush was HELD (ACK window full or TX buffer low) -> the old bundle is
-         * still here and this frame won't fit. Signal THROTTLE: the TCP recv loop
-         * skips netconn_recv (TCP backpressure) while still draining RF->TCP. The
-         * tick/next-frame flushes the held bundle once a slot frees. This replaces
-         * the old drop-on-full -- under decoupled backpressure the sender paces
-         * itself, so this path is reached only on transient saturation.
-         * The frame was already consumed from TCP, so a THROTTLE here IS a real
-         * loss for the sender -- count it, or thousands of frames vanish without
-         * a trace in the stats (observed: 720/s eaten silently). */
+        /* flush was HELD (window full or TX buffer low) and this frame won't
+         * fit: THROTTLE for TCP backpressure. The frame was already consumed
+         * from TCP, so count it. */
         if( p->agg_nsub > 0u &&
             ( (uint32_t)p->agg_len + 2u + len > eff_bytes ||
               p->agg_nsub + 1u > HALOW_ACK_AGG_MAX_SUB ) ){
@@ -1357,9 +1135,8 @@ static int32_t halow_ack_tx_uc( const uint8_t *payload, uint16_t len, const uint
         }
         /* start a fresh bundle if empty */
         if( p->agg_nsub == 0u ){
-            /* lazy-alloc coalesce buffer (kept for peer lifetime; freed on
-             * eviction). On heap exhaustion, skip aggregation for this frame
-             * and send it plain -- correct, just no throughput gain. */
+            /* lazy-alloc coalesce buffer; on heap exhaustion send this frame
+             * plain -- correct, just no throughput gain. */
             if( p->agg_buf == NULL ){
                 p->agg_buf = (uint8_t *)os_malloc(HALOW_ACK_FRAME_MAX);
                 if( p->agg_buf == NULL ){
@@ -1395,12 +1172,8 @@ static int32_t halow_ack_tx_uc( const uint8_t *payload, uint16_t len, const uint
     }
 
     /* ---- plain per-frame path (aggregation off / oversized / cap) ----
-     * Claim a retry slot NON-blocking (the tcps thread also drains the RF->TCP
-     * ring, so it must not block here). On a full window, signal THROTTLE so the
-     * TCP recv loop backpressures the sender; with agg on (default) this path is
-     * rare anyway. Pacing: a saturated LMAC TX buffer must THROTTLE (frame
-     * stays unconsumed) rather than -6-drop -- a lost frame here burns retry
-     * budget for nothing. */
+     * Non-blocking claim: a full window THROTTLEs so the TCP recv loop
+     * backpressures the sender. */
     if( halow_get_tx_vacancy() < HALOW_ACK_TX_VACANCY_LOW ){
         halow_ack_unlock();
         return HALOW_ACK_TX_THROTTLE;   /* the wrapper parks or counts */
@@ -1428,8 +1201,8 @@ static int32_t halow_ack_tx_uc( const uint8_t *payload, uint16_t len, const uint
     return pr;
 }
 
-/* Snapshot the most-recent ack_fids entries of the rolling dedup window (most
- * recent first) as low-16 fids for a cumulative ACK. Caller MUST hold g_ack_mutex. */
+/* Snapshot the most-recent ack_fids entries of the rolling dedup window
+ * (most recent first) as low-16 fids for a cumulative ACK. */
 static void halow_ack_build_fids_locked( halow_ack_peer_t *p, uint16_t fids[HALOW_ACK_ACK_FIDS_MAX] ){
     uint8_t want = g_ack_cfg.ack_fids;
     if( want > HALOW_ACK_ACK_FIDS_MAX ) want = HALOW_ACK_ACK_FIDS_MAX;
@@ -1442,11 +1215,9 @@ static void halow_ack_build_fids_locked( halow_ack_peer_t *p, uint16_t fids[HALO
     }
 }
 
-/* Record one ACK round trip. born_rtt keeps the historical born-based stat;
- * the EWMA tracks ONLY first-attempt TX->ACK latency (retries_used==0), which
- * is what the first-retry pacing needs -- a slot that already retransmitted
- * carries its backoff waits in the timestamp distance and would inflate the
- * estimate with exactly the stalls we are trying to avoid. */
+/* Record one ACK round trip. The EWMA tracks ONLY first-attempt TX->ACK
+ * latency (retries_used==0) -- a retransmitted slot carries its backoff
+ * waits in the timestamp distance and would inflate the pacing estimate. */
 static void halow_ack_rtt_record( uint32_t born_rtt, uint32_t lasttx_rtt, uint8_t retries_used ){
     g_ack_last_match_jiff = os_jiffies();
     if( g_ack_stats.ack_rtt_hits >= 1000000u ){
@@ -1473,11 +1244,10 @@ bool halow_ack_on_rx( const uint8_t *payload, uint16_t len, const uint8_t src_ma
         return true;
     }
 
-    /* ---- envelope v1 frames (PROTOCOL_DESIGN.md) ----
-     * Any v1 frame doubles as the capability beacon: the peer demonstrably
-     * speaks G2. ACK -> process the bitmap; BUNDLE -> record the seq window
-     * (dedup hits included) and fall through to the normal data path;
-     * anything else -> count and drop, never guess-parse (rule R3). */
+    /* ---- envelope v1 frames ----
+     * Any v1 frame doubles as the capability beacon (the peer speaks G2).
+     * ACK -> process the bitmap; BUNDLE -> record the seq window and fall
+     * through to the data path; anything else -> count and drop. */
     if( halow_ack_is_env_frame(payload, len) ){
         uint8_t ev = halow_env_ver(payload);
         uint8_t et = halow_env_type(payload);
@@ -1555,13 +1325,9 @@ bool halow_ack_on_rx( const uint8_t *payload, uint16_t len, const uint8_t src_ma
             p->evm_ewma_slow = (int8_t)(((int16_t)p->evm_ewma_slow * 31 + (int16_t)ack_evm) / 32);
             halow_ack_ra_on_ack(p);
         }
-        /* Cumulative ACK: free every outstanding slot whose fid appears among
-         * the fids carried in this ACK frame. Bound nfids by the RECEIVED
-         * LENGTH only, not our own ack_fids config: a peer configured with a
-         * larger ack_fids legitimately carries more fids than we would send,
-         * and capping them here silently dropped the tail -- those slots
-         * stalled, retransmitted and died as "loss" (32 vs 16 = half the ACK
-         * information thrown away). Protocol hard cap: HALOW_ACK_ACK_FIDS_MAX. */
+        /* Cumulative ACK: free every outstanding slot whose fid appears in
+         * this ACK. Bound nfids by the RECEIVED length, not our own config:
+         * a wider peer legitimately carries more fids. */
         uint32_t nfids = (len - 3u) / 2u;
         if( nfids > HALOW_ACK_ACK_FIDS_MAX ) nfids = HALOW_ACK_ACK_FIDS_MAX;
         for( uint32_t k = 0; k < nfids; k++ ){
@@ -1587,9 +1353,7 @@ bool halow_ack_on_rx( const uint8_t *payload, uint16_t len, const uint8_t src_ma
     }
 
     /* Recovery from a wrong L0 downgrade: this peer just sent us a magic
-     * frame (we are in the data path with an ACK/bundle-shaped payload or it
-     * fell through from the envelope branch) -- it demonstrably has the
-     * protocol layer. Legacy bundle magic check here covers G1 traffic. */
+     * frame, so it demonstrably has the protocol layer. */
     if( len >= 3u && payload[0] == HALOW_ACK_AGG_MAGIC0 && payload[1] == HALOW_ACK_AGG_MAGIC1 ){
         halow_ack_lock();
         halow_ack_peer_t *rp = halow_ack_peer_find(src_mac);
@@ -1605,13 +1369,8 @@ bool halow_ack_on_rx( const uint8_t *payload, uint16_t len, const uint8_t src_ma
     uint16_t fids[HALOW_ACK_ACK_FIDS_MAX] = {0};
     bool send_ack_now = true;       /* default: no peer -> send an empty ACK now */
     int8_t ack_evm = evm;
-    /* Broadcast-destined data (addr3 == broadcast, e.g. RNS announce/transport
-     * traffic or a peer that has not learned our MAC yet) gets NO ACK: the
-     * sender never claimed a retry slot for it, so our ACK can never match one
-     * -- it is pure airtime waste plus acks_rx_dup noise on the sender (one
-     * small test showed ~1200 useless duplicate-fid hits). The RNS layer above
-     * handles broadcast duplicates itself, so dedup is skipped too and the
-     * rolling fid window stays pure-unicast for the cumulative ACKs. */
+    /* Broadcast data gets NO ACK: the sender never claimed a retry slot for
+     * it, so our ACK can never match one -- pure airtime waste. */
     bool to_me = (dst_mac != NULL && memcmp(dst_mac, mac_broadcast, 6) != 0);
 
     halow_ack_lock();
@@ -1637,9 +1396,8 @@ bool halow_ack_on_rx( const uint8_t *payload, uint16_t len, const uint8_t src_ma
                 p->ack_due = false;
                 halow_ack_build_fids_locked(p, fids);
             }else{
-                /* defer: one ACK per ack_fids frames cuts the ACK-TXOP count, which is
-                 * the main throughput limiter on 1MHz. The tick sends it after
-                 * ack_hold_ms (well under the retry timeout). */
+                /* defer: one ACK per ack_fids frames cuts the ACK-TXOP count,
+                 * the main throughput limiter on 1MHz. */
                 send_ack_now = false;
                 if( !p->ack_due ){
                     p->ack_due = true;
@@ -1651,10 +1409,8 @@ bool halow_ack_on_rx( const uint8_t *payload, uint16_t len, const uint8_t src_ma
         }
     }else{
         send_ack_now = false;
-        /* Unicast to us but no peer slot available (table full of peers with
-         * bundles/slots in flight): the frame IS delivered, but it can never
-         * be ACKed -- the sender will retransmit to exhaustion. Count it so
-         * the "why is the peer retransmitting" question has an answer. */
+        /* Unicast to us but no peer slot available: the frame IS delivered,
+         * but it can never be ACKed -- count it. */
         if( to_me ){
             g_ack_stats.noack_hits++;
         }
@@ -1675,11 +1431,8 @@ bool halow_ack_on_rx( const uint8_t *payload, uint16_t len, const uint8_t src_ma
 
 void halow_ack_tick( void ){
     halow_tx_vacancy_watchdog();   /* self-heal TX budget after lost TX-completes */
-    /* Free a retired slot array once its grace period has passed (see
-     * halow_ack_slots_retire). Check+swap under g_ack_mutex: the retire path
-     * (config apply from the HTTP task) could otherwise free the same pointer
-     * concurrently, or swap in a NEW retired array that we then freed
-     * immediately -- defeating the grace period entirely. */
+    /* Free a retired slot array once its grace period has passed; the
+     * check+swap runs under g_ack_mutex. */
     if( g_ack_retire_n > 0u ){
         halow_ack_lock();
         for( uint32_t i = 0u; i < g_ack_retire_n; ){
@@ -1736,26 +1489,10 @@ void halow_ack_tick( void ){
     halow_ack_default_mcs_refresh();   /* BEFORE the lock: 5 s-TTL flash read */
     halow_ack_lock();
     uint8_t dflt_mcs = halow_ack_default_mcs();
-    /* NOTE: an ACK-starvation "pressure mode" (recycle slots at 1100 ms when
-     * matches dry up) was tried here and REVERTED: starvation cannot tell
-     * mutual-deaf saturation (recycle helps) from an ACK path that is simply
-     * lossy while the data path is clean (B->A here: A's ACKs cross the 1 dBm
-     * direction). In the latter case recycling murdered slots whose ACKs were
-     * merely late/lost-in-flight -- the clean direction went 0.3% -> 5.1%
-     * loss. The full-schedule lifetime stays unconditional; sustained MAX
-     * offered bidir on a half-duplex link with a 65%-loss direction is a
-     * collapse by physics, and real traffic (TCP window + RNS windowing)
-     * never offers it. */
     for( uint32_t i = 0; i < g_ack_slot_count; i++ ){
         halow_ack_slot_t *s = &g_ack_slots[i];
         if( !s->in_use ) continue;
-        /* Hard lifetime FIRST and UNGATED: a slot past its deadline is dropped
-         * no matter what -- the deadline check used to sit below the backoff
-         * `continue` and the TX-vacancy gate, so under mutual saturation (both
-         * peers blasting) slots were neither retransmitted NOR dropped: the
-         * window pinned at 8/8, acceptance stopped, goodput hit zero while
-         * both CPUs idled (bench MAX blast, build 42). Dropping needs no TX
-         * budget by definition. */
+        /* Hard lifetime FIRST and UNGATED: dropping needs no TX budget. */
         /* NOTE: an earlier "adaptive" variant halved the lifetime to 400 ms
          * when the window pinned full -- it MURDERED slots whose ACKs were
          * merely slow (bidir RTT stretches to 400-800 ms), converting
@@ -1770,11 +1507,8 @@ void halow_ack_tick( void ){
             g_ack_stats.drop_deadline++;
             if( pdead != NULL ){
                 pdead->dropped++;
-                /* G0 heuristic (the MAIN death path under a silent peer):
-                 * 12 bundles dead without a single ACK == the peer has no ACK
-                 * layer -> plain-only, stop wasting bundles its RNS parser
-                 * cannot read. Measured: 406 deadline deaths with compat
-                 * still L1 while a 2.2.0b peer dropped every bundle. */
+                /* G0 heuristic: 12 bundles dead without a single ACK == the
+                 * peer has no ACK layer -> plain-only. */
                 pdead->l0_strikes++;
                 if( pdead->compat == 1u && pdead->l0_strikes >= 12u ){
                     pdead->compat = 0u;
@@ -1784,36 +1518,21 @@ void halow_ack_tick( void ){
                              pdead->mac[0],pdead->mac[1],pdead->mac[2],
                              pdead->mac[3],pdead->mac[4],pdead->mac[5]);
                 }
-                /* Feed RA only when the TX path is NOT saturated. A deadline
-                 * drop under a stuffed TX buffer is congestion (our own queue
-                 * couldn't drain), not channel loss -- punishing RA for it
-                 * pins the peer at a low MCS, which drains even slower, which
-                 * drops even more: a congestion death spiral (observed: one
-                 * direction stuck at MCS0 ~60% "loss" while the peer ran
-                 * MCS7 at 600+ kbit/s on the same channel). Retry-exhaustion
-                 * drops (4 real air attempts, no ACK) still feed RA below. */
+                /* Feed RA only when the TX path is NOT saturated: a deadline
+                 * drop under a stuffed buffer is congestion, not channel loss.
+                 * Retry-exhaustion drops (real air attempts, no ACK) still
+                 * feed RA below. */
                 if( halow_get_tx_vacancy() >= HALOW_ACK_TX_VACANCY_LOW ){
                     halow_ack_ra_on_drop(pdead);
                 }
             }
             continue;
         }
-        /* Exponential retransmit backoff: each retry waits twice as long as the
-         * previous one. Without this, a frame whose ACK was lost retransmits
-         * every timeout_ms; on a half-duplex link the retransmit flood deafens
-         * the sender to the peer's (late-arriving) ACKs, so it retransmits yet
-         * more -- a bidirectional livelock where one direction captures the
-         * channel and the other starves to 100% loss even at trivial offered
-         * load. Backing off exponentially drains the retransmit noise within
-         * ~1 s so the reverse-direction ACKs can get through and break the
-         * cycle. retries_used is the count already attempted; cap the shift so
-         * a genuinely-lost frame still drops within bounded time.
-         * Shift cap 3 (8x, ~800 ms at timeout=100): the old cap 5 (32x, 3.2 s)
-         * let an overloaded frame ZOMBIE a slot for 6+ s -- under a bidir blast
-         * the whole 8-slot window filled with zombies, acceptance collapsed to
-         * ~1 frame/s and both directions died (bench: 96-98% loss). The layer
-         * above (TCP) retransmits end-to-end anyway; a stale frame is worth
-         * less than a free slot. */
+        /* Exponential retransmit backoff: each retry waits twice as long as
+         * the previous one. Without it, a frame whose ACK was lost retransmits
+         * every timeout_ms and the flood deafens the sender to the peer's
+         * late ACKs -- a bidirectional livelock. Shift cap 3: a stale frame
+         * must still drop within bounded time (TCP retransmits anyway). */
         uint64_t backoff_j = timeout_j;
         if( s->retries_used > 0u ){
             uint32_t shift = s->retries_used;
@@ -1834,8 +1553,7 @@ void halow_ack_tick( void ){
         }
         if( (now - s->tx_jiff) < backoff_j ) continue;
         /* TX buffer nearly full: skip this slot THIS round (budget and timer
-         * untouched) and let the queue drain -- retransmitting into a saturated
-         * LMAC would -6-drop silently and waste the retry budget. */
+         * untouched) and let the queue drain. */
         if( halow_get_tx_vacancy() < HALOW_ACK_TX_VACANCY_LOW ) continue;
 
         halow_ack_peer_t *p = halow_ack_peer_find(s->dest_mac);
@@ -1844,23 +1562,17 @@ void halow_ack_tick( void ){
             halow_ack_token_return();   /* peer gone: free the slot token */
             continue;
         }
-        /* Per-slot retry budget (fixed = max_retries; the lifetime cap above
-         * already removed everything older). Was shared via the peer's
-         * cur_retries, which with a sliding window would let several dropping
-         * slots slide the peer to NOACK and disable retries entirely. */
+        /* Per-slot retry budget: a budget shared via the peer's cur_retries
+         * would let several dropping slots slide the peer to NOACK. */
         if( s->retries_used < g_ack_cfg.max_retries ){
             s->retries_used++;
             s->tx_jiff = now;
             g_ack_stats.retransmitted++;
             p->retransmitted++;
             uint8_t pmcs = p->tx_mcs;
-            /* Copy out under the lock: once g_ack_mutex is dropped, an ACK for
-             * this very fid can arrive, free the slot, and a tcps-thread claim
-             * can immediately reuse it (lowest-index alloc) -- memcpy'ing a new
-             * frame over s->frame while the halow_tx below still reads it: a
-             * torn frame goes on air and the retry budget is already spent.
-             * The tick task is the only retransmit context, so one static
-             * scratch is safe. */
+            /* Copy out under the lock: once the mutex is dropped, an ACK can
+             * free this slot and a claim can reuse it -- memcpy'ing a new
+             * frame over s->frame mid-send would put a torn frame on air. */
             static uint8_t retx_buf[HALOW_ACK_FRAME_MAX];
             uint16_t retx_len = s->frame_len;
             uint8_t  retx_mac[6];
@@ -1886,11 +1598,8 @@ void halow_ack_tick( void ){
             halow_ack_ra_on_drop(p);
         }
     }
-    /* Drain A-MSDU coalesce buffers held past agg_hold_ms (partial bundles that
-     * never reached the size threshold in halow_ack_tx). Under saturation the
-     * inline flush dominates; this only releases sparse/stragglers so a low-rate
-     * peer isn't delayed indefinitely. Lock is held here; flush releases it
-     * across halow_tx and reacquires. */
+    /* Drain A-MSDU coalesce buffers held past agg_hold_ms; the flush releases
+     * the lock across halow_tx and reacquires. */
     if( g_ack_cfg.agg != 0u ){
         uint64_t hold_j = os_msecs_to_jiffies(g_ack_cfg.agg_hold_ms);
         if( hold_j == 0u ) hold_j = 1u;
@@ -1898,25 +1607,14 @@ void halow_ack_tick( void ){
             halow_ack_peer_t *p = &g_ack_peers[i];
             if( !p->in_use || p->agg_nsub == 0u ) continue;
             if( (now - p->agg_first_jiff) >= hold_j ){
-                /* Flush the partial bundle as soon as agg_hold_ms (2 ms default,
-                 * i.e. the next tick) elapses. The old gate held stragglers until
-                 * MAX_HOLD-50 (~950 ms): under saturation the inline flush fills
-                 * bundles anyway, so the gate only ever fired on SPARSE traffic --
-                 * and request/response protocols (RNS Resource windows: one small
-                 * RESOURCE_REQ per round, partial tail bundle per window) round-
-                 * tripped through ~1 s of coalesce hold each way, capping file
-                 * transfers at 10-20 kbit/s over an otherwise idle link.
-                 *
-                 * The tick claiming a slot here can beat the tcps probe
-                 * (halow_ack_tx_ready) to the window and make it over-read free
-                 * slots -- but the extra frames are no longer consumed-then-
-                 * dropped: the THROTTLE path parks them (bounded patience), so
-                 * they go out a tick or two later. No loss, just a short park. */
+                /* Flush the partial bundle as soon as agg_hold_ms elapses:
+                 * holding stragglers longer added ~1 s of latency to every
+                 * request/response round trip. A tick claim beating the tcps
+                 * probe to the window is harmless: extra frames park for a
+                 * tick or two, nothing is dropped. */
                 if( !halow_ack_agg_flush_locked(p, false) ){
-                    /* Bundle lifetime cap: a bundle that still can't leave (no
-                     * free slot, dead peer) must not sit forever -- past 1 s,
-                     * drop it; TCP above retransmits end-to-end and late-but-
-                     * sent is worth less than bounded latency. */
+                    /* Bundle past 1 s with no way out: drop it; TCP above
+                     * retransmits end-to-end. */
                     if( (now - p->agg_first_jiff) >= os_msecs_to_jiffies(HALOW_ACK_AGG_MAX_HOLD_MS) ){
                         g_ack_stats.dropped += p->agg_nsub;
                         p->dropped         += p->agg_nsub;
@@ -1927,8 +1625,7 @@ void halow_ack_tick( void ){
             }
         }
     }
-    /* Flush deferred (coalesced) ACKs whose ack_hold_ms window has elapsed. Lock
-     * is held; released across halow_ack_send_ack/halow_tx and reacquired. */
+    /* Flush deferred (coalesced) ACKs whose ack_hold_ms window has elapsed. */
     if( g_ack_cfg.ack_hold_ms != 0u ){
         for( uint32_t i = 0; i < HALOW_ACK_MAX_PEERS; i++ ){
             halow_ack_peer_t *p = &g_ack_peers[i];
@@ -1952,13 +1649,8 @@ void halow_ack_tick( void ){
     halow_ack_unlock();
 }
 
-/* The tick used to live on the SHARED os_work queue together with LED/telemetry/
- * watchdog-feed works: ONE work that blocked forever (observed on the bench:
- * 38+ s TX stall with wedges frozen -- tick dead, TX watchdog dead, no
- * recovery, no reboot) killed the ACK/retx/deferred-ACK machinery with it.
- * A dedicated task cannot be starved by unrelated works. It also FEEDS the
- * hardware watchdog: if the tick itself ever dies, the node resets in <=10 s
- * instead of hanging silently. */
+/* Dedicated task, not the shared os_work queue: it feeds the hardware
+ * watchdog, and if the tick itself dies the node resets in <=10 s. */
 static struct os_task g_ack_tick_task;
 volatile uint32_t g_ack_tick_count = 0u;   /* tick heartbeat, exposed via /api/tx_dbg */
 
@@ -1989,22 +1681,12 @@ void halow_ack_init( void ){
     halow_ack_unlock();
 
     os_task_init((const uint8 *)"acktk", &g_ack_tick_task, halow_ack_tick_task_fn, 0);
-    /* 4048 = the MAIN workqueue stack this tick used to run on; 3*1024 was
-     * SMALLER than its old home while the call chain had grown -- prime
-     * suspect for the mid-soak crash (stack overflow) seen on the bench. */
+    /* 4048 = the MAIN workqueue stack this tick used to run on. */
     os_task_set_stacksize(&g_ack_tick_task, 4048);
-    /* REALTIME -- ABOVE the LMAC RX tasks (osal prio 86/87), which outrank
-     * every app task and, under a heavy blast, can consume the CPU for longer
-     * than the 10 s hardware-watchdog window with the tick (at NORMAL) never
-     * scheduled: the node then resets SILENTLY -- no panic output, no tick-
-     * stall canary (the statistics task starves too). Observed on the bench
-     * ~15 min into a mixed soak (b113). This is safe now that the tick body
-     * is bounded: the configdb/flash reads were moved out of its locked path
-     * (halow_ack_default_mcs_refresh before the lock, halow_cfg_mcs_bw_refresh
-     * from the statistics task) -- the earlier b50 web-UI freeze under an
-     * ABOVE_NORMAL tick was this same multi-second flash read looping inside
-     * the body, not the priority itself. RHINO mutex PI keeps a blocked
-     * REALTIME tick from starving the lock holder. */
+    /* REALTIME, above the LMAC RX tasks: under a heavy blast they can consume
+     * the CPU for longer than the watchdog window with the tick never
+     * scheduled. Safe because the tick body is bounded (no flash reads in
+     * its locked path); RHINO mutex PI keeps it from starving lock holders. */
     os_task_set_priority(&g_ack_tick_task, OS_TASK_PRIORITY_REALTIME);
     os_task_run(&g_ack_tick_task);
 
@@ -2043,14 +1725,10 @@ bool halow_ack_peer_stats_by_mac( const uint8_t mac[6], halow_ack_peer_stats_t *
         out->tx_bytes       = p->tx_bytes;
         out->retransmitted  = p->retransmitted;
         out->last_tx_s      = p->last_tx_s;
-        /* TX loss AFTER retries: share of resolved frames (ACKed or retry-
-         * exhausted) that ultimately failed -- the delivery loss the user
-         * cares about. Frames rescued by retransmits are NOT a loss here.
-         * The per-attempt RF loss stays derivable from the raw counters
-         * (retransmitted / (tx_frames+retransmitted)); the RA's internal
-         * EWMA (loss_q8 below) is the separate MCS-tuning signal. */
-        out->loss_pct = (uint8_t)p->loss_iir_pct;   /* windowed IIR, not
-            * lifetime-cumulative: conditions change, the display must too */
+        /* TX loss AFTER retries (windowed IIR): what the user actually lost.
+         * Per-attempt loss stays derivable from retransmitted/(tx_frames+
+         * retransmitted); loss_q8 below is the RA's tuning signal. */
+        out->loss_pct = (uint8_t)p->loss_iir_pct;
         out->acks_since_step = p->acks_since_step;
         out->loss_q8     = p->loss_ewma_q8;
         out->compat      = p->compat;
@@ -2068,12 +1746,8 @@ static bool halow_peer_mac_known( const uint8_t mac[6] ){
     return false;
 }
 
-/* Effective link MTU from a peer-advertised value. advertised==0 means the
- * LinkRequest did not carry the (optional, HaLow-only) 3-byte signalling MTU --
- * standard Reticulum sends only the 64-byte core. The link's real MTU is still
- * bounded by the hardware (1MHz S1G max MSDU per MCS) and the configured RNS
- * limit, so default to that limit. Otherwise clamp the advertised value to it.
- * Stops the link stats showing MTU=0 for every standard-Reticulum link. */
+/* Effective link MTU: advertised==0 (standard Reticulum, no signalling
+ * extension) or above the hw/rns limit -> the limit; otherwise clamp. */
 static uint32_t halow_link_effective_mtu( uint32_t advertised ){
     uint32_t hw;
     uint32_t lim;
@@ -2085,9 +1759,8 @@ static uint32_t halow_link_effective_mtu( uint32_t advertised ){
     return (advertised == 0u || advertised > lim) ? lim : advertised;
 }
 
-/* Deliver one decoded RNS frame to the TCP side: parse/register, HDLC-encode,
- * push into the TCP ring. Extracted so rf_to_tcp can call it once per subframe
- * when an A-MSDU bundle is received. */
+/* Deliver one decoded RNS frame to the TCP side; split out so rf_to_tcp can
+ * call it per bundle subframe. */
 static void deliver_rns_frame( const uint8_t *pkg, uint16_t len,
                                const uint8_t *src_mac, bool unicast_to_me ){
     int32_t res;
@@ -2106,10 +1779,8 @@ static void deliver_rns_frame( const uint8_t *pkg, uint16_t len,
         int32_t rr;
         bool is_linkrequest = (packet_info.packet_type == RNS_PACKET_TYPE_LINKREQUEST);
         uint32_t rx_mtu = 0;
-        /* Capture the peer's advertised MTU if the (optional) signalling field is
-         * present; otherwise default to the hw/rns limit so the link shows a real
-         * MTU instead of 0. Either way, update the link's effective_mtu on a
-         * LinkRequest. */
+        /* Capture the peer's advertised MTU when present, else default to
+         * the hw/rns limit; update effective_mtu on a LinkRequest. */
         if( is_linkrequest ){
             (void)rns_link_utils_get_mtu(pkg, len, &packet_info, &rx_mtu);
             rx_mtu = halow_link_effective_mtu(rx_mtu);
@@ -2147,14 +1818,13 @@ void halow_pkg_handler_rf_to_tcp( uint8_t* pkg, uint16_t len,
     pkg = (uint8_t *)inner;
     len = inner_len;
     g_dbg_rns_rx_calls++;
-    /* Frames actually addressed to us (addr3 == our MAC, not broadcast): only
-     * these may re-write an already-learned peer MAC in the link DB. */
+    /* Frames actually addressed to us: only these may re-write a learned
+     * peer MAC in the link DB. */
     bool unicast_to_me = (dst_mac != NULL && memcmp(dst_mac, mac_broadcast, 6) != 0);
 
     /* Envelope v1 bundle: [A5][5A][0x1X][seq:2][nsub:1]{len,payload}.
-     * Same strict walk as the legacy bundle; subframes deliver individually.
-     * (seq was already recorded into the Block-ACK window by halow_ack_on_rx
-     * BEFORE the dedup decision -- retransmitted dups keep their bit set.) */
+     * Strict walk, subframes deliver individually; seq was already recorded
+     * into the Block-ACK window before the dedup decision. */
     if( len >= (uint16_t)(HALOW_ENV_BUNDLE_HDR + 2u) &&
         pkg[0] == HALOW_ENV_MAGIC0 && pkg[1] == HALOW_ENV_MAGIC1 &&
         halow_env_type(pkg) == HALOW_ENV_TYPE_BUNDLE && halow_env_ver(pkg) == HALOW_ENV_VER ){
@@ -2181,16 +1851,13 @@ void halow_pkg_handler_rf_to_tcp( uint8_t* pkg, uint16_t len,
                 return;
             }
         }
-        /* malformed envelope bundle: fall through would feed the raw envelope
-         * to the RNS parser (guaranteed parse failure) -- drop explicitly */
+        /* malformed envelope bundle: drop explicitly */
         g_ack_stats.rx_env_unk++;
         return;
     }
 
     /* A-MSDU bundle? Validate (nsub/lens consume the frame exactly, nsub>=2)
-     * then split into subframes and deliver each. A real bundle always parses;
-     * on the astronomically unlikely magic collision the frame falls through to
-     * single-frame delivery (which will simply fail the RNS parse and drop). */
+     * then split into subframes and deliver each. */
     if( len >= 4u && pkg[0] == HALOW_ACK_AGG_MAGIC0 && pkg[1] == HALOW_ACK_AGG_MAGIC1 ){
         uint8_t nsub = pkg[2];
         if( nsub >= 2u ){
@@ -2240,8 +1907,7 @@ int32_t halow_pkg_handler_tcp_to_rf( uint8_t* pkg, uint16_t len ){
         uint32_t stored_mtu;
         int16_t rns_mtu_limit;
 
-        /* cached config (statistics task refreshes it): a LINKREQUEST flood
-         * must not hammer the configdb/flash mutex on the tcps path */
+        /* cached config: a LINKREQUEST flood must not hammer the flash mutex */
         hw_mtu = halow_get_mtu(halow_cfg_mcs_get_cached());
         rns_mtu_limit = rns_mtu_limit_get();
 
@@ -2254,9 +1920,8 @@ int32_t halow_pkg_handler_tcp_to_rf( uint8_t* pkg, uint16_t len ){
         rns_link_utils_clamp_mtu(pkg, len, &packet_info, mtu_limit, &original_mtu);
         log_info("cap link MTU from %db to %db", (int)original_mtu, (int)mtu_limit);
 
-        /* original_mtu==0 means the LinkRequest did NOT carry the 3-byte signalling
-         * extension (standard Reticulum sends only the 64-byte core). Default to the
-         * hw/rns limit instead of leaving 0 (was showing as MTU=0 in link stats). */
+        /* original_mtu==0: standard Reticulum, no signalling extension --
+         * default to the hw/rns limit instead of 0. */
         stored_mtu = halow_link_effective_mtu(original_mtu);
 
         rns_link_db_package_register(&packet_info, RNS_PACKET_DIRECTION_TX,

@@ -64,9 +64,7 @@ int32_t rns_stream_decoder_process( rns_stream_decoder_t *decoder, const uint8_t
         return 0;
     }
 
-    /* A previously HELD frame (rejected with THROTTLE) retries FIRST, before
-     * any new byte is consumed: the frame is complete in frame_buffer and the
-     * caller explicitly re-invoked us. Still throttled -> nothing is consumed. */
+    /* A HELD frame retries FIRST, before any new byte is consumed. */
     if( decoder->held ){
         int32_t r = rns_stream_emit_frame(decoder, user);
         if( r == HALOW_ACK_TX_THROTTLE ){
@@ -96,15 +94,10 @@ int32_t rns_stream_decoder_process( rns_stream_decoder_t *decoder, const uint8_t
             ){
                 int32_t r = rns_stream_emit_frame(decoder, user);
                 if( r == HALOW_ACK_TX_THROTTLE ){
-                    /* CONTRACT (a frame accepted from TCP must reach the air):
-                     * the frame is NOT dropped and NOT forgotten -- it stays
-                     * complete in frame_buffer (held) and the input stops
-                     * right after this FLAG. The caller must re-feed the
-                     * unconsumed tail; until the frame is accepted we report
-                     * THROTTLE so the TCP recv loop closes the window.
-                     * Other nonzero returns are NOT holds: parse-garbage is
-                     * consumed (returns 0 upstream) and slot-path TX errors
-                     * already own a retry slot. */
+                    /* CONTRACT: the frame is NOT dropped -- it stays complete
+                     * in frame_buffer (held) and the input stops right after
+                     * this FLAG; *consumed reports the taken bytes and the
+                     * caller must re-feed the tail. */
                     decoder->held = true;
                     if( consumed != NULL ) *consumed = (uint16_t)(i + 1u);
                     return r;

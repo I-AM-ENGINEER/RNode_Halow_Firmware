@@ -54,8 +54,7 @@ static void test_temperature(void) {
 static void test_throughput(void) {
     static const uint8_t mcs_list[] = {0, 1, 2, 3, 4, 5, 6, 7, 10};
     static const uint8_t bw_list[]  = {1, 2, 4, 8};
-    /* heap, not static: 8 KiB parked forever in .bss for a debug-only sweep
-     * on a chip where code shares RAM with data */
+    /* heap, not static: debug-only sweep */
     uint8_t *pkt = (uint8_t *)os_malloc(8192);
     if (pkt == NULL) {
         log_warn("test_throughput: no mem for pkt");

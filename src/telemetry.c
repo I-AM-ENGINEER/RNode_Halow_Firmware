@@ -624,10 +624,8 @@ void telemetry_init( void ){
 
     telemetry_config_set_default(&cfg);
     telemetry_config_load(&cfg);
-    /* Save only on first boot (marker missing): an unconditional load+save
-     * rewrote all 14 kvdb keys every boot -- flash wear plus flashdb GC
-     * exposure during the boot window (the ack-config module documents the
-     * exact GC/boot-watchdog spiral this pattern caused there). */
+    /* Save only on first boot (marker missing): an unconditional save would
+     * rewrite every kvdb key each boot. */
     if( configdb_get_i16(TELEMETRY_CONFIG_ADD_CONFIG("seeded"), &seeded) != 0 ||
         seeded != 1 ){
         telemetry_config_save(&cfg);
@@ -647,8 +645,8 @@ void telemetry_init( void ){
     }
 }
 
-/* Enable-via-web-API entry: schedule the first send like telemetry_init does
- * on boot, so toggling telemetry on takes effect without a reboot. */
+/* Web-API enable entry: schedule the first send so toggling takes effect
+ * without a reboot. */
 void telemetry_kick( void ){
     os_run_work_delay(&telemetry_work, 5000LU);
 }

@@ -41,12 +41,8 @@
 
 #define HALOW_LBT_AIRTIME_ACCUMULATOR_BUF   10
 #define HALOW_LBT_AIRTIME_UPDATE_PERIOD_MS  100
-/* Adaptive task cadence: poll the noise floor at 1ms while RF traffic is recent
- * (LBT/CCA needs responsiveness under load), fall back to 10ms when the link has
- * been quiet. Activity is signalled by halow_lbt_set_tx_as_active() — which every
- * TX hits via halow_send_frame(), data frames and software ACKs alike — so a node
- * that is only receiving its own ACKs stays fast, while a truly idle node drops
- * to ~100Hz and stops burning ~10% CPU on noise sampling that changes nothing. */
+/* Adaptive cadence: poll at 1ms while TX is recent, 10ms when quiet
+ * (halow_lbt_set_tx_as_active signals activity). */
 #define HALOW_LBT_ACTIVE_WINDOW_MS          100
 #define HALOW_LBT_SLEEP_ACTIVE_MS           1
 #define HALOW_LBT_SLEEP_IDLE_MS             10
@@ -95,10 +91,8 @@ static struct os_task g_lbt_task;
 static struct os_mutex g_lbt_ctx_mutex;
 
 /* Lock-free TX-done heartbeat for airtime honesty. Written from task contexts
- * (halow_tx_skb_complete: tx_status task / purge) and from IRQ
- * (lmac_irq_tx_end). Single aligned 32-bit store: atomic on this core. Never
- * takes g_lbt_ctx_mutex (whose 10 ms timeout silently DROPPED deactivations
- * and pinned airtime at 100% forever -- the "endless transmission" display). */
+ * and from IRQ; single aligned 32-bit store: atomic. Never takes the ctx
+ * mutex (its timeout would drop deactivations). */
 static volatile uint32_t g_lbt_tx_done_ms;
 void halow_lbt_tx_done_notify( void ){
     g_lbt_tx_done_ms = (uint32_t)get_time_ms();
@@ -288,12 +282,8 @@ static int cmp_i8( const void *a, const void *b ){
     return (ia > ib) - (ia < ib);
 }
 
-/* Number of VALID samples actually written to the long ring. Until the ring
- * has wrapped once after boot, the tail is UNINITIALIZED heap: zeros sort
- * above every real dBm value and read as "channel busy" against any absolute
- * threshold -- computing the percentile (or busy ratio) over the full buffer
- * made bg_pwr show 0.0 dBm and ch_util 80-95% for the whole warm-up window
- * (~10 min at default sizes) after every reboot. */
+/* Number of VALID samples in the long ring: until it wraps once after boot,
+ * the tail is uninitialized heap (zeros read as "channel busy"). */
 static lwrb_sz_t long_ring_valid( halow_lbt_ctx_t *ctx ){
     lwrb_sz_t cap = (lwrb_sz_t)ctx->long_n;
     lwrb_sz_t free_b = lwrb_get_free(&ctx->long_rb);
@@ -313,8 +303,8 @@ static int8_t noise_pxx_from_rb( halow_lbt_ctx_t *ctx ){
 
     n = long_ring_valid(ctx);
     if (n == 0) {
-        /* ring empty (right after boot): the current short average is the
-         * best available estimate -- NOT 0 dBm */
+        /* ring empty (right after boot): the short average is the best
+         * available estimate -- NOT 0 dBm */
         return ctx->noise_short;
     }
 
@@ -438,11 +428,9 @@ void halow_lbt_task( void *arg ){
             if (cycle_us <= 0) cycle_us = 1;
             int32_t airtime_us = ctx->airtime_time_tx_from_last_cycle_update_us;
 
-            /* Staleness: a real PPDU at 1 MHz airs in ~25 ms, so an "active"
-             * flag with no TX-done heartbeat for 2 update periods is a lie
-             * (deactivation lost to the mutex timeout, or budget leaked and
-             * never refilled). Finalize the window at the LAST REAL
-             * COMPLETION instead of charging wall-clock forever. */
+            /* A real PPDU at 1 MHz airs in ~25 ms: "active" with no TX-done
+             * heartbeat for 2 update periods is stale -- finalize the window
+             * at the LAST REAL COMPLETION instead of charging wall-clock. */
             bool stale = false;
             if (ctx->airtime_tx_active) {
                 uint32_t done_ms = g_lbt_tx_done_ms;
@@ -499,8 +487,8 @@ void halow_lbt_task( void *arg ){
         }
 #endif
 
-        /* Decide cadence while we still hold the lock (ctx is valid); the unlock
-         * is deferred until after we have captured the activity timestamp. */
+        /* Decide cadence while we still hold the lock; the unlock is deferred
+         * until after the activity timestamp is captured. */
         int64_t act_us = ctx->last_activity_us;
         (void)os_mutex_unlock(&g_lbt_ctx_mutex);
         bool lbt_active = (get_time_us() - act_us)
@@ -584,8 +572,7 @@ void halow_lbt_set_tx_as_active( void ){
         g_lbt_ctx->airtime_time_last_tx_started = get_time_us();
         hlbt_debug("SET TX");
     }
-    /* heartbeat for the adaptive task cadence: every TX (data or ACK) keeps the
-     * noise-sampling loop in its responsive 1ms mode. */
+    /* every TX keeps the sampling loop in its responsive 1ms mode */
     g_lbt_ctx->last_activity_us = get_time_us();
 
     os_mutex_unlock(&g_lbt_ctx_mutex);
@@ -740,10 +727,6 @@ void halow_lbt_config_load( halow_lbt_config_t *cfg ){
     cfg->util_max_percent = 100;
     cfg->util_enabled = false;
 }
-
-/* halow_lbt_wait_tx_allowed() DELETED: zero callers, and its unbounded
- * while(airtime > max) sleep on the (previously sticky) airtime metric was
- * a permanent-TX-deadlock landmine the moment anyone enabled util gating. */
 
 int32_t halow_lbt_init( void ){
     os_mutex_init(&g_lbt_ctx_mutex);
