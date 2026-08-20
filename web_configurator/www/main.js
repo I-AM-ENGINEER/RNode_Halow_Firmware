@@ -102,8 +102,6 @@
             en: document.getElementById('cca_en').checked ? 1 : 0,
             ftpct: parseFloat(document.getElementById('cca_ftpct').value) || 0,
             dlpct: parseFloat(document.getElementById('cca_dlpct').value) || 0,
-            cwmin: parseInt(document.getElementById('cca_cwmin').value, 10),
-            cwmax: parseInt(document.getElementById('cca_cwmax').value, 10),
             thdyn: parseInt(document.getElementById('cca_thdyn').value, 10),
             sens: parseInt(document.getElementById('cca_sens').value, 10)
         };
@@ -296,7 +294,7 @@
     function setupDirtyTracking() {
         const map = [
             { group: 'halow', btn: 'save_halow', ids: ['halow_power_dbm', 'halow_central_freq', 'halow_mcs_index', 'halow_bandwidth'] },
-            { group: 'lbt', btn: 'save_lbt', ids: ['cca_en', 'cca_ftpct', 'cca_dlpct', 'cca_cwmin', 'cca_cwmax', 'cca_thdyn', 'cca_sens'] },
+            { group: 'lbt', btn: 'save_lbt', ids: ['cca_en', 'cca_ftpct', 'cca_dlpct', 'cca_thdyn', 'cca_sens'] },
             { group: 'net', btn: 'save_net', ids: ['net_dhcp', 'net_ip_address', 'net_gw_address', 'net_netmask'] },
             { group: 'slip', btn: 'save_slip', ids: ['slip_enable', 'slip_baud', 'slip_ip_address', 'slip_gw_address'] },
             { group: 'log', btn: 'save_log', ids: ['log_udp_enable', 'log_udp_host', 'log_udp_port'] },
@@ -397,20 +395,14 @@
     function validateLbtFields() {
         const ftpctField = document.getElementById('cca_ftpct');
         const dlpctField = document.getElementById('cca_dlpct');
-        const cwminField = document.getElementById('cca_cwmin');
-        const cwmaxField = document.getElementById('cca_cwmax');
         const sensField  = document.getElementById('cca_sens');
 
         const ftpct = parseFloat(ftpctField.value);
         const dlpct = parseFloat(dlpctField.value);
-        const cwmin = parseInt(cwminField.value, 10);
-        const cwmax = parseInt(cwmaxField.value, 10);
         const sens  = parseInt(sensField.value, 10);
 
         ftpctField.classList.toggle('error', isNaN(ftpct) || ftpct < 0.1 || ftpct > 100);
         dlpctField.classList.toggle('error', isNaN(dlpct) || (dlpct !== 0 && dlpct < 1) || dlpct > 100);
-        cwminField.classList.toggle('error', isNaN(cwmin) || cwmin < 1 || cwmin > 2047);
-        cwmaxField.classList.toggle('error', isNaN(cwmax) || cwmax < 1 || cwmax > 2047 || cwmax < cwmin);
         sensField.classList.toggle('error',  isNaN(sens)  || sens < 0 || sens > 10);
 
         updateSaveButton('lbt');
@@ -419,14 +411,10 @@
     function isLbtFormValid() {
         const ftpct = parseFloat(document.getElementById('cca_ftpct').value);
         const dlpct = parseFloat(document.getElementById('cca_dlpct').value);
-        const cwmin = parseInt(document.getElementById('cca_cwmin').value, 10);
-        const cwmax = parseInt(document.getElementById('cca_cwmax').value, 10);
         const sens  = parseInt(document.getElementById('cca_sens').value, 10);
 
         if (isNaN(ftpct) || ftpct < 0.1 || ftpct > 100) return false;
         if (isNaN(dlpct) || (dlpct !== 0 && dlpct < 1) || dlpct > 100) return false;
-        if (isNaN(cwmin) || cwmin < 1 || cwmin > 2047) return false;
-        if (isNaN(cwmax) || cwmax < 1 || cwmax > 2047 || cwmax < cwmin) return false;
         if (isNaN(sens) || sens < 0 || sens > 10) return false;
         return true;
     }
@@ -632,8 +620,6 @@
         document.getElementById('save_lbt').addEventListener('click', saveLbt);
         document.getElementById('cca_ftpct').addEventListener('input', function(e) { clampDecimal(e, 1); validateLbtFields(); });
         document.getElementById('cca_dlpct').addEventListener('input', function(e) { clampDecimal(e, 1); validateLbtFields(); });
-        document.getElementById('cca_cwmin').addEventListener('input', validateLbtFields);
-        document.getElementById('cca_cwmax').addEventListener('input', validateLbtFields);
         document.getElementById('cca_sens').addEventListener('input', validateLbtFields);
         document.getElementById('cca_thdyn').addEventListener('change', updateCcaThresholdFields);
 
@@ -836,25 +822,6 @@
             if (dnFld) dnFld.disabled = !raOn;
             if (raPanel) raPanel.classList.toggle('disabled', !ackOn);
             if (raWarn) raWarn.style.display = ackOn ? 'none' : 'block';
-            const box = document.getElementById('ack_stats_box');
-            if (box) {
-                const acked = Number(data.acked) || 0;
-                const dropped = Number(data.dropped) || 0;
-                const lossPct = (acked + dropped) > 0
-                    ? (dropped / (acked + dropped) * 100).toFixed(1) + '%'
-                    : '--';
-                box.textContent = 'loss=' + lossPct +
-                    '  tx=' + (data.tx_frames||0) +
-                    '  acked=' + acked +
-                    '  retrans=' + (data.retransmitted||0) +
-                    '  dropped=' + dropped +
-                    '  bc_rep=' + (data.bc_repeats||0) +
-                    '  acks_sent=' + (data.acks_sent||0) +
-                    '  noack_hits=' + (data.noack_hits||0) +
-                    '  peers=' + (data.peers||0) +
-                    '  outstanding=' + (data.outstanding||0) +
-                    '  last_evm=' + (data.last_evm||0) + 'dB';
-            }
             snapshotGroup('ack');
         } catch (err) {
         }
@@ -1546,8 +1513,6 @@
         setCheckbox('cca_en', cca.en ?? 1);
         setInput('cca_ftpct', cca.ftpct ?? 0.1);
         setInput('cca_dlpct', cca.dlpct ?? 100);
-        setInput('cca_cwmin', cca.cwmin ?? 31);
-        setInput('cca_cwmax', cca.cwmax ?? 1023);
         setSelect('cca_thdyn', String(cca.thdyn ?? 0));
         setInput('cca_sens', cca.sens ?? 5);
         validateLbtFields();

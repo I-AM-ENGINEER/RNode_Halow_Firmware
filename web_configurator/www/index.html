@@ -75,7 +75,7 @@
                 </label>
                 <p class="note">Valid values: 730-1080 MHz.</p>
                 <label>
-                    <span>MCS index</span>
+                    <span>Broadcast MCS index</span>
                     <select id="halow_mcs_index">
                         <option value="MCS10">MCS10</option>
                         <option value="MCS0">MCS0</option>
@@ -175,34 +175,6 @@
                     <p class="throughput-note">Measured with max MTU for each mode. Smaller payload sizes give significantly lower throughput due to per-frame overhead.</p>
                 </div>
 
-                <div class="throughput-card">
-                    <h4>Max Payload (bytes)</h4>
-                    <div class="throughput-table-wrap">
-                        <table class="throughput-table">
-                            <thead>
-                                <tr>
-                                    <th>Channel Width</th>
-                                    <th>MCS0</th>
-                                    <th>MCS1</th>
-                                    <th>MCS2</th>
-                                    <th>MCS3</th>
-                                    <th>MCS4</th>
-                                    <th>MCS5</th>
-                                    <th>MCS6</th>
-                                    <th>MCS7</th>
-                                    <th>MCS10</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr><th>1 MHz</th><td>700</td><td>1450</td><td>2200</td><td>3000</td><td>4500</td><td>6050</td><td>6800</td><td>7600</td><td>500</td></tr>
-                                <tr><th>2 MHz</th><td>1600</td><td>3200</td><td>4900</td><td>6500</td><td>8192</td><td>8192</td><td>8192</td><td>8192</td><td>—</td></tr>
-                                <tr><th>4 MHz</th><td>3400</td><td>6800</td><td>8192</td><td>8192</td><td>8192</td><td>8192</td><td>8192</td><td>8192</td><td>—</td></tr>
-                                <tr><th>8 MHz</th><td>7400</td><td>8192</td><td>8192</td><td>8192</td><td>8192</td><td>8192</td><td>8192</td><td>8192</td><td>—</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
             </div>
 
             <div class="panel">
@@ -234,15 +206,6 @@
                     <input type="number" id="cca_dlpct" min="0" max="100" step="0.1" value="100">
                 </label>
                 <p class="note">Valid values: 0-100%. Maximum airtime. 100% = no limit. Limits TX time even on free channel.</p>
-                <label>
-                    <span>CW min (CCA slot)</span>
-                    <input type="number" id="cca_cwmin" min="1" max="2047" value="31">
-                </label>
-                <p class="note">Valid values: 1-2047. Higher (31/63) - less collisions. Lower (7/15) - lower latency, higher priority.</p>
-                <label>
-                    <span>CW max (CCA slot)</span>
-                    <input type="number" id="cca_cwmax" min="1" max="2047" value="1023">
-                </label>
                 <div class="panel-actions">
                     <button type="button" id="save_lbt" disabled>Save</button>
                 </div>
@@ -266,7 +229,6 @@
                     <input type="number" id="ack_bc_repeat" min="1" max="3" value="2">
                 </label>
                 <p class="note">Broadcast frames (announces, link bootstrap) get no ACK, so repeats are their only loss protection. 2 = send each broadcast twice (default), 3 = most robust (poor conditions), 1 = off.</p>
-                <div class="ack-stats" id="ack_stats_box" style="font-size:12px;color:#888;margin-top:8px"></div>
                 <div class="panel-actions">
                     <button type="button" id="save_ack" disabled>Save</button>
                 </div>
@@ -289,7 +251,6 @@
                     <input type="number" id="ack_ra_loss_down" min="1" max="100" value="30">
                 </label>
                 <p class="note">When a peer's smoothed loss reaches/exceeds this, TX MCS steps down (more robust). Higher = "reliable link". Must be greater than the up threshold.</p>
-                <p class="note">Staleness: if no ACK from a peer in 1 min, its TX MCS resets to the global default and is held there for a 1-min cooldown.</p>
             </div>
 
             <div class="panel">
