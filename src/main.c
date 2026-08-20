@@ -1,5 +1,6 @@
 #define LOG_LOCAL_LEVEL LOG_DEBUG
 #include "lib/logc/log.h"
+#include "build_info_gen.h"
 #include "basic_include.h"
 #include "lib/lmac/lmac.h"
 #include "lib/skb/skb.h"
@@ -57,6 +58,7 @@
 #include "uart_slip.h"
 #include "net_log.h"
 #include "halow_pkg_handler.h"
+#include "halow_ack.h"
 #include "lib/net/ethphy/eth_phy.h"
 
 static struct os_work blink_wk;
@@ -72,13 +74,35 @@ extern struct hguart uart1;
 #include <stdint.h>
 
 // TCP -> RF
-static void rns_tcp_rx_handler( uint8_t *data, uint16_t len ){
+static int32_t rns_tcp_rx_handler( uint8_t *data, uint16_t len ){
     log_trace("rns package received len=%d", len);
-    statistics_radio_register_tx_package(len);
-    halow_pkg_handler_tcp_to_rf(data, len);
+    /* TX radio stats are registered at the RADIO layer (halow_pkg_handler.c,
+     * first-send sites), NOT here: counting TCP-ingress packets made the main
+     * page show pre-aggregation RNS packets (1800) against radio-level RX
+     * frames (454) on the same link -- "TX terrible vs RX". Radio-level TX
+     * (wire frames, retransmits excluded) mirrors RX accounting 1:1. */
+    return halow_pkg_handler_tcp_to_rf(data, len);
 }
 
 // RF -> TCP
+volatile uint32_t g_rx_cls_internal;
+volatile uint32_t g_rx_cls_notmine;
+volatile uint32_t g_rx_cls_data;
+#define RX_CAP_N 8u
+volatile uint8_t g_rx_cap[RX_CAP_N][16];
+static volatile uint32_t g_rx_cap_wr;
+
+static void rx_forensics_capture( const struct ieee80211_hdr *hdr,
+                                  const uint8_t *data, uint16_t len ){
+    uint32_t idx = g_rx_cap_wr % RX_CAP_N;
+    uint8_t *slot = (uint8_t *)g_rx_cap[idx];
+    memcpy(slot, hdr->addr2, 6);
+    uint32_t n = (uint32_t)len;
+    if (n > 10u) n = 10u;
+    memcpy(slot + 6, data, n);
+    g_rx_cap_wr++;
+}
+
 static void halow_rx_handler(struct hgic_rx_info *info,
                              struct ieee80211_hdr *hdr,
                              uint8 *data,
@@ -88,7 +112,7 @@ static void halow_rx_handler(struct hgic_rx_info *info,
     if (data == NULL || len <= 0) {
         return;
     }
-    
+
     nearby_modem_package_info_t modem_pkg_info = {
         .len = len,
         .mcs = info->mcs,
@@ -98,13 +122,24 @@ static void halow_rx_handler(struct hgic_rx_info *info,
     };
     memcpy(modem_pkg_info.mac, hdr->addr2, 6);
 
-    nearby_modem_package_register(&modem_pkg_info);
-    indication_led_rx();
-    statistics_radio_register_rx_package(len);
+    /* ACK frames (legacy fid-list AND envelope Block-ACK) are internal
+     * reliability plumbing, not user data: they must NOT show up in link
+     * statistics (rx packets/bytes/throughput), blink the data LED, appear in
+     * nearby-modem scans, or feed the nearby RX MCS -- ACKs run at their own
+     * robust adaptive rate (often far below the data RA rate), which made a
+     * healthy MCS7 link display as "RX MCS2". Count/deliver only real data. */
+    if (!halow_ack_is_internal_frame(data, (uint16_t)len)) {
+        nearby_modem_package_register(&modem_pkg_info);
+        indication_led_rx();
+        statistics_radio_register_rx_package(len);
+    } else {
+        rx_forensics_capture(hdr, data, (uint16_t)len);
+        g_rx_cls_internal++;
+    }
 
     uint8_t my_mac[6];
     /* Compare addr3 (the destination, see halow_send_frame) against the node's
-     * TX identity (g_wmac via mac_generator_get), NOT get_mac() (g_efuse): the
+     * TX identity (g_wmac via mac_generator_get, NOT get_mac() (g_efuse): the
      * peer learns our MAC from our TX addr2 == mac_generator_get, and addresses
      * us via addr3 with that same value. g_efuse != g_wmac, so the old
      * get_mac() comparison rejected every unicast-to-us frame (only never
@@ -112,23 +147,40 @@ static void halow_rx_handler(struct hgic_rx_info *info,
     mac_generator_get(my_mac);
     if ((memcmp(hdr->addr3, mac_broadcast, 6) != 0) &&
         (memcmp(hdr->addr3, my_mac, 6) != 0)) {
-        log_trace("RX not my mac, drop");
+        rx_forensics_capture(hdr, data, (uint16_t)len);
+        g_rx_cls_notmine++;
         return;
     }
-    halow_pkg_handler_rf_to_tcp(data, (uint16_t)len, (const uint8_t *)hdr->addr2);
+    g_rx_cls_data++;
+    halow_pkg_handler_rf_to_tcp(data, (uint16_t)len, (const uint8_t *)hdr->addr2,
+                                (const uint8_t *)hdr->addr3, info->evm);
 }
 
 // TCP -> rns stream decoder
-int32_t tcp_to_halow_send(const uint8_t* data, uint32_t len){
+int32_t tcp_to_halow_send(const uint8_t* data, uint32_t len, uint16_t *consumed){
     if(data == NULL){
+        if(consumed) *consumed = 0u;
         return -100;
     }
     if(len == 0){
+        if(consumed) *consumed = 0u;
         return -200;
     }
 
-    rns_stream_decoder_process(&tcp_rns_decoder, data, (uint16_t)len, NULL);
-    return 0;
+    /* Propagate HALOW_ACK_TX_THROTTLE so tcp_server's recv loop can skip
+     * netconn_recv (TCP backpressure) while still draining the RF->TCP ring.
+     * *consumed tells it exactly how many bytes were taken: the unconsumed
+     * tail of the netbuf must be re-fed after the TX path drains (contract:
+     * bytes accepted from TCP always reach the air). */
+    return rns_stream_decoder_process(&tcp_rns_decoder, data, (uint16_t)len, NULL, consumed);
+}
+
+void rns_tcp_session_reset(void){
+    rns_stream_decoder_reset(&tcp_rns_decoder);
+}
+
+int32_t rns_tcp_retry_held(void){
+    return rns_stream_decoder_retry_held(&tcp_rns_decoder, NULL);
 }
 
 #include "lib/net/ethphy/eth_mdio_bus.h"
@@ -213,7 +265,7 @@ sysevt_hdl_res sys_event_hdl(uint32 event_id, uint32 data, uint32 priv) {
 
 static uint32_t firmware_build_hash( void ){
     uint32_t hash = 0x811C9DC5;
-    const char *s = FW_FULL_VERSION;
+    const char *s = FW_BUILD_VERSION;
 
     while (*s) {
         hash ^= (uint8_t)(*s++);
@@ -229,9 +281,14 @@ static uint32_t firmware_build_hash( void ){
 
 static void boot_counter_update(void){
     int32_t pwr_on_cnt = 0;
+    /* Feed the boot watchdog around the flash write: on a GC-heavy flashdb
+     * sector this can outlast the 3 s timeout and abort the write mid-erase,
+     * dirtying the sector further (reboot-spiral hazard, see halow_ack_config_load). */
+    mcu_watchdog_feed();
     configdb_get_i32("pwr_on_cnt", &pwr_on_cnt);
     pwr_on_cnt++;
     configdb_set_i32("pwr_on_cnt", &pwr_on_cnt);
+    mcu_watchdog_feed();
     log_info("Boot counter = %d\n", pwr_on_cnt);
 }
 
@@ -255,7 +312,7 @@ bool boot_recovery_check( void ){
     bool led = false;
 
     if (!button_get()) {
-        false;
+        return false;   /* was a bare `false;` statement -- a no-op */
     }
 
     while (button_get()) {
@@ -290,7 +347,12 @@ __init int main(void) {
     extern uint32 __sinit, __einit;
     os_sleep_ms(5000);
     log_debug("mcu_watchdog_timeout");
-    mcu_watchdog_timeout(3);
+    /* 10 s, not 3: boot-time flashdb/littlefs mounts can GC a sector dirtied
+     * by an earlier watchdog-aborted write for several seconds. A 3 s budget
+     * aborted the write mid-erase, dirtying it further -> reboot spiral that
+     * never completes (observed after an OTA with a torn config sector). 10 s
+     * lets one boot always finish the GC; runtime hang protection is intact. */
+    mcu_watchdog_timeout(10);
     log_debug("sys_event_init");
     sys_event_init(32);
     log_debug("sys_event_take");

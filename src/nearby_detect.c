@@ -1,6 +1,10 @@
 #include <string.h>
 #include <stdio.h>
+#include <stdint.h>
+#include <time.h>
 
+#include <csi_core.h>   /* __disable_irq inline */
+#include "osal/csky/defs.h"   /* disable_irq macro */
 #include "nearby_detect.h"
 
 static nearby_modem_db_t g_nearby_db;
@@ -31,12 +35,16 @@ static uint32_t nearby_modem_find_oldest_index( void ){
 }
 
 void nearby_modem_package_register( const nearby_modem_package_info_t *pkg ){
+    /* RX task mutates vs httpd readers: run the whole update under irq-off so
+     * a reader never catches a half-memset'd entry (torn JSON at worst, but
+     * modems_count/index math is also read-modify-write here). */
     nearby_modem_t *modem;
     uint32_t index;
 
     if( pkg == NULL ){
         return;
     }
+    uint32_t irqf = disable_irq();
 
     modem = nearby_modem_find_by_mac(pkg->mac);
     if( modem != NULL ){
@@ -46,6 +54,7 @@ void nearby_modem_package_register( const nearby_modem_package_info_t *pkg ){
         modem->lastrx_timestamp_s = (int32_t)pkg->timestamp_s;
         modem->rx_bytes += (int32_t)pkg->len;
         modem->rx_packets += 1;
+        enable_irq(irqf);
         return;
     }
 
@@ -66,6 +75,7 @@ void nearby_modem_package_register( const nearby_modem_package_info_t *pkg ){
     g_nearby_db.modems[index].rx_bytes = (int32_t)pkg->len;
     g_nearby_db.modems[index].rx_packets = 1;
     g_nearby_db.modems[index].user = NULL;
+    enable_irq(irqf);
 }
 
 nearby_modem_t* nearby_modem_get_by_index( uint32_t index ){
@@ -102,4 +112,20 @@ void nearby_modem_print_table( void ){
             m->user
         );
     }
+}
+
+int8_t nearby_modem_best_recent_rssi( uint32_t age_s ){
+    int8_t best = -128;
+    int32_t now = (int32_t)time(NULL);
+    uint32_t irqf = disable_irq();
+    for( uint32_t i = 0; i < g_nearby_db.modems_count; i++ ){
+        nearby_modem_t *m = &g_nearby_db.modems[i];
+        if( (now - m->lastrx_timestamp_s) <= (int32_t)age_s ){
+            if( m->last_rssi > best ){
+                best = m->last_rssi;
+            }
+        }
+    }
+    enable_irq(irqf);
+    return best;
 }

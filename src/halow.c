@@ -1,3 +1,6 @@
+#include "sys_config.h"
+#define LOG_LOCAL_LEVEL LOG_LEVEL_HALOW
+#include "lib/logc/log.h"
 #include "halow.h"
 
 #include <string.h>
@@ -20,6 +23,11 @@
 //#include "lmac_ctx.h"
 #include "utils.h"
 #include "mac_generator.h"
+#include "device.h"         /* device_reboot() */
+/* ota.h can't be included here: its basic_include.h pulls hal/gpio.h, whose
+ * gpio_set_dir prototype conflicts with mars_lmac_tx.h's. Local externs. */
+extern bool ota_wota_active( void );
+extern bool ota_fw_active( void );
 
 #define HALOW_CONFIG_PREFIX             CONFIGDB_ADD_MODULE("halow")
 #define HALOW_CONFIG_ADD_CONFIG(name)   HALOW_CONFIG_PREFIX "." name
@@ -59,7 +67,14 @@
 #define HALOW_RETRY_FRM_MAX     0
 #define HALOW_RETRY_RTS_MAX     0
 #define HALOW_RETRY_FB_CNT      0
-#define HALOW_RTS_THRESH        0xFFFF
+/* RTS/CTS disabled: on a strong (SNR~50), 2-node point-to-point 1MHz link the
+ * 2-frame RTS/CTS handshake per TXOP is pure overhead that dominates the short
+ * data time and caps the TXOP rate (~30-40/s). With A-MSDU aggregation already
+ * cutting the TXOP count ~3x, collision opportunity is low, so RTS buys little
+ * robustness for a lot of airtime. Raising the threshold above the max MPDU
+ * (2000 B) turns RTS off for every frame. Re-enable by lowering to 100 if a
+ * lossy/contended environment needs it. */
+#define HALOW_RTS_THRESH        2400
 
 /* CCA */
 #define HALOW_CCA_FOR_CE        0
@@ -74,9 +89,19 @@
 
 #define HALOW_MCS10_MAX_MSDU    500
 #define HALOW_FRAG_HDR_SIZE     2
-#define HALOW_FRAG_MAX_PAYLOAD  250
+/* Measured on air (broadcast probe, 30 dB SNR): a single MCS10 PPDU is
+ * boot-lottery marginal at ~344-400B -- the long-frame edge moves with each
+ * LO calibration (observed: one boot 342B wire = 100% loss, the next 346B =
+ * 0.0%; duplicate mode doubles airtime, so the ceiling is roughly half the
+ * MCS0 cap). 300 keeps >12% symbol margin under the WORST observed edge and
+ * makes multi-fragment packets robust: their first fragment must never sit
+ * on the marginal edge (2-frag 380B packets lost 85% with a 340B limit). */
+#define HALOW_FRAG_MAX_PAYLOAD  300
 #define HALOW_FRAG_TIMEOUT_MS   1000
-#define HALOW_FRAG_MAX_TOTAL    16
+/* 8 parts: the RNS stream parser caps input frames at 2048 B -> at most
+ * ceil(2048/300)=7 fragments; 16 was pure slack in the static reassembly
+ * buffer. */
+#define HALOW_FRAG_MAX_TOTAL    8
 
 //#define HALOW_DEBUG
 #ifdef HALOW_DEBUG
@@ -94,16 +119,81 @@ static halow_rx_cb g_rx_cb;
 static uint16_t g_seq;
 
 static uint32_t g_tx_vacated_bytes = TX_BUFFER_SIZE;
+/* Monotonic count of TX-completed skbs: the "TX is alive" progress signal for
+ * the hard-wedge detector (any increment means the LMAC is still completing). */
+static volatile uint32_t g_tx_complete_seq = 0u;
+
+/* TX diagnostics (see halow_tx_dbg_t). IRQ-context counters are plain
+ * increments -- cheap and lock-free; the snapshot is taken from the
+ * workqueue at wedge detection, before the purge runs. */
+halow_tx_dbg_t g_tx_dbg;   /* zero-initialized */
+static uint32_t g_tx_wedge_count = 0u;   /* hard-wedge purges so far */
+
+/* Set by the watchdog, consumed by lmac_tx_task (see mars_lmac_tx.c). */
+extern volatile uint8_t lmac_tx_purge_request;
+
+void halow_tx_dbg_get( halow_tx_dbg_t *out ){
+    extern volatile uint32_t lmac_ac_pd_count;
+    if( out == NULL ) return;
+    uint32_t flag = disable_irq();   /* tear-free-ish read vs the IRQ writer */
+    *out = g_tx_dbg;
+    enable_irq(flag);
+    out->complete_seq  = g_tx_complete_seq;
+    out->wedge_count   = g_tx_wedge_count;
+    /* live machine state for the soak monitor (see halow_tx_dbg_t) */
+    out->ac_pd          = lmac_ac_pd_count;
+    out->budget_live    = g_tx_vacated_bytes;
+    out->bo_ftype_live  = ah_lmac.bo_frame_type;
+    out->bo_sub_live    = ah_lmac.bo_tx_substate;
+    for( uint32_t ac = 0u; ac < 4u; ac++ ){
+        out->q_live[ac]   = skb_list_count(&ah_lmac_tx.pTx_ac_queues[ac]);
+        out->sel_live[ac] = ah_lmac_tx.pTx_ac_aggr_data[ac].selected_count;
+    }
+    {
+        extern float halow_lbt_ch_util_get(void);
+        extern float halow_lbt_airtime_get(void);
+        int32_t at = (int32_t)(halow_lbt_airtime_get() * 1000.0f);
+        int32_t cu = (int32_t)(halow_lbt_ch_util_get() * 1000.0f);
+        if( at > 2550 ) at = 2550;  if( at < 0 ) at = 0;
+        if( cu > 2550 ) cu = 2550;  if( cu < 0 ) cu = 0;
+        out->airtime_pct_x10 = (uint8_t)((at + 5) / 10);
+        out->ch_util_pct_x10 = (uint8_t)((cu + 5) / 10);
+    }
+}
+
+static void halow_tx_wedge_snapshot( void ){
+    uint32_t flag = disable_irq();
+    g_tx_dbg.snap_jiffies         = (uint32_t)os_jiffies();
+    g_tx_dbg.snap_complete_seq    = g_tx_complete_seq;
+    g_tx_dbg.snap_tx_end_count    = g_tx_dbg.tx_end_count;
+    g_tx_dbg.snap_budget          = g_tx_vacated_bytes;
+    g_tx_dbg.snap_tx_stat         = LMAC_HW->TX_STAT;
+    g_tx_dbg.snap_fsm             = LMAC_HW->FSM_STAT;
+    g_tx_dbg.snap_comn            = LMAC_HW->COMN_CTRL;
+    g_tx_dbg.snap_irqpd           = LMAC_HW->IRQ_PD;
+    g_tx_dbg.snap_bocnt           = LMAC_HW->BO_CNT0;
+    g_tx_dbg.snap_ac              = ah_lmac.current_ac_flags & 0x0fu;
+    g_tx_dbg.snap_sub             = (uint8_t)ah_lmac.bo_tx_substate;
+    g_tx_dbg.snap_bo_ftype        = (uint8_t)ah_lmac.bo_frame_type;
+    g_tx_dbg.snap_ctrl_flags      = (uint8_t)ah_lmac.tx_irq_ctrl_flags;
+    for( uint32_t ac = 0u; ac < 4u; ac++ ){
+        g_tx_dbg.snap_q_ac[ac] = skb_list_count(&ah_lmac_tx.pTx_ac_queues[ac]);
+        g_tx_dbg.snap_sel[ac]  = ah_lmac_tx.pTx_ac_aggr_data[ac].selected_count;
+    }
+    g_tx_wedge_count++;
+    enable_irq(flag);
+}
 static struct os_semaphore g_tx_vacated_sem;
 
 extern void lmac_kick_tx_task( void );
 extern void lhw_abort_fsm(void);
+extern void lhw_enable_irq_ac(void);
 extern void update_rx_buff_addr(void);
 extern void lhw_start_rx(uint32 flags);
 
 /* ===== MCS10 fragmentation =====
  *
- * MCS10 (OFDMA 26-tone) has ~450B PHY payload limit.
+ * MCS10 (S1G duplicate mode) single-PPDU limit is ~344-400B, boot-dependent (see HALOW_FRAG_MAX_PAYLOAD).
  * For packets exceeding this, we split into fragments with 2B header:
  *   [0] (total << 4) | seq    total>=1, seq<total
  *   [1] uuid                incremented per logical packet
@@ -112,7 +202,6 @@ extern void lhw_start_rx(uint32 flags);
  * total>1: reassemble on RX, discard after 1 s timeout
  */
 static uint8_t  frag_tx_uuid;
-static uint8_t  frag_tx_buf[HALOW_FRAG_HDR_SIZE + HALOW_FRAG_MAX_PAYLOAD];
 
 typedef struct {
     bool     active;
@@ -146,6 +235,13 @@ static void halow_runtime_reconfig_barrier(void)
     lmac_custom_cfg.defer_ac_pd = 1;
     LMAC_HW->AC_PD = 0u;
 
+    /* Whole surgery under CPU irq-off: masking only the device IRQ_EN leaves a
+     * window for an already-asserted ac_pd to dispatch mid-surgery, when
+     * skb_list[] is half-NULLed with a stale queued_count (reorder NULL-deref)
+     * or an skb sits both in the AC queue and the aggregate list (double-free).
+     * skb_list_queue_head nests safely inside (it restores IE only if it was
+     * set on entry). */
+    uint32_t cpsr = disable_irq();
     uint32_t saved_irq = LMAC_HW->IRQ_EN;
     LMAC_HW->IRQ_EN = 0u;
     LMAC_HW->IRQ_PD = 0xffffffffu;
@@ -155,7 +251,9 @@ static void halow_runtime_reconfig_barrier(void)
     for (uint32_t ac = 0; ac < 4u; ac++) {
         lmac_tx_ctx_buff *aggr = &ah_lmac_tx.pTx_ac_aggr_data[ac];
 
-        for (int32_t i = (int32_t)aggr->selected_count - 1; i >= 0; i--) {
+        /* rescue every slot, not just selected_count: a wedged aggregate can
+         * hold frames queued beyond the selection (queued_count > selected) */
+        for (int32_t i = 63; i >= 0; i--) {
             struct sk_buff *skb = aggr->skb_list[i];
             if (skb != NULL) {
                 skb_list_queue_head(&ah_lmac_tx.pTx_ac_queues[ac], skb);
@@ -185,6 +283,7 @@ static void halow_runtime_reconfig_barrier(void)
 
     LMAC_HW->IRQ_EN = saved_irq;
     LMAC_HW->IRQ_PD = 0xffffffffu;
+    enable_irq(cpsr);
 
     lmac_custom_cfg.defer_ac_pd = 0;
     for (uint32_t ac = 0; ac < 4u; ac++) {
@@ -221,6 +320,11 @@ static int32_t halow_lmac_rx_mcs10(struct hgic_rx_info *info,
         return 0;
     }
 
+    if (total > HALOW_FRAG_MAX_TOTAL) {
+        g_tx_dbg.rx_frag_drop++;
+        return 0;
+    }
+
     uint8_t seq  = payload[0] & 0x0F;
     uint8_t uuid = payload[1];
     uint8_t *fdata = payload + HALOW_FRAG_HDR_SIZE;
@@ -235,6 +339,7 @@ static int32_t halow_lmac_rx_mcs10(struct hgic_rx_info *info,
 
     if (frag_reasm.active &&
         (now - frag_reasm.last_tick) > HALOW_FRAG_TIMEOUT_MS) {
+        g_tx_dbg.rx_frag_drop++;
         frag_reasm.active = false;
     }
 
@@ -247,13 +352,26 @@ static int32_t halow_lmac_rx_mcs10(struct hgic_rx_info *info,
         frag_reasm.active = true;
     }
 
-    if (seq < frag_reasm.total) {
+    /* Wire fields are attacker-controllable (RF is unauthenticated): clamp
+     * everything before it indexes or sizes the 4000-byte static buffer.
+     * A retransmitted duplicate must not bump `received` again or a truncated
+     * reassembly gets delivered as complete (part_len[seq]==0 marks
+     * "not yet received"; TX never emits zero-length fragments). */
+    if (seq < frag_reasm.total &&
+        flen > 0 && flen <= HALOW_FRAG_MAX_PAYLOAD &&
+        frag_reasm.part_len[seq] == 0) {
         uint32_t off = 0;
         for (uint8_t i = 0; i < seq; i++)
             off += frag_reasm.part_len[i];
-        memcpy(frag_reasm.buf + off, fdata, (uint32_t)flen);
-        frag_reasm.part_len[seq] = (uint16_t)flen;
-        frag_reasm.received++;
+        if (off + (uint32_t)flen <= sizeof(frag_reasm.buf)) {
+            memcpy(frag_reasm.buf + off, fdata, (uint32_t)flen);
+            frag_reasm.part_len[seq] = (uint16_t)flen;
+            frag_reasm.received++;
+        }else{
+            g_tx_dbg.rx_frag_drop++;
+        }
+    }else if (seq >= frag_reasm.total || flen <= 0 || flen > HALOW_FRAG_MAX_PAYLOAD) {
+        g_tx_dbg.rx_frag_drop++;
     }
 
     frag_reasm.last_tick = now;
@@ -297,15 +415,53 @@ static int32_t halow_lmac_rx(struct lmac_ops *ops,
     return 0;
 }
 
+/* Budget-only refund for frames the LMAC rejected (the skb itself is freed by
+ * the LMAC error path). Same irq-guard rules as halow_tx_skb_complete. */
+static void halow_tx_skb_budget_refund( uint32_t len ){
+    bool full;
+    uint32_t flag = disable_irq();
+    g_tx_vacated_bytes += len;
+    full = (g_tx_vacated_bytes >= TX_BUFFER_SIZE);
+    if( full ) g_tx_vacated_bytes = TX_BUFFER_SIZE;
+    enable_irq(flag);
+    if( full ){
+        halow_lbt_set_tx_as_deactive();
+    }
+}
+
+/* Give one completed skb's bytes back to the TX budget, wake a blocked sender
+ * and free it. Shared by the normal TX-complete callback and the hard-wedge
+ * purge (skbs that will never complete get the same accounting so the budget
+ * and the heap stay consistent).
+ * The budget is RMW'd from several preemptive contexts (tcps thread, ACK
+ * workqueue, RX thread, tx_status_task) -- every mutation runs under a brief
+ * irq-disable so concurrent += / -= can't lose an update or wrap the counter
+ * (a wrapped budget disables all vacancy gating). The deactivate call takes
+ * the LBT mutex, so it stays OUTSIDE the critical section. */
+void halow_tx_skb_complete( struct sk_buff *skb ){
+    if( skb == NULL ) return;
+    bool full;
+    uint32_t flag = disable_irq();
+    g_tx_complete_seq++;
+    {
+        extern void halow_lbt_tx_done_notify( void );   /* atomic store, irq-safe */
+        halow_lbt_tx_done_notify();
+    }
+    g_tx_vacated_bytes += skb->len;
+    full = (g_tx_vacated_bytes >= TX_BUFFER_SIZE);
+    if( full ) g_tx_vacated_bytes = TX_BUFFER_SIZE;
+    enable_irq(flag);
+    if( full ){
+        halow_lbt_set_tx_as_deactive();
+    }
+    os_sema_up(&g_tx_vacated_sem);
+    kfree_skb(skb);
+}
+
 static int32_t halow_lmac_tx_status_callback(struct lmac_ops *ops, struct sk_buff *skb) {
     (void)ops;
     if (skb) {
-        g_tx_vacated_bytes += skb->len;
-        if(g_tx_vacated_bytes == TX_BUFFER_SIZE){
-            halow_lbt_set_tx_as_deactive();
-        }
-        os_sema_up(&g_tx_vacated_sem);
-        kfree_skb(skb);
+        halow_tx_skb_complete(skb);
     }
     return 0;
 }
@@ -458,7 +614,6 @@ void halow_config_apply(const halow_config_t *cfg){
 
 static void halow_modem_set_default(void){
     uint8_t g_mac[6];
-
     get_mac(g_mac);
 
     /* ---- basic bring-up ---- */
@@ -567,18 +722,224 @@ void halow_set_rx_cb(halow_rx_cb cb) {
     g_rx_cb = cb;
 }
 
-void halow_get_tx_vacanted_bytes(uint32_t bytes){
-    while(1) {
-        if (g_tx_vacated_bytes >= bytes) {
-            g_tx_vacated_bytes -= bytes;
+/* Deleted halow_get_tx_vacanted_bytes(): zero callers and an unguarded
+ * read-then-subtract RMW on g_tx_vacated_bytes (violates the irq-guard rule
+ * at halow_tx_skb_complete) -- a latent budget-drift bug if ever revived. */
+
+/* Non-blocking view of the LMAC TX vacancy (free bytes in the bounded TX buffer).
+ * Used by the ACK layer to apply backpressure (drop/hold) instead of blocking
+ * the TCP RX handler -- which stalled connections and made high-rate
+ * throughput non-reproducible. */
+uint32_t halow_get_tx_vacancy( void ){
+    return g_tx_vacated_bytes;
+}
+
+/* TX-vacancy leak watchdog, two-tier.
+ *
+ * Tier 1 (soft leak): budget below full AND all AC queues empty AND nothing
+ * selected into an aggregate, held for 500 ms. A max-length 1 MHz PPDU airs in
+ * ~25 ms and the status task drains in ms, so 500 ms of queues-empty with a
+ * non-full budget can only mean the budget is stale. Resync is safe.
+ *
+ * Tier 2 (hard wedge): TX work is PENDING (AC queues non-empty, aggregates
+ * selected, or the budget below full) but the TX-complete sequence counter has
+ * not moved for 5 s. This is the observed saturation failure: the LMAC loses
+ * its TX-complete events, retransmit/flush paths keep enqueueing fresh skbs
+ * behind the dead ones, the budget drains, every gate (flush hold, retx skip,
+ * TX-THROTTLE) freezes -- and because the AC queues never drain, tier 1 never
+ * fires. Both directions wedging simultaneously kills the link 100% until
+ * reboot (verified on the bench: bidirectional MAX blast -> 99-100% loss,
+ * airtime stuck at 100%, outstanding ACK slots frozen at 8/8).
+ * Recovery: request a purge from lmac tx_task (drains the AC queues through
+ * the normal completion path and resets per-AC aggregate state -- the skbs
+ * stuck there are dead regardless). If even the purge cannot restore TX
+ * progress for another 5 s (LMAC HW state machine itself stuck) reboot: a
+ * permanently-dead radio serves nobody, and an OTA session in progress is
+ * respected (no reboot while flashing). */
+void halow_tx_vacancy_watchdog( void ){
+    static uint64_t leak_since = 0u;
+    static uint64_t wedge_since = 0u;
+    static uint64_t wedge_purge_jiff = 0u;
+    static uint32_t wedge_last_seq = 0u;
+    static uint32_t wedge_last_acpd = 0u;   /* latched at each PURGE (see below) */
+    static uint32_t dead_strikes = 0u;      /* consecutive dead-FSM wedges */
+    extern volatile uint32_t lmac_ac_pd_count;   /* mars_lmac_phy.c */
+    uint64_t now = os_jiffies();
+
+    /* ---- tier 0: fast armed-TX timeout ------------------------------------
+     * The HW end-to-end timer (IRQ_EN bit14 -> lmac_irq_tx_tmo) is dead in
+     * modem mode (JTAG-verified: END_TO_LIMIT=5000 produced zero tmos during
+     * active traffic), so a latched armed TX (bo_frame_type!=0, FSM_STAT
+     * phantom-busy, BO_CNT0 frozen, IRQ_PD=0 -- nothing will ever assert)
+     * previously waited 5-15 s for the tier-2 purge. 500 ms with the bo state
+     * latched AND zero tx_end AND zero ac_pd movement is unambiguous wedge:
+     * a healthy contended node still cycles ac_pd every few ms. Recovery =
+     * exactly the abort sequence the purge uses -- queues and the parked
+     * aggregate are NOT touched: the skb stays in aggr->skb_list and the
+     * next ac_pd re-attempts it (gen_tx_agglist reuse). */
+    {
+        static uint64_t bo_stuck_since = 0u;
+        static uint64_t bo_last_abort  = 0u;
+        static uint32_t bo_last_end_cnt = 0u, bo_last_acpd = 0u;
+#define HALOW_TX_BO_TMO_MS      500u
+#define HALOW_TX_BO_TMO_GAP_MS  1000u
+
+        if( ah_lmac.bo_frame_type == 0u ){
+            bo_stuck_since = 0u;                          /* not armed */
+        }else if( g_tx_dbg.tx_end_count != bo_last_end_cnt ||
+                  lmac_ac_pd_count        != bo_last_acpd ){
+            bo_stuck_since = now;                         /* still moving */
+        }else if( bo_stuck_since == 0u ){
+            bo_stuck_since = now;                         /* first frozen sample */
+        }
+        bo_last_end_cnt = g_tx_dbg.tx_end_count;
+        bo_last_acpd    = lmac_ac_pd_count;
+
+        /* Phase-2 signature: attempt_tx's OWN gate condition (phy.c:
+         * (fsm>>8)&7!=0 || (fsm>>24)&7!=1 -> -1 forever) while every RF gate
+         * in COMN_CTRL is OFF -- the radio is provably idle, so any "busy"
+         * here is bookkeeping-phantom (bench-verified pattern). This variant
+         * KEEPS ac_pd cycling (attempt_tx fails the gate forever), which the
+         * frozen-counters check above deliberately ignores. */
+        if( ah_lmac.bo_frame_type != 0u &&
+            ( ((LMAC_HW->FSM_STAT >> 8) & 7u) != 0u ||
+              ((LMAC_HW->FSM_STAT >> 24) & 7u) != 1u ) &&
+            (LMAC_HW->COMN_CTRL & ((1u<<10)|(1u<<11)|(1u<<16)|(1u<<17))) == 0u ){
+            if( bo_stuck_since == 0u ) bo_stuck_since = now;
+        }
+
+        if( bo_stuck_since != 0u &&
+            (now - bo_stuck_since) >= os_msecs_to_jiffies(HALOW_TX_BO_TMO_MS) &&
+            ( bo_last_abort == 0u ||
+              (now - bo_last_abort) >= os_msecs_to_jiffies(HALOW_TX_BO_TMO_GAP_MS) ) ){
+
+            uint32_t stuck_sub = ah_lmac.bo_tx_substate;  /* for the log only */
+            uint32_t flag = disable_irq();
+            /* Idempotent under the mask on this single core: if a tx_end that
+             * ran before disable_irq() already cleared the latch, no-op. */
+            if( ah_lmac.bo_frame_type != 0u ){
+                bo_last_abort = now;
+                lhw_abort_fsm();                  /* == purge abort sequence */
+                LMAC_HW->BO_CNT0 = 0u;            /* mirror bo_fns clear */
+                ah_lmac.bo_frame_type  = 0u;
+                ah_lmac.bo_tx_substate = 0u;
+                lhw_enable_irq_ac();
+                g_tx_dbg.bo_tmo_recov++;
+            }
+            enable_irq(flag);
+            bo_stuck_since = 0u;
+            log_warn("halow: fast TX bo-timeout (sub=%u frozen >=%ums) -> FSM aborted, TX retried",
+                     (unsigned)stuck_sub, HALOW_TX_BO_TMO_MS);
+        }
+    }
+
+    /* ---- tier 2: hard wedge (pending TX + zero TX-complete progress) ---- */
+    bool pending = (g_tx_vacated_bytes < TX_BUFFER_SIZE);
+    if( !pending ){
+        for( uint32_t ac = 0u; ac < 4u; ac++ ){
+            if( skb_list_count(&ah_lmac_tx.pTx_ac_queues[ac]) != 0u ){
+                pending = true;
+                break;
+            }
+            if( ah_lmac_tx.pTx_ac_aggr_data[ac].selected_count != 0u ){
+                pending = true;
+                break;
+            }
+        }
+    }
+    if( !pending ){
+        wedge_since = 0u;
+        wedge_purge_jiff = 0u;
+        dead_strikes = 0u;      /* strikes don't carry across episodes */
+    }else if( g_tx_complete_seq != wedge_last_seq ){
+        /* TX work is completing -- normal traffic (a big low-MCS bundle can
+         * legitimately hold the channel for seconds; the counter still moves
+         * between its retries because every HW attempt completes). Only REAL
+         * completions reset the stuck timer; ac_pd activity deliberately does
+         * NOT (it merely stretches the purge threshold in the else branch --
+         * see the lost-TX-complete scenario there). */
+        wedge_since = 0u;
+        wedge_purge_jiff = 0u;
+        wedge_last_seq  = g_tx_complete_seq;
+        wedge_last_acpd = lmac_ac_pd_count;
+    }else{
+        if( wedge_since == 0u ) wedge_since = now;
+        uint64_t stuck_ms = os_jiffies_to_msecs(now - wedge_since);
+        /* Contention veto must be BOUNDED, not infinite: a lost TX-complete
+         * (IRQ glitch, unarmed end-to-end timer) leaves the skb stuck in the
+         * aggregate while the FSM keeps cycling beacons/CCA -- ac_pd stays
+         * alive, an unconditional veto suppressed the purge forever, the
+         * budget never refilled, and halow_lbt's airtime_tx_active pinned the
+         * airtime metric at 100% ("endless transmission", bench build 43).
+         * 15 s without a single TX-complete while WE hold pending frames is a
+         * wedge by any definition; a fully frozen machine (ac_pd dead too)
+         * still purges fast at 5 s. */
+        uint32_t acpd_moved = (lmac_ac_pd_count != wedge_last_acpd) ? 1u : 0u;
+        uint32_t wedge_thresh_ms = acpd_moved ? 15000u : 5000u;
+        bool purge_due = ( stuck_ms >= wedge_thresh_ms &&
+                           ( wedge_purge_jiff == 0u ||
+                             (now - wedge_purge_jiff) >= os_msecs_to_jiffies(wedge_thresh_ms) ) );
+        if( purge_due ){
+            wedge_purge_jiff = now;
+            wedge_last_acpd  = lmac_ac_pd_count;
+            /* Reboot eligibility counts ONLY dead-FSM wedges (ac_pd frozen
+             * across the full inter-purge window). Contention wedges purge
+             * and wait; a truly dead machine escalates: 3 strikes + 30 s. */
+            if( acpd_moved == 0u ) dead_strikes++;
+            else                   dead_strikes = 0u;
+            halow_tx_wedge_snapshot();
+            log_warn("halow: TX hard wedge #%u (budget=%lu, no complete %lums, acpd_move=%u, dead=%u) -> purge",
+                     (unsigned)g_tx_wedge_count,
+                     (unsigned long)g_tx_vacated_bytes, (unsigned long)stuck_ms,
+                     (unsigned)acpd_moved, (unsigned)dead_strikes);
+            lmac_tx_purge_request = 1u;
+            os_sema_up(&ah_lmac_tx.tx_sem);
+        }else if( stuck_ms >= 30000u && dead_strikes >= 3u ){
+            /* TRULY last resort: three purges brought no TX progress for half
+             * a minute -- the radio is serving nobody. Never during OTA. */
+            if( ota_wota_active() || ota_fw_active() ){
+                log_warn("halow: TX still wedged after purges, OTA active - no reboot");
+                lmac_tx_purge_request = 1u;
+                os_sema_up(&ah_lmac_tx.tx_sem);
+            }else{
+                log_error("halow: TX dead after %u purges -> reboot",
+                          (unsigned)g_tx_wedge_count);
+                os_sleep_ms(50);   /* let the log line reach the UART */
+                device_reboot();
+            }
+        }
+    }
+
+    /* ---- tier 1: soft budget leak with idle queues ---- */
+    if( g_tx_vacated_bytes >= TX_BUFFER_SIZE ){
+        leak_since = 0u;
+        return;
+    }
+    for( uint32_t ac = 0u; ac < 4u; ac++ ){
+        if( skb_list_count(&ah_lmac_tx.pTx_ac_queues[ac]) != 0u ){
+            leak_since = 0u;
             return;
         }
-        os_sema_down(&g_tx_vacated_sem, osWaitForever);
+        if( ah_lmac_tx.pTx_ac_aggr_data[ac].selected_count != 0u ){
+            leak_since = 0u;
+            return;
+        }
     }
+    if( leak_since == 0u ){
+        leak_since = now;
+        return;
+    }
+    if( (now - leak_since) < os_msecs_to_jiffies(500u) ) return;
+    leak_since = 0u;
+    log_warn("halow: TX vacancy leak (budget=%lu, queues idle) -> resync",
+             (unsigned long)g_tx_vacated_bytes);
+    g_tx_vacated_bytes = TX_BUFFER_SIZE;
+    halow_lbt_set_tx_as_deactive();
+    os_sema_up(&g_tx_vacated_sem);
 }
 
 static int32_t halow_send_frame(const uint8_t *payload, uint32_t len,
-                                 const uint8_t destination_mac[6], uint8_t mcs)
+                                 const uint8_t destination_mac[6], uint8_t mcs, uint8_t tid)
 {
     struct ieee80211_hdr hdr;
     memset(&hdr, 0, sizeof(hdr));
@@ -597,6 +958,7 @@ static int32_t halow_send_frame(const uint8_t *payload, uint32_t len,
 
     struct sk_buff *skb = alloc_tx_skb(need);
     if (!skb){
+        g_tx_dbg.tx_drop_alloc++;
         return -5;
     }
 
@@ -604,11 +966,30 @@ static int32_t halow_send_frame(const uint8_t *payload, uint32_t len,
     memcpy(skb_put(skb, sizeof(hdr)), &hdr, sizeof(hdr));
     memcpy(skb_put(skb, len), payload, len);
 
-    skb->priority = 0;
+    skb->priority = tid & 7u;   /* 802.1d tid -> AC queue at reload (ACK=7 -> AC3) */
     skb->tx       = 1;
-    halow_get_tx_vacanted_bytes(skb->len);
+    /* Non-blocking TX flow control: if the bounded LMAC TX buffer is full, drop
+     * the frame immediately instead of blocking.  Blocking here stalls the lwIP
+     * tcpip_thread (the recv callback runs in that context), which prevents TCP
+     * window updates and eventually resets the connection under any real-world
+     * load where the sender blasts at max speed.  Dropping lets lwIP shrink its
+     * receive window naturally so the sender backs off to the RF drain rate.
+     * Check+consume is one irq-guarded RMW: an unchecked read-then-subtract
+     * could interleave with a concurrent sender and wrap the counter. */
+    {
+        uint32_t flag = disable_irq();
+        if( g_tx_vacated_bytes < skb->len ){
+            enable_irq(flag);
+            kfree_skb(skb);
+            g_tx_dbg.tx_drop_budget++;
+            return -6;
+        }
+        g_tx_vacated_bytes -= skb->len;
+        enable_irq(flag);
+    }
 
     int32_t res;
+    uint32_t sent_len = skb->len;   /* LMAC error paths free the skb themselves */
     if (lmac_custom_cfg.fast_tx) {
         res = lmac_fast_tx(skb, mcs);
     } else {
@@ -616,18 +997,63 @@ static int32_t halow_send_frame(const uint8_t *payload, uint32_t len,
         lmac_kick_tx_task();
     }
 
+    if( res != 0 ){
+        /* LMAC rejected the frame (its error paths free the skb themselves):
+         * give the bytes back or every rejection permanently shrinks the
+         * budget and the node wedges itself into -6 forever. */
+        halow_tx_skb_budget_refund(sent_len);
+        g_tx_dbg.tx_drop_lmac++;
+        return res;
+    }
+
     halow_lbt_set_tx_as_active();
-    return res;
+    return 0;
 }
 
-static int32_t halow_tx_mcs10_frag( const uint8_t *data, uint32_t len, const uint8_t destination_mac[6], uint8_t mcs ) {
-    uint8_t uuid = ++frag_tx_uuid;
+static int32_t halow_tx_mcs10_frag( const uint8_t *data, uint32_t len,
+                                    const uint8_t destination_mac[6], uint8_t mcs, uint8_t tid ) {
+    /* The wire header packs the fragment count into 4 bits ((n<<4)|seq with
+     * n,seq <= 15): anything above HALOW_FRAG_MAX_PAYLOAD*HALOW_FRAG_MAX_TOTAL
+     * (4000 B) cannot be represented -- the old code silently truncated n and
+     * the receiver merged garbage. halow_tx() callers must size-limit first. */
+    if( len > (uint32_t)HALOW_FRAG_MAX_PAYLOAD * HALOW_FRAG_MAX_TOTAL ){
+        g_tx_dbg.tx_drop_alloc++;
+        return -4;
+    }
 
+    /* Fragment buffer is STATIC + mutex-serialized, NOT stack memory: this
+     * path also runs from the RX thread ("lmac rx", whose stack is the
+     * BINARY's fixed 1024 bytes) to send MCS10 ACKs, and a 252-byte local
+     * here was the single largest frame on that tiny stack -- the RX chain
+     * (ack_on_rx -> send_ack -> this -> halow_send_frame) overflowed it under
+     * blast and corrupted the adjacent heap. Callers are task-context only
+     * (RX thread, tcps, acktk), so a mutex is the right serializer; the
+     * one-time lazy init runs under irq-off so it cannot race itself. The
+     * uuid stays unique per packet (irq-guarded ++) so the receiver can tell
+     * two interleaved logical packets apart even on uuid wraparound races. */
+    static struct os_mutex g_frag_mu;
+    static bool g_frag_mu_ok = false;
+    static uint8_t frag[HALOW_FRAG_HDR_SIZE + HALOW_FRAG_MAX_PAYLOAD];
+    uint8_t uuid;
+    {
+        uint32_t flag = disable_irq();
+        uuid = ++frag_tx_uuid;
+        if( !g_frag_mu_ok ){
+            (void)os_mutex_init(&g_frag_mu);
+            g_frag_mu_ok = true;
+        }
+        enable_irq(flag);
+    }
+    (void)os_mutex_lock(&g_frag_mu, -1);
+
+    int32_t ret;
     if (len <= HALOW_FRAG_MAX_PAYLOAD) {
-        frag_tx_buf[0] = (uint8_t)(1u << 4);
-        frag_tx_buf[1] = uuid;
-        memcpy(frag_tx_buf + HALOW_FRAG_HDR_SIZE, data, len);
-        return halow_send_frame(frag_tx_buf, HALOW_FRAG_HDR_SIZE + len, destination_mac, mcs);
+        frag[0] = (uint8_t)(1u << 4);
+        frag[1] = uuid;
+        memcpy(frag + HALOW_FRAG_HDR_SIZE, data, len);
+        ret = halow_send_frame(frag, HALOW_FRAG_HDR_SIZE + len, destination_mac, mcs, tid);
+        os_mutex_unlock(&g_frag_mu);
+        return ret;
     }
 
     uint8_t n = (uint8_t)((len + HALOW_FRAG_MAX_PAYLOAD - 1) / HALOW_FRAG_MAX_PAYLOAD);
@@ -639,47 +1065,127 @@ static int32_t halow_tx_mcs10_frag( const uint8_t *data, uint32_t len, const uin
             chunk = HALOW_FRAG_MAX_PAYLOAD;
         }
 
-        frag_tx_buf[0] = (uint8_t)((n << 4) | i);
-        frag_tx_buf[1] = uuid;
-        memcpy(frag_tx_buf + HALOW_FRAG_HDR_SIZE, data + off, chunk);
+        frag[0] = (uint8_t)((n << 4) | i);
+        frag[1] = uuid;
+        memcpy(frag + HALOW_FRAG_HDR_SIZE, data + off, chunk);
 
-        int32_t res = halow_send_frame(frag_tx_buf, HALOW_FRAG_HDR_SIZE + chunk, destination_mac, mcs);
+        int32_t res = halow_send_frame(frag, HALOW_FRAG_HDR_SIZE + chunk, destination_mac, mcs, tid);
         if (res != 0){
+            os_mutex_unlock(&g_frag_mu);
             return res;
         }
 
         off += chunk;
     }
 
+    os_mutex_unlock(&g_frag_mu);
     return 0;
 }
 
 int32_t halow_tx( const uint8_t *data, uint32_t len, const uint8_t destination_mac[6], uint8_t mcs ) {
+    return halow_tx_p( data, len, destination_mac, mcs, 0u );
+}
+
+/* Cached link config for the TX hot path: resolving the default MCS or the
+ * bandwidth reads 5+ configdb KV keys -- under load that's 100+ flash reads/s.
+ * The cache is refreshed ONLY from the statistics task (halow_cfg_mcs_bw_refresh,
+ * once per loop) so the TX hot path never runs a configdb load itself: those KV
+ * reads take the configdb/flash mutexes with WAIT_FOREVER, and this cache sits
+ * on the ack-tick's retransmit/deferred-ACK path -- the tick feeds the
+ * hardware watchdog, so a multi-second stall behind a config-save GC here is
+ * a silent node reset (observed twice <5 min after OTA + heavy blast). The
+ * cold-cache fallback load below runs only at boot, before traffic exists. */
+static uint8_t  cfg_cache_mcs  = 0u;
+static uint8_t  cfg_cache_bw   = 0u;
+static bool     cfg_cache_ok   = false;
+
+void halow_cfg_mcs_bw_refresh( void ){
+    halow_config_t cfg;
+    halow_config_load(&cfg);
+    cfg_cache_mcs = cfg.mcs;
+    cfg_cache_bw  = cfg.bandwidth;
+    cfg_cache_ok  = true;
+}
+
+static void halow_cfg_mcs_bw_cached( uint8_t *mcs_out, uint8_t *bw_out ){
+    if( !cfg_cache_ok ) halow_cfg_mcs_bw_refresh();
+    *mcs_out = cfg_cache_mcs;
+    *bw_out  = cfg_cache_bw;
+}
+
+int32_t halow_tx_p( const uint8_t *data, uint32_t len, const uint8_t destination_mac[6], uint8_t mcs, uint8_t tid ) {
     if (g_ops == NULL)  return -1;
     if (data == NULL)   return -2;
     if (len == 0)        return -3;
     if (len > TX_BUFFER_SIZE) return -4;
 
-    if (mcs == HALOW_MCS_DEFAULT) {
-        halow_config_t cfg;
-        halow_config_load(&cfg);
-        mcs = cfg.mcs;
+    /* Per-frame MCS override. Fall back to the globally configured (sanitized)
+     * MCS for HALOW_MCS_DEFAULT or any value the LMAC TX rate tables cannot
+     * index: only MCS0-7 and the special MCS10 are supported. Without this,
+     * auto-rate-adaptation can drive the per-peer TX MCS up to 8/9 -> OOB in
+     * the NDBPS/retry tables -> wrong symbol count -> truncated frame in air. */
+    if (mcs == HALOW_MCS_DEFAULT || (mcs > 7 && mcs != 10)) {
+        uint8_t dflt_mcs, dflt_bw;
+        halow_cfg_mcs_bw_cached(&dflt_mcs, &dflt_bw);
+        mcs = dflt_mcs;
     }
 
     if (mcs == 10) {
-        return halow_tx_mcs10_frag(data, len, destination_mac, mcs);
+        return halow_tx_mcs10_frag(data, len, destination_mac, mcs, tid);
     }
 
-    return halow_send_frame(data, len, destination_mac, mcs);
+    /* Size-rate consistency: a frame longer than the max MSDU for the requested
+     * MCS is physically untransmittable at 1 MHz -- the binary LMAC rejects it
+     * in gen_txvec ("syms too long for non-mcs10, max 511") but keeps it
+     * queued and retries forever, stalling the whole AC queue until the
+     * watchdog purges it (observed: tens of seconds of 100% loss per event,
+     * watchdog reboot after 30 s). The plain (non-aggregated) ACK path and
+     * post-downshift retransmits can both produce such frames. RX decodes each
+     * frame at its own rate, so bump the MCS to the lowest rate whose max MSDU
+     * carries this frame instead of dropping it; margin 32 B covers the 802.11
+     * header halow_send_frame prepends (+4 FCS the symbol calc adds). */
+    {
+        uint8_t cfg_mcs, cfg_bw;
+        halow_cfg_mcs_bw_cached(&cfg_mcs, &cfg_bw);
+        uint8_t bw_idx = halow_bw_index(cfg_bw);
+        if( len + 32u > halow_max_msdu[bw_idx][mcs] ){
+            uint8_t bumped = 0u;
+            for( uint8_t m = (uint8_t)(mcs + 1u); m <= 7u; m++ ){
+                if( len + 32u <= halow_max_msdu[bw_idx][m] ){ bumped = m; break; }
+            }
+            if( bumped == 0u ){
+                g_tx_dbg.tx_drop_oversize++;
+                return -4;   /* > max MSDU even at MCS7: cannot go on air */
+            }
+            mcs = bumped;
+            g_tx_dbg.tx_mcs_bump++;
+        }
+    }
+
+    return halow_send_frame(data, len, destination_mac, mcs, tid);
+}
+
+/* Cached MCS getter for hot paths (LINKREQUEST MTU clamp): the config cache
+ * is refreshed by the statistics task every second; cold-cache callers fall
+ * back to one direct load (boot only). */
+uint8_t halow_cfg_mcs_get_cached(void) {
+    uint8_t mcs, bw;
+    halow_cfg_mcs_bw_cached(&mcs, &bw);
+    return mcs;
 }
 
 uint32_t halow_get_mtu(uint8_t mcs) {
-    halow_config_t cfg;
-    halow_config_load(&cfg);
-
+    /* Cached variant of the raw table lookup: the hot callers (every
+     * LINKREQUEST MTU clamp) used to trigger TWO flash config loads per
+     * packet (one here, one at the call site) -- under a link-establishment
+     * flood that is configdb-mutex churn exactly when the tcps path is
+     * busiest. The cache is refreshed by the statistics task every second
+     * (halow_cfg_mcs_bw_refresh already loads the full config); a config
+     * POST is visible within one second. */
+    uint8_t cm, cb;
+    halow_cfg_mcs_bw_cached(&cm, &cb);
     if (mcs == 10) {
         return HALOW_MCS10_MAX_MSDU;
     }
-
-    return (uint32_t)halow_max_msdu[halow_bw_index(cfg.bandwidth)][mcs];
+    return (uint32_t)halow_max_msdu[halow_bw_index(cb)][mcs];
 }

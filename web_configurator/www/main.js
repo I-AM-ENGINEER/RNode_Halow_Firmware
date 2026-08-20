@@ -18,7 +18,8 @@
         tcp: '',
         telemetry: '',
         privacy: '',
-        rns_mtu: ''
+        rns_mtu: '',
+        ack: ''
     };
     const DASHBOARD_REFRESH_MS = 1000;
     const dashboardState = {
@@ -101,8 +102,6 @@
             en: document.getElementById('cca_en').checked ? 1 : 0,
             ftpct: parseFloat(document.getElementById('cca_ftpct').value) || 0,
             dlpct: parseFloat(document.getElementById('cca_dlpct').value) || 0,
-            cwmin: parseInt(document.getElementById('cca_cwmin').value, 10),
-            cwmax: parseInt(document.getElementById('cca_cwmax').value, 10),
             thdyn: parseInt(document.getElementById('cca_thdyn').value, 10),
             sens: parseInt(document.getElementById('cca_sens').value, 10)
         };
@@ -255,6 +254,10 @@
             btn = document.getElementById('save_rns_mtu');
             isValid = isRnsMtuFormValid();
         }
+        if (group === 'ack') {
+            current = jsonSnapshot(readAckForm());
+            btn = document.getElementById('save_ack');
+        }
 
         if (!btn) { return; }
 
@@ -272,6 +275,7 @@
         if (group === 'telemetry') { baselines.telemetry = jsonSnapshot(readTelemetryForm()); }
         if (group === 'privacy') { baselines.privacy = jsonSnapshot(readPrivacyForm()); }
         if (group === 'rns_mtu') { baselines.rns_mtu = jsonSnapshot(readRnsMtuForm()); }
+        if (group === 'ack') { baselines.ack = jsonSnapshot(readAckForm()); }
         updateSaveButton(group);
     }
 
@@ -290,7 +294,7 @@
     function setupDirtyTracking() {
         const map = [
             { group: 'halow', btn: 'save_halow', ids: ['halow_power_dbm', 'halow_central_freq', 'halow_mcs_index', 'halow_bandwidth'] },
-            { group: 'lbt', btn: 'save_lbt', ids: ['cca_en', 'cca_ftpct', 'cca_dlpct', 'cca_cwmin', 'cca_cwmax', 'cca_thdyn', 'cca_sens'] },
+            { group: 'lbt', btn: 'save_lbt', ids: ['cca_en', 'cca_ftpct', 'cca_dlpct', 'cca_thdyn', 'cca_sens'] },
             { group: 'net', btn: 'save_net', ids: ['net_dhcp', 'net_ip_address', 'net_gw_address', 'net_netmask'] },
             { group: 'slip', btn: 'save_slip', ids: ['slip_enable', 'slip_baud', 'slip_ip_address', 'slip_gw_address'] },
             { group: 'log', btn: 'save_log', ids: ['log_udp_enable', 'log_udp_host', 'log_udp_port'] },
@@ -305,7 +309,8 @@
                 ]
             },
             { group: 'privacy', btn: 'save_privacy', ids: ['privacy_mac_rotation', 'privacy_mac_broadcast'] },
-            { group: 'rns_mtu', btn: 'save_rns_mtu', ids: ['reticulum_link_mtu'] }
+            { group: 'rns_mtu', btn: 'save_rns_mtu', ids: ['reticulum_link_mtu'] },
+            { group: 'ack', btn: 'save_ack', ids: ['ack_retries', 'ack_rate_adapt', 'ack_ra_loss_up', 'ack_ra_loss_down', 'ack_agg', 'ack_bc_repeat'] }
         ];
 
         map.forEach(m => {
@@ -321,6 +326,28 @@
             const btn = document.getElementById(m.btn);
             if (btn) { btn.disabled = true; }
         });
+
+        const retriesFld = document.getElementById('ack_retries');
+        const raBox = document.getElementById('ack_rate_adapt');
+        const upFld = document.getElementById('ack_ra_loss_up');
+        const dnFld = document.getElementById('ack_ra_loss_down');
+        const raPanel = document.getElementById('ra_panel');
+        const raWarn = document.getElementById('ra_warn');
+        if (retriesFld && raBox) {
+            const syncRateAdapt = () => {
+                const ackOn = (parseInt(retriesFld.value, 10) || 0) > 0;
+                if (!ackOn) raBox.checked = false;
+                const raOn = !!raBox.checked && ackOn;
+                if (upFld) upFld.disabled = !raOn;
+                if (dnFld) dnFld.disabled = !raOn;
+                if (raPanel) raPanel.classList.toggle('disabled', !ackOn);
+                if (raWarn) raWarn.style.display = ackOn ? 'none' : 'block';
+                updateSaveButton('ack');
+            };
+            retriesFld.addEventListener('input', syncRateAdapt);
+            retriesFld.addEventListener('change', syncRateAdapt);
+            raBox.addEventListener('change', syncRateAdapt);
+        }
     }
 
     function switchTab(tabName) {
@@ -368,20 +395,14 @@
     function validateLbtFields() {
         const ftpctField = document.getElementById('cca_ftpct');
         const dlpctField = document.getElementById('cca_dlpct');
-        const cwminField = document.getElementById('cca_cwmin');
-        const cwmaxField = document.getElementById('cca_cwmax');
         const sensField  = document.getElementById('cca_sens');
 
         const ftpct = parseFloat(ftpctField.value);
         const dlpct = parseFloat(dlpctField.value);
-        const cwmin = parseInt(cwminField.value, 10);
-        const cwmax = parseInt(cwmaxField.value, 10);
         const sens  = parseInt(sensField.value, 10);
 
         ftpctField.classList.toggle('error', isNaN(ftpct) || ftpct < 0.1 || ftpct > 100);
         dlpctField.classList.toggle('error', isNaN(dlpct) || (dlpct !== 0 && dlpct < 1) || dlpct > 100);
-        cwminField.classList.toggle('error', isNaN(cwmin) || cwmin < 1 || cwmin > 2047);
-        cwmaxField.classList.toggle('error', isNaN(cwmax) || cwmax < 1 || cwmax > 2047 || cwmax < cwmin);
         sensField.classList.toggle('error',  isNaN(sens)  || sens < 0 || sens > 10);
 
         updateSaveButton('lbt');
@@ -390,14 +411,10 @@
     function isLbtFormValid() {
         const ftpct = parseFloat(document.getElementById('cca_ftpct').value);
         const dlpct = parseFloat(document.getElementById('cca_dlpct').value);
-        const cwmin = parseInt(document.getElementById('cca_cwmin').value, 10);
-        const cwmax = parseInt(document.getElementById('cca_cwmax').value, 10);
         const sens  = parseInt(document.getElementById('cca_sens').value, 10);
 
         if (isNaN(ftpct) || ftpct < 0.1 || ftpct > 100) return false;
         if (isNaN(dlpct) || (dlpct !== 0 && dlpct < 1) || dlpct > 100) return false;
-        if (isNaN(cwmin) || cwmin < 1 || cwmin > 2047) return false;
-        if (isNaN(cwmax) || cwmax < 1 || cwmax > 2047 || cwmax < cwmin) return false;
         if (isNaN(sens) || sens < 0 || sens > 10) return false;
         return true;
     }
@@ -603,8 +620,6 @@
         document.getElementById('save_lbt').addEventListener('click', saveLbt);
         document.getElementById('cca_ftpct').addEventListener('input', function(e) { clampDecimal(e, 1); validateLbtFields(); });
         document.getElementById('cca_dlpct').addEventListener('input', function(e) { clampDecimal(e, 1); validateLbtFields(); });
-        document.getElementById('cca_cwmin').addEventListener('input', validateLbtFields);
-        document.getElementById('cca_cwmax').addEventListener('input', validateLbtFields);
         document.getElementById('cca_sens').addEventListener('input', validateLbtFields);
         document.getElementById('cca_thdyn').addEventListener('change', updateCcaThresholdFields);
 
@@ -649,6 +664,8 @@
 
         document.getElementById('save_privacy').addEventListener('click', savePrivacy);
         document.getElementById('save_rns_mtu').addEventListener('click', saveRnsMtu);
+        const saveAckBtn = document.getElementById('save_ack');
+        if (saveAckBtn) saveAckBtn.addEventListener('click', saveAck);
         document.getElementById('reticulum_link_mtu').addEventListener('input', validateRnsMtuField);
         document.getElementById('reticulum_link_mtu').addEventListener('change', validateRnsMtuField);
 
@@ -781,6 +798,35 @@
         }
     }
 
+    async function loadAckConfig() {
+        try {
+            const res = await fetch('/api/ack_cfg');
+            if (!res.ok) return;
+            const data = await res.json();
+            setInput('ack_retries', data.retries != null ? data.retries : 3);
+            setInput('ack_bc_repeat', data.bc_repeat != null ? data.bc_repeat : 2);
+            setInput('ack_ra_loss_up',   data.ra_loss_up   != null ? data.ra_loss_up   : 5);
+            setInput('ack_ra_loss_down', data.ra_loss_down != null ? data.ra_loss_down : 30);
+            const aggBox = document.getElementById('ack_agg');
+            if (aggBox) aggBox.checked = !!data.agg;
+            const ra = document.getElementById('ack_rate_adapt');
+            const upFld = document.getElementById('ack_ra_loss_up');
+            const dnFld = document.getElementById('ack_ra_loss_down');
+            const raPanel = document.getElementById('ra_panel');
+            const raWarn = document.getElementById('ra_warn');
+            const retries = Number(data.retries) || 0;
+            const ackOn = retries > 0;
+            const raOn = !!data.rate_adapt && ackOn;
+            if (ra) ra.checked = raOn;
+            if (upFld) upFld.disabled = !raOn;
+            if (dnFld) dnFld.disabled = !raOn;
+            if (raPanel) raPanel.classList.toggle('disabled', !ackOn);
+            if (raWarn) raWarn.style.display = ackOn ? 'none' : 'block';
+            snapshotGroup('ack');
+        } catch (err) {
+        }
+    }
+
     async function loadAll() {
         try {
             const res = await fetch('/api/get_all');
@@ -792,6 +838,7 @@
             populateFromState();
             snapshotAll();
             loadRnsMtuConfig();
+            loadAckConfig();
             return true;
         } catch (err) {
             console.error('get_all error', err);
@@ -831,6 +878,9 @@
 				setText('stat_cpu', d.cpu);
 				setText('stat_heap', d.heap);
 				setText('stat_chip_temp', d.chip_temp);
+				setText('stat_vcc', d.vcc);
+				setText('stat_vdd13b', d.vdd13b);
+				setText('stat_vdd13c', d.vdd13c);
             }
         } catch (err) {
             // ignore periodic fetch errors
@@ -987,45 +1037,55 @@
     }
 
     function parseNearbyRow(row) {
-        if (Array.isArray(row)) {
-            return {
-                mac: row[0],
-                rssi: row[1],
-                snr: row[2],
-                mcs: row[3],
-                packets: row[4],
-                bytes: row[5],
-                lastSeen: row[6]
-            };
-        }
-
+        /* Firmware (web_api_nearby_modems_get) emits self-describing objects
+         * keyed with rx_/tx_ prefixes (mirrors rns_link_db_link_t). has_rx /
+         * has_tx flag which direction carries real data so the UI can render
+         * '--' for the absent half (a heard-only neighbour has no TX stats;
+         * a TX-only peer has no RX stats). Output keys match the <th
+         * data-key=...> in the nearby table so sortRows can index by them. */
+        const o = (row && typeof row === 'object') ? row : {};
         return {
-            mac: row?.m ?? row?.mac,
-            rssi: row?.r ?? row?.rssi,
-            snr: row?.snr,
-            mcs: row?.s ?? row?.mcs,
-            packets: row?.p ?? row?.rx_packets,
-            bytes: row?.b ?? row?.rx_bytes,
-            lastSeen: row?.l ?? row?.last_seen
+            mac:            o.mac,
+            hasRx:          !(o.has_rx === false || o.has_rx === 0),
+            hasTx:          (o.has_tx === true || o.has_tx === 1),
+            rxRssi:         o.rx_rssi,
+            rxSnr:          o.rx_snr,
+            rxMcs:          o.rx_mcs,
+            rxBytes:        o.rx_bytes,
+            rxPackets:      o.rx_packets,
+            rxLast:         o.rx_last_age,
+            txMcs:          o.tx_mcs,
+            txEvm:          o.tx_evm,
+            txPackets:      o.tx_frames,      /* wire MPDUs == "TX packets" */
+            txBytes:        o.tx_bytes,
+            txAcked:        o.tx_acked,
+            txDropped:      o.tx_dropped,
+            txRetransmitted:o.tx_retransmitted,
+            txLast:         o.tx_last_age,
+            txLoss:         o.tx_loss_pct     /* TX loss AFTER retries (windowed IIR), 0..100 */
         };
     }
 
-    function calcNearbyBitrate(mac, bytes) {
+    /* Per-direction bitrate delta for the nearby table. Separated from the
+     * reticulum speedCache and keyed by 'rx:'/<mac> / 'tx:'/<mac> so RX and TX
+     * deltas don't collide for the same peer. Returns '--' until two samples
+     * exist (i.e. after the second poll). */
+    function nearbyBitrate(cacheKey, bytes) {
         const nowMs = Date.now();
-        const rxBytes = Number(bytes);
+        const numBytes = Number(bytes);
 
-        if (!mac || !Number.isFinite(rxBytes) || rxBytes < 0) {
+        if (!cacheKey || !Number.isFinite(numBytes) || numBytes < 0) {
             return '--';
         }
 
-        const prev = nearbyState.speedCache.get(mac);
-        nearbyState.speedCache.set(mac, { bytes: rxBytes, tsMs: nowMs });
+        const prev = nearbyState.speedCache.get(cacheKey);
+        nearbyState.speedCache.set(cacheKey, { bytes: numBytes, tsMs: nowMs });
 
         if (!prev) {
             return '--';
         }
 
-        const deltaBytes = rxBytes - prev.bytes;
+        const deltaBytes = numBytes - prev.bytes;
         const deltaMs = nowMs - prev.tsMs;
 
         if (deltaBytes < 0 || deltaMs <= 0) {
@@ -1049,23 +1109,29 @@
     function sortRows(rows, parseFn, key, desc, rateCache) {
         if (!key) return rows;
         const sorted = rows.slice();
-        const numericKeys = new Set(['rssi', 'snr', 'mcs', 'packets', 'bytes', 'lastSeen',
-            'rxBytes', 'txBytes', 'rxPackets', 'txPackets', 'lastRx', 'lastTx', 'mtu']);
+        /* Numeric sort keys used by BOTH the nearby and reticulum tables. Keys
+         * match the parsed-row field names (parseNearbyRow / parseReticulumRow)
+         * and the <th data-key=...> headers in index.html. */
+        const numericKeys = new Set([
+            'rxRssi', 'rxSnr', 'rxMcs', 'txMcs', 'txLoss', 'txEvm',
+            'rxPackets', 'txPackets', 'rxBytes', 'txBytes',
+            'rxLast', 'txLast', 'mtu'
+        ]);
         sorted.sort((a, b) => {
             const pa = parseFn(a);
             const pb = parseFn(b);
             let va, vb;
 
-            if (key === 'rate') {
-                va = peekBitrate(rateCache, pa.mac, pa.bytes);
-                vb = peekBitrate(rateCache, pb.mac, pb.bytes);
-            } else if (key === 'rxRate' || key === 'txRate') {
-                const ka = String(pa.id ?? pa.remoteMac ?? '');
-                const kb = String(pb.id ?? pb.remoteMac ?? '');
-                const rKeyA = (key === 'rxRate' ? 'rx:' : 'tx:') + ka;
-                const rKeyB = (key === 'rxRate' ? 'rx:' : 'tx:') + kb;
-                va = peekBitrate(rateCache, rKeyA, key === 'rxRate' ? pa.rxBytes : pa.txBytes);
-                vb = peekBitrate(rateCache, rKeyB, key === 'rxRate' ? pb.rxBytes : pb.txBytes);
+            if (key === 'rxRate' || key === 'txRate') {
+                /* Rate is derived from per-poll byte deltas in the table's own
+                 * speedCache (reticulum or nearby), keyed 'rx:'/<id-or-mac> or
+                 * 'tx:'/<id-or-mac>. Identify the row by whichever identity the
+                 * table carries (reticulum = id/remoteMac, nearby = mac). */
+                const ka = String(pa.mac ?? pa.id ?? pa.remoteMac ?? '');
+                const kb = String(pb.mac ?? pb.id ?? pb.remoteMac ?? '');
+                const isRx = (key === 'rxRate');
+                va = peekBitrate(rateCache, (isRx ? 'rx:' : 'tx:') + ka, isRx ? pa.rxBytes : pa.txBytes);
+                vb = peekBitrate(rateCache, (isRx ? 'rx:' : 'tx:') + kb, isRx ? pb.rxBytes : pb.txBytes);
             } else if (numericKeys.has(key)) {
                 va = Number(pa[key]) || 0;
                 vb = Number(pb[key]) || 0;
@@ -1128,40 +1194,61 @@
         if (!rows.length) {
             const tr = document.createElement('tr');
             const td = document.createElement('td');
-            td.colSpan = 7;
+            td.colSpan = 15;   /* keep in sync with the <thead> column count */
             td.textContent = 'No devices';
             tr.appendChild(td);
             body.appendChild(tr);
             return;
         }
 
+        /* Helpers: each cell is either a real value or '--' when the peer has
+         * no data for that direction (has_rx/has_tx). A unit suffix is appended
+         * for signal-quality cells. */
+        const dash = '--';
+        const cell = (v) => (v !== undefined && v !== null && v !== '') ? String(v) : dash;
+        const cellUnit = (v, unit) => (v !== undefined && v !== null && v !== '') ? (v + unit) : dash;
+        const ageCell = (ageRaw) => {
+            const age = Number(ageRaw);
+            return (Number.isFinite(age) && age >= 0) ? formatNearbyLastSeen(age) : dash;
+        };
+
         rows.forEach(srcRow => {
             const row = parseNearbyRow(srcRow);
             const tr = document.createElement('tr');
+            const mac = String(row.mac ?? '');
+            const hasRx = row.hasRx !== false;
+            const hasTx = row.hasTx === true;
+
+            const rxRate = hasRx ? nearbyBitrate('rx:' + mac, row.rxBytes) : dash;
+            const txRate = hasTx ? nearbyBitrate('tx:' + mac, row.txBytes) : dash;
+
+            /* Order MUST match the <thead data-key=...> in index.html:
+             *   mac, rxRssi, rxSnr, rxMcs, txMcs, txLoss, txEvm,
+             *   rxPackets, txPackets, rxBytes, txBytes, rxRate, txRate,
+             *   rxLast, txLast */
             const values = [
                 formatMac(row.mac),
-                row.rssi + ' dBm',
-                row.snr + ' dB',
-                normalizeNearbyMcs(row.mcs),
-                Number(row.packets).toLocaleString('ru-RU'),
-                formatBytes(row.bytes),
-                calcNearbyBitrate(row.mac, row.bytes)
+                hasRx ? cellUnit(row.rxRssi, ' dBm') : dash,
+                hasRx ? cellUnit(row.rxSnr, ' dB') : dash,
+                hasRx ? cell(row.rxMcs) : dash,
+                hasTx ? cell(row.txMcs) : dash,
+                hasTx ? cellUnit(row.txLoss, '%') : dash,
+                hasTx ? cellUnit(row.txEvm, ' dB') : dash,
+                hasRx ? Number(row.rxPackets).toLocaleString('ru-RU') : dash,
+                hasTx ? Number(row.txPackets).toLocaleString('ru-RU') : dash,
+                hasRx ? formatBytes(row.rxBytes) : dash,
+                hasTx ? formatBytes(row.txBytes) : dash,
+                rxRate,
+                txRate,
+                hasRx ? ageCell(row.rxLast) : dash,
+                hasTx ? ageCell(row.txLast) : dash
             ];
 
             values.forEach(value => {
                 const td = document.createElement('td');
-                td.textContent = (value !== undefined && value !== null && value !== '') ? value : '--';
+                td.textContent = value;
                 tr.appendChild(td);
             });
-
-            const ageTd = document.createElement('td');
-            const age = Number(row.lastSeen);
-            if (Number.isFinite(age) && age >= 0) {
-                ageTd.textContent = formatNearbyLastSeen(age);
-            } else {
-                ageTd.textContent = '--';
-            }
-            tr.appendChild(ageTd);
 
             body.appendChild(tr);
         });
@@ -1191,6 +1278,7 @@
 
             setText('nearby_self_mac', formatMac(data?.m ?? '--'));
             setText('nearby_count', total);
+            setText('nearby_tx_mcs', (data?.tx_mcs != null) ? ('MCS' + data.tx_mcs) : '--');
             nearbyState.rows = rows;
             renderNearby();
         } catch (err) {
@@ -1238,6 +1326,20 @@
         }
         parts.push(s + 's');
         return parts.join(' ');
+    }
+
+    /* RNS link state enum — MUST match rns_link_db_state_t in inc/rns/defines.h.
+     * The firmware ships this as a raw number, so we map it to a human-readable
+     * label here for the Reticulum table. */
+    function formatRnsState(state) {
+        switch (Number(state)) {
+            case 0: return 'Closed';
+            case 1: return 'Pending';      // REQUEST_SENT  — LinkRequest sent, awaiting reply
+            case 2: return 'Handshake';    // PROOF_RECEIVED — proof phase, almost open
+            case 3: return 'Open';         // OPEN          — fully established, data flows
+            default: return (state !== undefined && state !== null && state !== '')
+                       ? String(state) : '--';
+        }
     }
 
     function parseReticulumRow(row) {
@@ -1326,15 +1428,15 @@
                 fmt(row.id),
                 fmt(row.remoteMac),
                 fmt(row.destination),
-                fmt(row.state),
+                formatRnsState(row.state),
                 formatBytes(row.rxBytes),
                 formatBytes(row.txBytes),
                 fmt(row.rxPackets),
                 fmt(row.txPackets),
                 (Number.isFinite(lastRx) && lastRx >= 0) ? formatDurationCompact(lastRx) : '--',
                 (Number.isFinite(lastTx) && lastTx >= 0) ? formatDurationCompact(lastTx) : '--',
-                rxRate !== '--' ? rxRate + ' kbit/s' : '0 kbit/s',
-                txRate !== '--' ? txRate + ' kbit/s' : '0 kbit/s',
+                rxRate !== '--' ? formatNearbyBitrate(Number(rxRate)) : '0 kbit/s',
+                txRate !== '--' ? formatNearbyBitrate(Number(txRate)) : '0 kbit/s',
                 fmt(row.mtu)
             ];
 
@@ -1411,8 +1513,6 @@
         setCheckbox('cca_en', cca.en ?? 1);
         setInput('cca_ftpct', cca.ftpct ?? 0.1);
         setInput('cca_dlpct', cca.dlpct ?? 100);
-        setInput('cca_cwmin', cca.cwmin ?? 31);
-        setInput('cca_cwmax', cca.cwmax ?? 1023);
         setSelect('cca_thdyn', String(cca.thdyn ?? 0));
         setInput('cca_sens', cca.sens ?? 5);
         validateLbtFields();
@@ -1599,6 +1699,32 @@
         }
         loadAll();
         loadRnsMtuConfig();
+        loadAckConfig();
+    }
+
+    function readAckForm() {
+        const ra = document.getElementById('ack_rate_adapt');
+        const up = parseInt(document.getElementById('ack_ra_loss_up').value, 10);
+        const dn = parseInt(document.getElementById('ack_ra_loss_down').value, 10);
+        const bcr = parseInt(document.getElementById('ack_bc_repeat').value, 10);
+        return {
+            retries: parseInt(document.getElementById('ack_retries').value, 10) || 0,
+            rate_adapt: (ra && ra.checked && !ra.disabled) ? 1 : 0,
+            ra_loss_up:   isNaN(up) ? 5   : Math.max(0, Math.min(99, up)),
+            ra_loss_down: isNaN(dn) ? 30  : Math.max(1, Math.min(100, dn)),
+            bc_repeat:    isNaN(bcr) ? 2  : Math.max(1, Math.min(3, bcr)),
+            agg:    (document.getElementById('ack_agg') && document.getElementById('ack_agg').checked) ? 1 : 0
+        };
+    }
+
+    async function saveAck() {
+        const payload = readAckForm();
+        try {
+            await postJson('/api/ack_cfg', payload);
+        } catch (err) {
+            console.error('saveAck error', err);
+        }
+        loadAckConfig();
     }
 
     function sanitizeLxmf(value) {

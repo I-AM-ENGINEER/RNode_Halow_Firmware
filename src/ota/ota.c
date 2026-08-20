@@ -1,10 +1,12 @@
 // TODO
 // Checksum cheking
 #include "sys_config.h"
+#include "build_info_gen.h"
 //#define LOG_LOCAL_LEVEL     LOG_LEVEL_OTA
 #include "lib/logc/log.h"
 
 #include "ota.h"
+#include "utils.h"
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -37,6 +39,21 @@ static const struct fal_partition *g_ota_part;
 static bool g_ota_erased;
 static uint32_t g_ota_total;
 static ota_fw_ctx_t s_fw_ota;
+static int64_t s_fw_ota_begin_ms;
+
+#define OTA_FW_SESSION_TIMEOUT_MS (10u * 60u * 1000u)
+
+bool ota_fw_active( void ){
+    if( !s_fw_ota.active ){
+        return false;
+    }
+    if( (get_time_ms() - s_fw_ota_begin_ms) > (int64_t)OTA_FW_SESSION_TIMEOUT_MS ){
+        s_fw_ota.active = false;
+        log_warn("ota: fw session timed out");
+        return false;
+    }
+    return true;
+}
 
 static uint32_t crc32_fw( uint32_t crc, const uint8_t *p, uint32_t n ){
     uint32_t c = crc ^ 0xFFFFFFFFu;
@@ -155,19 +172,24 @@ int32_t ota_fw_begin( uint32_t total_size, uint32_t expect_crc32 ){
     s_fw_ota.active       = true;
     s_fw_ota.total        = total_size;
     s_fw_ota.expect_crc32 = expect_crc32;
+    s_fw_ota_begin_ms     = get_time_ms();
 
     return 0;
 }
 
 int32_t ota_fw_write_chunk( uint32_t off, const uint8_t *data, uint16_t len ){
-    if (!s_fw_ota.active) { 
+    if (!s_fw_ota.active) {
         return -1;
     }
-    if (data == NULL || len == 0) { 
+    if (data == NULL || len == 0) {
         return -2;
     }
 
-    return _libota_write_fw_ah(s_fw_ota.total, off, data, len);
+    int32_t r = _libota_write_fw_ah(s_fw_ota.total, off, data, len);
+    if (r == 0) {
+        s_fw_ota_begin_ms = get_time_ms();
+    }
+    return r;
 }
 
 int32_t ota_fw_end( void ){
@@ -262,11 +284,24 @@ static int ota_cmd_firmware_data(struct netif* nif, uint8_t* data, uint32_t len)
     }
 
     int32 r = 0;
+    /* Arm the same OTA guard the web path uses (s_fw_ota.active): the TX-wedge
+     * watchdog's last-resort reboot and the ota_fw_active() checks must stay
+     * suppressed during an eth flash session too -- a reboot mid-session (the
+     * first chunk already erased the whole firmware partition) bricks the
+     * node. Cleared on the final chunk or any write error. */
+    if (fw_off == 0) {
+        s_fw_ota.active = true;
+        s_fw_ota.total  = fw_total;
+    }
     r = _libota_write_fw_ah(fw_total, fw_off, fw->data, fw_len);
     log_trace("FW_DATA: write ret=%ld", (long)r);
     hgprintf("libota_write_fw_ah ret=%ld\r\n", (long)r);
     if (r != 0) {
+        s_fw_ota.active = false;
         return -1;
+    }
+    if (fw_off + fw_len >= fw_total) {
+        s_fw_ota.active = false;
     }
 
     struct eth_ota_fw_data answer;
@@ -402,7 +437,7 @@ static int ota_cmd_get_ip( struct netif *nif, uint8_t *data, uint32_t len ){
     resp.mask = mask;
 
     resp.version[0] = 0;
-    strncpy(resp.version, FW_FULL_VERSION, sizeof(resp.version) - 1);
+    strncpy(resp.version, FW_BUILD_VERSION, sizeof(resp.version) - 1);
     resp.version[sizeof(resp.version) - 1] = 0;
 
     struct pbuf *p = pbuf_alloc(PBUF_RAW, (uint16_t)sizeof(resp), PBUF_RAM);

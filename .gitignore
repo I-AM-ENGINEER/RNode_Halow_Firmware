@@ -38,3 +38,9 @@ tmp
 
 # Auto-regenerated per build (Makefile gen-fw-build-info target, when present)
 src/fw_build_info.c
+
+postmortem_*.json
+build_number.txt
+/logs/
+ga*.json
+nm*.json

@@ -169,12 +169,22 @@ static int32 hguart_close(struct uart_device *uart_t)
 static int32 hguart_putc(struct uart_device *uart_t, int8 Data)
 {
     struct hguart *uart = (struct hguart *)uart_t;
+    /* Bounded spin: a wedged/clock-gated UART peripheral must cost us ONE
+     * dropped character, never the caller. The unbounded wait froze the
+     * RHINO timer task inside a periodic print (seen live on the bench via
+     * JTAG: tmr_adapt_cb -> hgprintf -> hguart_putc spinning on USR.TXFE
+     * for days) -- with the timer task dead, every task that printed ever
+     * after blocked on the log path and the whole node (lwIP included) went
+     * silent while the CPU kept spinning. */
+    uint32 guard = 0u;
 #if UART_FIFO_EN
-    while ((uart->hw->USR & BIT(1)) == 0); //tx fifo full
+    while (((uart->hw->USR & BIT(1)) == 0) && (++guard < 200000u)); //tx fifo full
+    if (guard >= 200000u) return RET_ERR;
     uart->hw->RBR = Data;
 #else
     uart->hw->RBR = Data;
-    while ((uart->hw->LSR & BIT(5)) == 0);
+    while (((uart->hw->LSR & BIT(5)) == 0) && (++guard < 200000u));
+    if (guard >= 200000u) return RET_ERR;
 #endif
     return RET_OK;
 }

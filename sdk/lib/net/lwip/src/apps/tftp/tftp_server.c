@@ -216,6 +216,14 @@ recv(void *arg, struct udp_pcb *upcb, struct pbuf *p, const ip_addr_t *addr, u16
     return;
   }
 
+  /* hardening: a 1-3 byte datagram reads past the pbuf payload below (opcode
+   * + blknum are 4 bytes) and a short DATA packet would write header bytes
+   * into the open file */
+  if (p->tot_len < 4) {
+    pbuf_free(p);
+    return;
+  }
+
   opcode = sbuf[0];
 
   tftp_state.last_pkt = tftp_state.timer;

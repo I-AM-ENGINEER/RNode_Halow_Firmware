@@ -91,7 +91,12 @@ void lhw_irq_init(void) {
     LMAC_HW->IRQ_EN  = 0;
     LMAC_HW->IRQ_PD = 0xffffffffU;
     LMAC_HW->IRQ_EN  = 0x80U | 0x20U | 0x04U | 0x400U | 0x8000U | 0x2000U | 0x4000U | (1U << 18);
-    LMAC_HW->END_TO_LIMIT = 25000U;
+    /* END_TO_LIMIT: the stock firmware NEVER writes this register. The old
+     * fixed 25000 silently TRUNCATED long low-rate TXOPs (MCS1 frames over
+     * ~125 symbols lost 12-17% on a 30 dB SNR link -- the "broken low-rate
+     * regime"). Max value = effectively no artificial end-to-end cap, the
+     * closest safe equivalent of stock behavior. */
+    LMAC_HW->END_TO_LIMIT = 0xFFFFFFFFU;
     LMAC_HW->IRQ_EN |= (1U << 20) | 0x1000U;
 }
 

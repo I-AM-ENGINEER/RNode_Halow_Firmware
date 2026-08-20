@@ -1,4 +1,5 @@
 #include "sys_config.h"
+#include "build_info_gen.h"
 #define LOG_LOCAL_LEVEL LOG_LEVEL_CONFIG_API_DISPATCH
 
 #include "basic_include.h"
@@ -89,6 +90,7 @@ static const web_api_route_t s_api_routes[] = {
     { "telemetry_cfg",      web_api_telemetry_cfg_get,      web_api_telemetry_cfg_post  },
     { "privacy_cfg",        web_api_privacy_cfg_get,        web_api_privacy_cfg_post    },
     { "rns_mtu_cfg",        web_api_rns_mtu_cfg_get,        web_api_rns_mtu_cfg_post    },
+    { "ack_cfg",            web_api_ack_cfg_get,            web_api_ack_cfg_post        },
     { "telemetry_send",     NULL,                           web_api_telemetry_send_post },
 
     { "ota_wipe_lfs",       NULL,                           web_api_ota_wipe_lfs_post   },
@@ -100,6 +102,11 @@ static const web_api_route_t s_api_routes[] = {
     { "ota_fw_chunk",       NULL,                           web_api_ota_fw_chunk_post   },
     { "reboot",             NULL,                           web_api_reboot_post         },
     { "reset_stat",         NULL,                           web_api_radio_stat_post     },
+#ifdef FW_BUILD_BETA
+    { "cpu_dump",           web_api_cpu_dump_get,           NULL                        },
+    { "tx_dbg",             web_api_tx_dbg_get,             NULL                        },
+    { "rf_dbg",             web_api_rf_dbg_get,             web_api_rf_dbg_post         },
+#endif
     { "default_rst",        NULL,                           web_api_default_reset       },
 };
 

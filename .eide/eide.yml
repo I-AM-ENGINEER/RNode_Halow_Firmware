@@ -116,6 +116,11 @@ targets:
           asm-compiler:
             ASM_FLAGS: -mcpu=ck803 -g -pipe -D__NO_BOARD_INIT -DTXW4002ACK803
           beforeBuildTasks:
+            - name: Build info
+              abortAfterFailed: false
+              command: python pack/build_info.py beta
+              disable: false
+              stopBuildAfterFailed: true
             - name: mkdir out
               abortAfterFailed: false
               command: rm -rf "out" && mkdir "out"
@@ -133,6 +138,152 @@ targets:
             warnings: unspecified
           global:
             output-debug-info: enable
+          linker:
+            $disableOutputTask: true
+            LD_FLAGS: -mcpu=ck803 -nostartfiles -Wl,--gc-sections -Wl,-zmax-page-size=1024 -Wl,-Map=project.map -Wl,--ckmap=txw4002a.map -Wl,--wrap=lwip_netif_hook_inputdata -Wl,--wrap=lmac_send_bss_announcement -Wl,--wrap=ah_rf_lo_freq_set -Wl,--wrap=ah_rf_lo_table_cfg
+            LIB_FLAGS: libs/obj/libcommon/common_c_misc.o libs/obj/libcommon/common_sleepcb.o libs/obj/libcommon/common_sysevt.o libs/obj/libcommon/heap_mmpool.o libs/obj/libcommon/heap_sysheap.o libs/obj/libcommon/ota_eth_ota.o libs/obj/libcommon/ota_fw.o libs/obj/libcommon/ota_fwinfo.o libs/obj/libcommon/skb_skb_list.o libs/obj/libcommon/skb_skb_pool.o libs/obj/libcommon/syscfg_syscfg.o libs/obj/libcommon/xmodem_xmodem.o libs/obj/libcommon/xmodem_xmodem_fw.o libs/obj/libcore/emac_hg_gmac_eva.o libs/obj/libcore/slave_hgsdio20_slave.o libs/obj/libcore/txw4002ack803_startup.o libs/obj/libcore/txw4002ack803_sysctrl.o libs/obj/libcore/usb11_hgusb11_base.o libs/obj/libcore/usb11_hgusb11_dev_api.o libs/obj/libcore/usb11_hgusb11_dev_ep0.o libs/obj/libcore/usb11_hgusb11_dev_tbl.o libs/obj/liblmac/mars_ah_dsleep.o libs/obj/liblmac/mars_ah_wphy.o libs/obj/liblmac/mars_ahrf.o libs/obj/liblmac/mars_lmac.o libs/obj/liblmac/mars_lmac_cfg.o libs/obj/liblmac/mars_lmac_rc.o libs/obj/liblmac/mars_lmac_rx.o
+              libs/obj/liblmac/mars_lmac_test.o libs/obj/liblmac/mars_lmac_tx_origfuncs.o libs/obj/liblmac/mars_lmac_util.o libs/obj/libnetutils/dhcpd_dhcpd.o libs/obj/libnetutils/utils_chksum.o libs/obj/libnetutils/utils_dnsred.o libs/obj/libnetutils/utils_netat.o libs/obj/libnetutils/utils_netlog.o libs/obj/libnetutils/utils_sntp.o libs/obj/libnetutils/utils_udp.o libs/obj/libnetutils/utils_wnbota.o libs/obj/libosal/csky_condv.o libs/obj/libosal/csky_msgqueue.o libs/obj/libosal/csky_mutex.o libs/obj/libosal/csky_semaphore.o libs/obj/libosal/csky_sleep.o libs/obj/libosal/csky_task.o libs/obj/libosal/csky_time.o libs/obj/libosal/csky_timer.o libs/obj/libosal/osal_work.o libs/obj/liblmac/mars_lmac_hw.o libs/obj/liblmac/mars_rfdigicali.o libs/obj/liblmac/mars_lmac_cipher.o -lm
+            linker-type: gcc
+            output-format: elf
+            print-mem-usage: true
+            remove-unused-input-sections: true
+    uploadConfigMap:
+      Custom:
+        bin: ""
+        commandLine: python ${workspaceFolder}/flash.py --elf ${OutDir}/${ProjectName}.elf
+        eraseChipCommand: ""
+      JLink:
+        baseAddr: ""
+        bin: ""
+        cpuInfo:
+          cpuName: "null"
+          vendor: "null"
+        otherCmds: ""
+        proType: 1
+        speed: 8000
+    uploader: Custom
+  Release:
+    cppPreprocessAttrs:
+      defineList: []
+      incList:
+        - csky/configs
+        - csky/csi_core/include
+        - csky/csi_driver/include
+        - csky/csi_kernel/include
+        - csky/csi_kernel/rhino/arch/include
+        - csky/csi_kernel/rhino/common
+        - csky/csi_kernel/rhino/core/include
+        - csky/csi_kernel/rhino/driver
+        - csky/csi_kernel/rhino/pwrmgmt
+        - csky/libs/include
+        - sdk/chip/txw4002ack803
+        - sdk/include
+        - sdk/include/chip
+        - sdk/include/chip/txw4002ack803
+        - sdk/include/lib/net/lwip
+        - sdk/include/lib/ota
+        - sdk/include/lib/net/lwip/include
+        - sdk/lib/lmac/mars
+        - sdk/lib/net/lwip/src/apps/altcp_tls
+        - sdk/lib/net/lwip/src/apps/http
+        - sdk/lib/net/lwip/src/apps/http/makefsdata
+        - sdk/lib/net/lwip/src/apps/snmp
+        - sdk/lib/umac/umac4
+        - sdk/lib/umac/umac4/include
+        - sdk/lib/umac/umac4/lib
+        - sdk/lib/umac/umac4/wnb/include
+        - sdk/lib/umac/umac4/wpa
+        - sdk/lib/umac/umac4/wpa_auth
+        - sdk/lib/crypto/mbedtls/include
+        - sdk/lib/crypto/openssl/include
+        - sdk/lib/crypto/openssl/crypto
+        - inc
+        - inc/config
+        - sdk/lib/microReticulum/ArduinoJson/Include
+        - sdk/lib/microReticulum/microReticulum/src
+        - sdk/lib/microReticulum/Crypro
+      libList: []
+    excludeList:
+      - libs/libatcmd
+      - libs/libcommon
+      - libs/libcore
+      - libs/liblmac
+      - libs/libnetutils
+      - libs/libosal
+      - libs/libwifi
+      - sdk/include
+      - csky/configs
+      - csky/csi_core
+      - csky/csi_driver
+      - csky/csi_kernel/rhino/arch/include
+      - csky/csi_kernel/rhino/core/include
+      - sdk/lib/net/libcurl
+      - src/atcmd.c
+      - sdk/lib/usb_app
+      - src/deep_sleep_placeholder.c
+      - <virtual_root>/libcore.S
+      - src/events.c
+      - src/pairsta.c
+      - sdk/lib/common/atcmd.c
+      - sdk/lib/net/mongoose
+      - sdk/lib/microReticulum/microReticulum/variants
+      - sdk/lib/microReticulum/microReticulum/test
+      - sdk/lib/microReticulum/microReticulum/lib
+      - sdk/lib/microReticulum/microReticulum/examples
+      - sdk/lib/microReticulum/microReticulum/boards
+      - sdk/lib/microReticulum/Crypro/examples
+      - sdk/lib/crypto/mbedtls
+      - sdk/lib/crypto/openssl
+      - sdk/lib/lmac/__edited
+      - sdk/lib/lmac/mars_lmac_cipher.c
+      - sdk/lib/lmac/mars_lmac_hw.c
+      - sdk/lib/lmac/mars_rfdigicali.c
+    settings:
+      debugger: cortex-debug
+    toolchain: ANY_GCC
+    toolchainConfigMap:
+      ANY_GCC:
+        linkerScriptPath: gcc_csky.ld
+        options:
+          version: 2
+          afterBuildTasks:
+            - name: Create bin
+              abortAfterFailed: false
+              command: ${ToolchainRoot}/bin/${CompilerPrefix}objcopy -O binary ${OutDir}/${ProjectName}.elf ${OutDir}/${ProjectName}.bin
+              disable: false
+            - name: Compress bin
+              abortAfterFailed: false
+              command: python pack/prepare_firmware.py ${OutDir}/${ProjectName}.bin -o out/fw.bin
+              disable: false
+            - name: Create OTA
+              abortAfterFailed: false
+              command: python pack/build_OTA.py out out/fw.bin
+              disable: false
+          asm-compiler:
+            ASM_FLAGS: -mcpu=ck803 -pipe -D__NO_BOARD_INIT -DTXW4002ACK803
+          beforeBuildTasks:
+            - name: Build info
+              abortAfterFailed: false
+              command: python pack/build_info.py release
+              disable: false
+              stopBuildAfterFailed: true
+            - name: mkdir out
+              abortAfterFailed: false
+              command: rm -rf "out" && mkdir "out"
+              disable: false
+              stopBuildAfterFailed: true
+          c/cpp-compiler:
+            CXX_FLAGS: -D_GLIBCXX_USE_C99_STDIO
+            C_FLAGS: -mcpu=ck803 -Os -Wall -ffunction-sections -fdata-sections -Wno-comment -Wno-unused-function -Wno-unused-but-set-variable -mno-required-printf -pipe -D__NO_BOARD_INIT -DTXW4002ACK803 -DSKBPOOL_ENABLE -DMPOOL_ALLOC -DCONFIG_UMAC4
+            language-c: c11
+            language-cpp: c++11
+            one-elf-section-per-data: true
+            one-elf-section-per-function: true
+            optimization: level-none
+            signed-char: true
+            warnings: unspecified
+          global:
+            output-debug-info: disable
           linker:
             $disableOutputTask: true
             LD_FLAGS: -mcpu=ck803 -nostartfiles -Wl,--gc-sections -Wl,-zmax-page-size=1024 -Wl,-Map=project.map -Wl,--ckmap=txw4002a.map -Wl,--wrap=lwip_netif_hook_inputdata -Wl,--wrap=lmac_send_bss_announcement -Wl,--wrap=ah_rf_lo_freq_set -Wl,--wrap=ah_rf_lo_table_cfg

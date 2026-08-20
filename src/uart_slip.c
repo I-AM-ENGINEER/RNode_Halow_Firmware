@@ -324,8 +324,8 @@ static void uart_slip_config_apply_cb( void *arg ){
     }
 
     slip_started = false;
-    slip_rb_reset();
     (void)uart_slip_uart_stop();
+    slip_rb_reset();
 
     memcpy(&g_uart_slip_config, cfg, sizeof(g_uart_slip_config));
 

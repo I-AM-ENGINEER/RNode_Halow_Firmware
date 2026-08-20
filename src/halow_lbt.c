@@ -41,6 +41,15 @@
 
 #define HALOW_LBT_AIRTIME_ACCUMULATOR_BUF   10
 #define HALOW_LBT_AIRTIME_UPDATE_PERIOD_MS  100
+/* Adaptive task cadence: poll the noise floor at 1ms while RF traffic is recent
+ * (LBT/CCA needs responsiveness under load), fall back to 10ms when the link has
+ * been quiet. Activity is signalled by halow_lbt_set_tx_as_active() — which every
+ * TX hits via halow_send_frame(), data frames and software ACKs alike — so a node
+ * that is only receiving its own ACKs stays fast, while a truly idle node drops
+ * to ~100Hz and stops burning ~10% CPU on noise sampling that changes nothing. */
+#define HALOW_LBT_ACTIVE_WINDOW_MS          100
+#define HALOW_LBT_SLEEP_ACTIVE_MS           1
+#define HALOW_LBT_SLEEP_IDLE_MS             10
 
 #ifdef HALOW_LBT_DEBUG
 #define hlbt_debug(fmt, ...)  os_printf("[HLBT] " fmt "\r\n", ##__VA_ARGS__)
@@ -74,6 +83,7 @@ typedef struct {
     int64_t       airtime_time_last_tx_started;
     int32_t       airtime_time_tx_from_last_cycle_update_us;
     bool          airtime_tx_active;
+    int64_t       last_activity_us;   /* last TX (data/ACK) timestamp, for adaptive cadence */
     float         airtime_rb[HALOW_LBT_AIRTIME_ACCUMULATOR_BUF];
     int8_t        airtime_rb_idx;
 
@@ -83,6 +93,16 @@ typedef struct {
 static halow_lbt_ctx_t *g_lbt_ctx;
 static struct os_task g_lbt_task;
 static struct os_mutex g_lbt_ctx_mutex;
+
+/* Lock-free TX-done heartbeat for airtime honesty. Written from task contexts
+ * (halow_tx_skb_complete: tx_status task / purge) and from IRQ
+ * (lmac_irq_tx_end). Single aligned 32-bit store: atomic on this core. Never
+ * takes g_lbt_ctx_mutex (whose 10 ms timeout silently DROPPED deactivations
+ * and pinned airtime at 100% forever -- the "endless transmission" display). */
+static volatile uint32_t g_lbt_tx_done_ms;
+void halow_lbt_tx_done_notify( void ){
+    g_lbt_tx_done_ms = (uint32_t)get_time_ms();
+}
 
 extern void     ah_rfdigicali_bknoise_valid_pd_clr( void );
 extern uint32_t ah_rfdigicali_bknoise_valid_pd_get( void );
@@ -132,6 +152,9 @@ static void halow_lbt_rand_init_from_bknoise( void ){
     os_srand(seed);
 }
 
+/* forward: defined below near the ring helpers */
+static lwrb_sz_t long_ring_valid( halow_lbt_ctx_t *ctx );
+
 float halow_lbt_ch_util_get(void){
     halow_lbt_ctx_t *ctx;
     uint32_t busy;
@@ -152,7 +175,7 @@ float halow_lbt_ch_util_get(void){
         return 0.0f;
     }
 
-    n = (lwrb_sz_t)ctx->long_n;
+    n = long_ring_valid(ctx);
     if (n == 0) {
         (void)os_mutex_unlock(&g_lbt_ctx_mutex);
         return 0.0f;
@@ -265,6 +288,18 @@ static int cmp_i8( const void *a, const void *b ){
     return (ia > ib) - (ia < ib);
 }
 
+/* Number of VALID samples actually written to the long ring. Until the ring
+ * has wrapped once after boot, the tail is UNINITIALIZED heap: zeros sort
+ * above every real dBm value and read as "channel busy" against any absolute
+ * threshold -- computing the percentile (or busy ratio) over the full buffer
+ * made bg_pwr show 0.0 dBm and ch_util 80-95% for the whole warm-up window
+ * (~10 min at default sizes) after every reboot. */
+static lwrb_sz_t long_ring_valid( halow_lbt_ctx_t *ctx ){
+    lwrb_sz_t cap = (lwrb_sz_t)ctx->long_n;
+    lwrb_sz_t free_b = lwrb_get_free(&ctx->long_rb);
+    return (free_b > cap) ? 0 : (lwrb_sz_t)(cap - free_b);
+}
+
 static int8_t noise_pxx_from_rb( halow_lbt_ctx_t *ctx ){
     lwrb_sz_t n;
     uint8_t pct;
@@ -276,9 +311,11 @@ static int8_t noise_pxx_from_rb( halow_lbt_ctx_t *ctx ){
         return 0;
     }
 
-    n = (lwrb_sz_t)ctx->long_n;
+    n = long_ring_valid(ctx);
     if (n == 0) {
-        return 0;
+        /* ring empty (right after boot): the current short average is the
+         * best available estimate -- NOT 0 dBm */
+        return ctx->noise_short;
     }
 
     (void)lwrb_peek(&ctx->long_rb, 0, ctx->tmp_sort, n);
@@ -398,19 +435,46 @@ void halow_lbt_task( void *arg ){
             int64_t now_us  = get_time_us();
             int64_t last_us = ctx->time_last_cycle_update_us;
             int64_t cycle_us = now_us - last_us;
+            if (cycle_us <= 0) cycle_us = 1;
             int32_t airtime_us = ctx->airtime_time_tx_from_last_cycle_update_us;
 
+            /* Staleness: a real PPDU at 1 MHz airs in ~25 ms, so an "active"
+             * flag with no TX-done heartbeat for 2 update periods is a lie
+             * (deactivation lost to the mutex timeout, or budget leaked and
+             * never refilled). Finalize the window at the LAST REAL
+             * COMPLETION instead of charging wall-clock forever. */
+            bool stale = false;
             if (ctx->airtime_tx_active) {
+                uint32_t done_ms = g_lbt_tx_done_ms;
+                if (done_ms != 0u &&
+                    ((uint32_t)((uint32_t)current_time_ms - done_ms) >
+                     2u * HALOW_LBT_AIRTIME_UPDATE_PERIOD_MS)) {
+                    stale = true;
+                }
+            }
+
+            if (ctx->airtime_tx_active && !stale) {
                 int64_t start_us = ctx->airtime_time_last_tx_started;
 
                 int64_t dt = now_us - start_us;
                 int64_t acc = (int64_t)airtime_us + dt;
-                
+
                 airtime_us = (int32_t)acc;
                 ctx->airtime_time_last_tx_started = now_us;
+            } else if (ctx->airtime_tx_active) {
+                /* stale: close at the last completion heartbeat */
+                int64_t start_us = ctx->airtime_time_last_tx_started;
+                int64_t end_us   = (int64_t)g_lbt_tx_done_ms * 1000LL;
+                if (end_us < start_us) end_us = start_us;
+                int64_t acc = (int64_t)airtime_us + (end_us - start_us);
+                if (acc > INT32_MAX) acc = INT32_MAX;
+                airtime_us = (int32_t)acc;
+                ctx->airtime_time_last_tx_started = 0;
+                ctx->airtime_tx_active = false;
             } else {
                 ctx->airtime_time_last_tx_started = 0;
             }
+            if ((int64_t)airtime_us > cycle_us) airtime_us = (int32_t)cycle_us;
 
             float current_airtime = (float)airtime_us / (float)cycle_us;
             ctx->airtime_rb[ctx->airtime_rb_idx++] = current_airtime;
@@ -435,8 +499,13 @@ void halow_lbt_task( void *arg ){
         }
 #endif
 
+        /* Decide cadence while we still hold the lock (ctx is valid); the unlock
+         * is deferred until after we have captured the activity timestamp. */
+        int64_t act_us = ctx->last_activity_us;
         (void)os_mutex_unlock(&g_lbt_ctx_mutex);
-		os_sleep_ms(1);
+        bool lbt_active = (get_time_us() - act_us)
+                          < ((int64_t)HALOW_LBT_ACTIVE_WINDOW_MS * 1000);
+        os_sleep_ms(lbt_active ? HALOW_LBT_SLEEP_ACTIVE_MS : HALOW_LBT_SLEEP_IDLE_MS);
     }
 }
 
@@ -515,6 +584,9 @@ void halow_lbt_set_tx_as_active( void ){
         g_lbt_ctx->airtime_time_last_tx_started = get_time_us();
         hlbt_debug("SET TX");
     }
+    /* heartbeat for the adaptive task cadence: every TX (data or ACK) keeps the
+     * noise-sampling loop in its responsive 1ms mode. */
+    g_lbt_ctx->last_activity_us = get_time_us();
 
     os_mutex_unlock(&g_lbt_ctx_mutex);
 }
@@ -669,11 +741,9 @@ void halow_lbt_config_load( halow_lbt_config_t *cfg ){
     cfg->util_enabled = false;
 }
 
-void halow_lbt_wait_tx_allowed(void){
-    while (halow_lbt_airtime_get() > halow_lbt_airtime_max_percentage()){
-        os_sleep_ms(HALOW_LBT_AIRTIME_UPDATE_PERIOD_MS);
-    }
-}
+/* halow_lbt_wait_tx_allowed() DELETED: zero callers, and its unbounded
+ * while(airtime > max) sleep on the (previously sticky) airtime metric was
+ * a permanent-TX-deadlock landmine the moment anyone enabled util gating. */
 
 int32_t halow_lbt_init( void ){
     os_mutex_init(&g_lbt_ctx_mutex);

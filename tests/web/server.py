@@ -569,7 +569,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     parser = argparse.ArgumentParser(description="Mock web configurator server")
-    parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--port", type=int, default=8085)
     parser.add_argument("--host", default="127.0.0.1")
     args = parser.parse_args()
 

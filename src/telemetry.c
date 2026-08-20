@@ -33,6 +33,7 @@
 #define TELEMETRY_CONFIG_DIRECTIONAL_NAME     TELEMETRY_CONFIG_ADD_CONFIG("diren")
 #define TELEMETRY_CONFIG_DIRECTION_NAME       TELEMETRY_CONFIG_ADD_CONFIG("dir")
 #define TELEMETRY_CONFIG_LXMF_NAME            TELEMETRY_CONFIG_ADD_CONFIG("lxmf")
+#define TELEMETRY_CONFIG_PORT_NAME            TELEMETRY_CONFIG_ADD_CONFIG("port")
 
 extern struct netif *netif_default;
 static struct os_work telemetry_work;
@@ -152,7 +153,7 @@ static void telemetry_config_sanitize( telemetry_config_t *cfg ){
         cfg->directional = false;
     }
 
-    if(cfg->port < 1024){
+    if (cfg->port < 1024) {
         cfg->port = 1883;
     }
 
@@ -175,6 +176,7 @@ void telemetry_config_load( telemetry_config_t *cfg ){
     configdb_get_i32(TELEMETRY_CONFIG_SEND_PERIOD_NAME,   (int32_t *)&cfg->send_period_s);
     configdb_get_i8 (TELEMETRY_CONFIG_DIRECTIONAL_NAME,   (int8_t *)&cfg->directional);
     configdb_get_i16(TELEMETRY_CONFIG_DIRECTION_NAME,     (int16_t *)&cfg->direction);
+    configdb_get_i16(TELEMETRY_CONFIG_PORT_NAME,          (int16_t *)&cfg->port);
 
     configdb_get_blob(TELEMETRY_CONFIG_LATITUDE_NAME,     &cfg->latitude,  sizeof(cfg->latitude));
     configdb_get_blob(TELEMETRY_CONFIG_LONGITUDE_NAME,    &cfg->longitude, sizeof(cfg->longitude));
@@ -206,6 +208,7 @@ void telemetry_config_save( telemetry_config_t *cfg ){
     configdb_set_i8 (TELEMETRY_CONFIG_EXT_EN_NAME,      (const int8_t *)&cfg->extended_enabled);
     configdb_set_i32(TELEMETRY_CONFIG_SEND_PERIOD_NAME, (const int32_t *)&cfg->send_period_s);
     configdb_set_i8 (TELEMETRY_CONFIG_DIRECTIONAL_NAME, (const int8_t *)&cfg->directional);
+    configdb_set_i16(TELEMETRY_CONFIG_PORT_NAME,        (const int16_t *)&cfg->port);
     configdb_set_i16(TELEMETRY_CONFIG_DIRECTION_NAME,   (const int16_t *)&cfg->direction);
 
     configdb_set_blob(TELEMETRY_CONFIG_LATITUDE_NAME,   &cfg->latitude,  sizeof(cfg->latitude));
@@ -615,12 +618,22 @@ static int32 telemetry_work_handler( struct os_work *work ){
 
 void telemetry_init( void ){
     telemetry_config_t cfg;
+    int16_t seeded = 0;
 
     log_debug("init begin");
 
     telemetry_config_set_default(&cfg);
     telemetry_config_load(&cfg);
-    telemetry_config_save(&cfg);
+    /* Save only on first boot (marker missing): an unconditional load+save
+     * rewrote all 14 kvdb keys every boot -- flash wear plus flashdb GC
+     * exposure during the boot window (the ack-config module documents the
+     * exact GC/boot-watchdog spiral this pattern caused there). */
+    if( configdb_get_i16(TELEMETRY_CONFIG_ADD_CONFIG("seeded"), &seeded) != 0 ||
+        seeded != 1 ){
+        telemetry_config_save(&cfg);
+        seeded = 1;
+        configdb_set_i16(TELEMETRY_CONFIG_ADD_CONFIG("seeded"), (const int16_t *)&seeded);
+    }
 
     telemetry_config_log_debug("INIT", &cfg);
 
@@ -632,6 +645,12 @@ void telemetry_init( void ){
     } else {
         log_debug("init: telemetry disabled");
     }
+}
+
+/* Enable-via-web-API entry: schedule the first send like telemetry_init does
+ * on boot, so toggling telemetry on takes effect without a reboot. */
+void telemetry_kick( void ){
+    os_run_work_delay(&telemetry_work, 5000LU);
 }
 
 void telemetry_send_now( void ){

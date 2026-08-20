@@ -28,6 +28,10 @@ int32_t web_api_telemetry_send_post( const cJSON *in, cJSON *out );
 int32_t web_api_dev_stat_get( const cJSON *in, cJSON *out );
 int32_t web_api_radio_stat_get( const cJSON *in, cJSON *out );
 int32_t web_api_radio_stat_post( const cJSON *in, cJSON *out );
+int32_t web_api_cpu_dump_get( const cJSON *in, cJSON *out );
+int32_t web_api_tx_dbg_get( const cJSON *in, cJSON *out );
+int32_t web_api_rf_dbg_get( const cJSON *in, cJSON *out );
+int32_t web_api_rf_dbg_post( const cJSON *in, cJSON *out );
 
 int32_t web_api_online_ota_get( const cJSON *in, cJSON *out );
 int32_t web_api_online_ota_post( const cJSON *in, cJSON *out );
@@ -58,5 +62,8 @@ int32_t web_api_privacy_cfg_post( const cJSON *in, cJSON *out );
 
 int32_t web_api_rns_mtu_cfg_get( const cJSON *in, cJSON *out );
 int32_t web_api_rns_mtu_cfg_post( const cJSON *in, cJSON *out );
+
+int32_t web_api_ack_cfg_get( const cJSON *in, cJSON *out );
+int32_t web_api_ack_cfg_post( const cJSON *in, cJSON *out );
 
 #endif // __CONFIG_API_CALLS_H__

@@ -36,12 +36,18 @@ void rns_link_db_init( void );
  * single lock. No raw link pointers escape the DB, so callers are race-free.
  *
  * remote_mac != NULL  -> store the peer MAC (logged only when it changes)
+ * unicast_to_me       -> an already-learned MAC is only overwritten by frames
+ *                        that were ADDRESSED TO US (dst == our MAC). A
+ *                        broadcast-destined replay can no longer hijack a
+ *                        link's TX destination to an attacker MAC; the
+ *                        unknown->known transition stays free (bootstrap).
  * update_mtu == true  -> store effective_mtu (logged only when it changes) */
 int32_t rns_link_db_package_register( const rns_link_packet_info_t* pkg,
                                       rns_packet_direction_t direction,
                                       const uint8_t *remote_mac,
                                       uint32_t effective_mtu,
-                                      bool update_mtu );
+                                      bool update_mtu,
+                                      bool unicast_to_me );
 
 uint8_t rns_link_db_link_count_get( void );
 

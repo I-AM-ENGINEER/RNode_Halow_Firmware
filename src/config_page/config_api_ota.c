@@ -70,7 +70,8 @@ int32_t web_api_ota_wipe_lfs_post( const cJSON *in, cJSON *out ){
     (void)out;
 
     log_debug("wota_wipe: clearing /www");
-    
+    ota_wota_session_abort();
+
     if (ota_format_littefs() != 0) {
         log_error("wota_wipe failed");
         return -1;

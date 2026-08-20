@@ -176,10 +176,17 @@ __init uint8 lvd_detect(void)
 __init void malloc_init(void)
 {
     uint32 flags = 0;
+    uint32 heap_size = SYS_HEAP_SIZE;
 #ifdef MEM_TRACE
     flags |= SYSHEAP_FLAGS_MEM_LEAK_TRACE | SYSHEAP_FLAGS_MEM_OVERFLOW_CHECK;
 #endif
-    sysheap_init(&sram_heap, (void *)SYS_HEAP_START, SYS_HEAP_SIZE, flags);
+    /* Guard against pathological firmware growth: if .bss is so large that the
+     * auto-computed heap underflows (wraps huge) or is implausibly tiny, split
+     * whatever SRAM remains 50/50 between heap and skb pool. */
+    if (heap_size > (512u * 1024u) || heap_size < (32u * 1024u)) {
+        heap_size = SRAM_POOL_SIZE / 2u;
+    }
+    sysheap_init(&sram_heap, (void *)SYS_HEAP_START, heap_size, flags);
 #ifdef PSRAM_HEAP
     sysheap_init(&psram_heap, (void *)psrampool_start, psrampool_end - psrampool_start, flags);
 #endif

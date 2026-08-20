@@ -45,6 +45,9 @@
             <table class="stats-table">
                 <tbody>
                 <tr><th>Chip temperature</th><td id="stat_chip_temp">--</td></tr>
+                <tr><th>Supply voltage</th><td id="stat_vcc">--</td></tr>
+                <tr><th>Core voltage 1.3B</th><td id="stat_vdd13b">--</td></tr>
+                <tr><th>Core voltage 1.3C</th><td id="stat_vdd13c">--</td></tr>
                 <tr><th>Uptime</th><td id="stat_uptime">--</td></tr>
 				<tr><th>CPU usage</th><td id="stat_cpu">--</td></tr>
 				<tr><th>Heap</th><td id="stat_heap">--</td></tr>
@@ -72,7 +75,7 @@
                 </label>
                 <p class="note">Valid values: 730-1080 MHz.</p>
                 <label>
-                    <span>MCS index</span>
+                    <span>Broadcast MCS index</span>
                     <select id="halow_mcs_index">
                         <option value="MCS10">MCS10</option>
                         <option value="MCS0">MCS0</option>
@@ -172,34 +175,6 @@
                     <p class="throughput-note">Measured with max MTU for each mode. Smaller payload sizes give significantly lower throughput due to per-frame overhead.</p>
                 </div>
 
-                <div class="throughput-card">
-                    <h4>Max Payload (bytes)</h4>
-                    <div class="throughput-table-wrap">
-                        <table class="throughput-table">
-                            <thead>
-                                <tr>
-                                    <th>Channel Width</th>
-                                    <th>MCS0</th>
-                                    <th>MCS1</th>
-                                    <th>MCS2</th>
-                                    <th>MCS3</th>
-                                    <th>MCS4</th>
-                                    <th>MCS5</th>
-                                    <th>MCS6</th>
-                                    <th>MCS7</th>
-                                    <th>MCS10</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr><th>1 MHz</th><td>700</td><td>1450</td><td>2200</td><td>3000</td><td>4500</td><td>6050</td><td>6800</td><td>7600</td><td>500</td></tr>
-                                <tr><th>2 MHz</th><td>1600</td><td>3200</td><td>4900</td><td>6500</td><td>8192</td><td>8192</td><td>8192</td><td>8192</td><td>—</td></tr>
-                                <tr><th>4 MHz</th><td>3400</td><td>6800</td><td>8192</td><td>8192</td><td>8192</td><td>8192</td><td>8192</td><td>8192</td><td>—</td></tr>
-                                <tr><th>8 MHz</th><td>7400</td><td>8192</td><td>8192</td><td>8192</td><td>8192</td><td>8192</td><td>8192</td><td>8192</td><td>—</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-
             </div>
 
             <div class="panel">
@@ -231,18 +206,51 @@
                     <input type="number" id="cca_dlpct" min="0" max="100" step="0.1" value="100">
                 </label>
                 <p class="note">Valid values: 0-100%. Maximum airtime. 100% = no limit. Limits TX time even on free channel.</p>
-                <label>
-                    <span>CW min (CCA slot)</span>
-                    <input type="number" id="cca_cwmin" min="1" max="2047" value="31">
-                </label>
-                <p class="note">Valid values: 1-2047. Higher (31/63) - less collisions. Lower (7/15) - lower latency, higher priority.</p>
-                <label>
-                    <span>CW max (CCA slot)</span>
-                    <input type="number" id="cca_cwmax" min="1" max="2047" value="1023">
-                </label>
                 <div class="panel-actions">
                     <button type="button" id="save_lbt" disabled>Save</button>
                 </div>
+            </div>
+
+            <div class="panel">
+                <h3>ACK (ARQ) Settings</h3>
+                <p class="note">Unicast data frames are retransmitted until the peer acknowledges them. Set retries to 0 to send without delivery guarantee.</p>
+                <label>
+                    <span>Max retries</span>
+                    <input type="number" id="ack_retries" min="0" max="8" value="3">
+                </label>
+                <p class="note">0 = NOACK (fire-and-forget). Frames that exhaust the retry budget are dropped.</p>
+                <label>
+                    <span>Frame aggregation</span>
+                    <input type="checkbox" id="ack_agg" checked>
+                </label>
+                <p class="note">Packs several frames for the same peer into one RF frame. Improves throughput; disable only to debug.</p>
+                <label>
+                    <span>Broadcast repeat count</span>
+                    <input type="number" id="ack_bc_repeat" min="1" max="3" value="2">
+                </label>
+                <p class="note">Broadcast frames (announces, link bootstrap) get no ACK, so repeats are their only loss protection. 2 = send each broadcast twice (default), 3 = most robust (poor conditions), 1 = off.</p>
+                <div class="panel-actions">
+                    <button type="button" id="save_ack" disabled>Save</button>
+                </div>
+            </div>
+
+            <div class="panel" id="ra_panel">
+                <h3>Rate Adaptation</h3>
+                <p class="note panel-warn" id="ra_warn" style="display:none;color:#a00;font-weight:bold">Requires ACK: set Max retries &gt; 0 in the ACK card above to enable.</p>
+                <label class="toggle-label">
+                    <span>Enable</span>
+                    <input type="checkbox" id="ack_rate_adapt">
+                </label>
+                <label>
+                    <span>Step up at loss ≤ (%)</span>
+                    <input type="number" id="ack_ra_loss_up" min="0" max="99" value="5">
+                </label>
+                <p class="note">When a peer's smoothed loss drops at/under this, TX MCS steps up (faster). Lower = aggressive "fast link".</p>
+                <label>
+                    <span>Step down at loss ≥ (%)</span>
+                    <input type="number" id="ack_ra_loss_down" min="1" max="100" value="30">
+                </label>
+                <p class="note">When a peer's smoothed loss reaches/exceeds this, TX MCS steps down (more robust). Higher = "reliable link". Must be greater than the up threshold.</p>
             </div>
 
             <div class="panel">
@@ -468,6 +476,7 @@
                     <tbody>
                     <tr><th>WiFi MAC</th><td id="nearby_self_mac">--</td></tr>
                     <tr><th>Heard devices</th><td id="nearby_count">--</td></tr>
+                    <tr><th>Default MCS index</th><td id="nearby_tx_mcs">--</td></tr>
                     </tbody>
                 </table>
 
@@ -476,17 +485,24 @@
                         <thead>
                             <tr>
                                 <th data-key="mac">MAC</th>
-                                <th data-key="rssi">Last RSSI</th>
-                                <th data-key="snr">Last SNR</th>
-                                <th data-key="mcs">MCS</th>
-                                <th data-key="packets">Packets</th>
-                                <th data-key="bytes">RX Data</th>
-                                <th data-key="rate">RX Rate</th>
-                                <th data-key="lastSeen">Last seen</th>
+                                <th data-key="rxRssi">RX RSSI</th>
+                                <th data-key="rxSnr">RX SNR</th>
+                                <th data-key="rxMcs">RX MCS</th>
+                                <th data-key="txMcs">TX MCS</th>
+                                <th data-key="txLoss">TX Loss</th>
+                                <th data-key="txEvm">TX EVM</th>
+                                <th data-key="rxPackets">RX Pkts</th>
+                                <th data-key="txPackets">TX Pkts</th>
+                                <th data-key="rxBytes">RX Data</th>
+                                <th data-key="txBytes">TX Data</th>
+                                <th data-key="rxRate">RX Rate</th>
+                                <th data-key="txRate">TX Rate</th>
+                                <th data-key="rxLast">Last RX</th>
+                                <th data-key="txLast">Last TX</th>
                             </tr>
                         </thead>
                         <tbody id="nearby_table_body">
-                            <tr><td colspan="13">--</td></tr>
+                            <tr><td colspan="15">--</td></tr>
                         </tbody>
                     </table>
                 </div>

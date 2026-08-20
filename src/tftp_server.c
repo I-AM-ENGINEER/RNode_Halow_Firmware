@@ -34,6 +34,15 @@ static void *tftp_lfs_open( const char *fname, const char *mode, u8_t write ){
         return NULL;
     }
 
+    /* The TFTP server is unauthenticated: without a path guard any LAN host
+     * could create/overwrite ANY littlefs file (e.g. www/index.html.gz -- a
+     * persistent web-UI tamper, or wear-leveling churn from WRQ floods).
+     * Restrict to the www/ subtree and reject traversal fragments. */
+    if( (strncmp(fname, "www/", 4) != 0) || (strstr(fname, "..") != NULL) ){
+        log_warn("open rejected (outside www/): '%s'", fname);
+        return NULL;
+    }
+
     memset(&g_tftp_file, 0, sizeof(g_tftp_file));
 
     log_debug("open %s '%s' mode='%s'", write ? "WRQ" : "RRQ", fname, mode ? mode : "");

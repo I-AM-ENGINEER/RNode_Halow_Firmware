@@ -50,6 +50,13 @@ void mac_generator_init(void) {
 
 void mac_generator_config_load(mac_generator_config_t *cfg) {
     if (!cfg) return;
+    /* Defaults FIRST: configdb_get_* leaves the output untouched on a missing
+     * key, so an uninitialized caller (web_api_privacy_cfg_get/post locals,
+     * any device missing the keys after a factory reset) would read stack
+     * garbage -- garbage broadcast_mac != 0 transmits with addr2 = all-FF,
+     * garbage rotation silently rotates the MAC. */
+    cfg->rotation_minutes = 0u;
+    cfg->broadcast_mac    = 0u;
     configdb_get_i16(KEY_ROT, (int16_t *)&cfg->rotation_minutes);
     configdb_get_i8(KEY_BC, (int8_t *)&cfg->broadcast_mac);
 }
