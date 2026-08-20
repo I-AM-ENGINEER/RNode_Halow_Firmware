@@ -1,9 +1,5 @@
 #include "sys_config.h"
-#include "build_info_gen.h"   /* auto-generated: FW_BUILD_NUMBER_STR, FW_BUILD_DATE */
-/* Rich version string with the monotonic per-build number (regenerated each
- * build by pack/bump_build.sh). FW_FULL_VERSION in sys_config.h only carries
- * the compile date/time; this one identifies the exact build. */
-#define FW_BUILD_VERSION  FW_VERSION " (build " FW_BUILD_NUMBER_STR ", " FW_BUILD_DATE ")"
+#include "build_info_gen.h"
 #define LOG_LOCAL_LEVEL LOG_LEVEL_CONFIG_API_CALLS
 
 #include "basic_include.h"
@@ -1510,7 +1506,6 @@ int32_t web_api_rns_mtu_cfg_post( const cJSON *in, cJSON *out ){
 
 int32_t web_api_ack_cfg_get( const cJSON *in, cJSON *out ){
     halow_ack_config_t cfg;
-    halow_ack_stats_t st;
     (void)in;
     if (out == NULL) return WEB_API_RC_BAD_REQUEST;
     halow_ack_config_get_live(&cfg);
@@ -1528,42 +1523,46 @@ int32_t web_api_ack_cfg_get( const cJSON *in, cJSON *out ){
     cJSON_AddNumberToObject(out, "gap_ms",      (double)cfg.data_gap_ms);
     cJSON_AddNumberToObject(out, "bc_repeat", (double)cfg.bc_repeat);
     cJSON_AddNumberToObject(out, "env",       (double)cfg.env);
-    halow_ack_stats_get(&st);
-    cJSON_AddNumberToObject(out, "tx_frames",  (double)st.tx_frames);
-    cJSON_AddNumberToObject(out, "acked",      (double)st.acked);
-    cJSON_AddNumberToObject(out, "retransmitted", (double)st.retransmitted);
-    cJSON_AddNumberToObject(out, "dropped",    (double)st.dropped);
-    cJSON_AddNumberToObject(out, "acks_sent",  (double)st.acks_sent);
-    cJSON_AddNumberToObject(out, "ack_mcs",    (double)st.ack_mcs_last);
-    cJSON_AddNumberToObject(out, "acks_tx_fail",(double)st.acks_tx_fail);
-    cJSON_AddNumberToObject(out, "acks_rx_dup",(double)st.acks_rx_dup);
-    cJSON_AddNumberToObject(out, "acks_rx_frames",(double)st.acks_rx_frames);
-    cJSON_AddNumberToObject(out, "drop_deadline",(double)st.drop_deadline);
-    cJSON_AddNumberToObject(out, "drop_exhaust",(double)st.drop_exhaust);
-    cJSON_AddNumberToObject(out, "drop_throttle",(double)st.drop_throttle);
-    cJSON_AddNumberToObject(out, "drop_agg_full",(double)st.drop_agg_full);
-    cJSON_AddNumberToObject(out, "drop_plain_vac",(double)st.drop_plain_vac);
-    cJSON_AddNumberToObject(out, "drop_plain_slot",(double)st.drop_plain_slot);
-    cJSON_AddNumberToObject(out, "env_tx_bundles",(double)st.env_tx_bundles);
-    cJSON_AddNumberToObject(out, "env_rx_bundles",(double)st.env_rx_bundles);
-    cJSON_AddNumberToObject(out, "env_tx_acks",   (double)st.env_tx_acks);
-    cJSON_AddNumberToObject(out, "env_rx_acks",   (double)st.env_rx_acks);
-    cJSON_AddNumberToObject(out, "rx_env_unk",    (double)st.rx_env_unk);
-    cJSON_AddNumberToObject(out, "ack_rtt_avg_ms",
-        st.ack_rtt_hits ? (double)(st.ack_rtt_sum_ms / st.ack_rtt_hits) : 0.0);
-    cJSON_AddNumberToObject(out, "ack_rtt_hits", (double)st.ack_rtt_hits);
-    cJSON_AddNumberToObject(out, "noack_hits", (double)st.noack_hits);
-    cJSON_AddNumberToObject(out, "last_evm",   (double)st.last_evm);
-    cJSON_AddNumberToObject(out, "peers",      (double)st.peers);
-    cJSON_AddNumberToObject(out, "outstanding",(double)st.outstanding);
-    /* RA diagnostics */
-    cJSON_AddNumberToObject(out, "ra_ack_calls",   (double)st.ra_ack_calls);
-    cJSON_AddNumberToObject(out, "ra_upshifts",    (double)st.ra_upshifts);
-    cJSON_AddNumberToObject(out, "ra_downshifts",  (double)st.ra_downshifts);
-    cJSON_AddNumberToObject(out, "ra_blk_loss",    (double)st.ra_blocked_loss);
-    cJSON_AddNumberToObject(out, "ra_blk_gap",     (double)st.ra_blocked_gap);
-    cJSON_AddNumberToObject(out, "ra_blk_max",     (double)st.ra_blocked_max);
-    cJSON_AddNumberToObject(out, "bc_repeats",     (double)st.bc_repeats);
+#ifdef FW_BUILD_BETA
+    {
+        halow_ack_stats_t st;
+        halow_ack_stats_get(&st);
+        cJSON_AddNumberToObject(out, "tx_frames",  (double)st.tx_frames);
+        cJSON_AddNumberToObject(out, "acked",      (double)st.acked);
+        cJSON_AddNumberToObject(out, "retransmitted", (double)st.retransmitted);
+        cJSON_AddNumberToObject(out, "dropped",    (double)st.dropped);
+        cJSON_AddNumberToObject(out, "acks_sent",  (double)st.acks_sent);
+        cJSON_AddNumberToObject(out, "ack_mcs",    (double)st.ack_mcs_last);
+        cJSON_AddNumberToObject(out, "acks_tx_fail",(double)st.acks_tx_fail);
+        cJSON_AddNumberToObject(out, "acks_rx_dup",(double)st.acks_rx_dup);
+        cJSON_AddNumberToObject(out, "acks_rx_frames",(double)st.acks_rx_frames);
+        cJSON_AddNumberToObject(out, "drop_deadline",(double)st.drop_deadline);
+        cJSON_AddNumberToObject(out, "drop_exhaust",(double)st.drop_exhaust);
+        cJSON_AddNumberToObject(out, "drop_throttle",(double)st.drop_throttle);
+        cJSON_AddNumberToObject(out, "drop_agg_full",(double)st.drop_agg_full);
+        cJSON_AddNumberToObject(out, "drop_plain_vac",(double)st.drop_plain_vac);
+        cJSON_AddNumberToObject(out, "drop_plain_slot",(double)st.drop_plain_slot);
+        cJSON_AddNumberToObject(out, "env_tx_bundles",(double)st.env_tx_bundles);
+        cJSON_AddNumberToObject(out, "env_rx_bundles",(double)st.env_rx_bundles);
+        cJSON_AddNumberToObject(out, "env_tx_acks",   (double)st.env_tx_acks);
+        cJSON_AddNumberToObject(out, "env_rx_acks",   (double)st.env_rx_acks);
+        cJSON_AddNumberToObject(out, "rx_env_unk",    (double)st.rx_env_unk);
+        cJSON_AddNumberToObject(out, "ack_rtt_avg_ms",
+            st.ack_rtt_hits ? (double)(st.ack_rtt_sum_ms / st.ack_rtt_hits) : 0.0);
+        cJSON_AddNumberToObject(out, "ack_rtt_hits", (double)st.ack_rtt_hits);
+        cJSON_AddNumberToObject(out, "noack_hits", (double)st.noack_hits);
+        cJSON_AddNumberToObject(out, "last_evm",   (double)st.last_evm);
+        cJSON_AddNumberToObject(out, "peers",      (double)st.peers);
+        cJSON_AddNumberToObject(out, "outstanding",(double)st.outstanding);
+        cJSON_AddNumberToObject(out, "ra_ack_calls",   (double)st.ra_ack_calls);
+        cJSON_AddNumberToObject(out, "ra_upshifts",    (double)st.ra_upshifts);
+        cJSON_AddNumberToObject(out, "ra_downshifts",  (double)st.ra_downshifts);
+        cJSON_AddNumberToObject(out, "ra_blk_loss",    (double)st.ra_blocked_loss);
+        cJSON_AddNumberToObject(out, "ra_blk_gap",     (double)st.ra_blocked_gap);
+        cJSON_AddNumberToObject(out, "ra_blk_max",     (double)st.ra_blocked_max);
+        cJSON_AddNumberToObject(out, "bc_repeats",     (double)st.bc_repeats);
+    }
+#endif
     return WEB_API_RC_OK;
 }
 
