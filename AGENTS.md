@@ -211,3 +211,47 @@ LMAC_HW->TX_SUB_FRM[idx * 2 + 1] = len;
 `lmac_irq_bo_fns` and everything it calls runs from interrupt context.
 **No `log_trace`/`log_debug` on the normal (non-error) path** — blocking UART output in IRQ
 breaks TX timers. `log_warn` on error paths is acceptable (system already broken at that point).
+
+## PHY size-rate constraint (max MSDU per MCS, 1 MHz) — found 2026-08-18
+
+The binary LMAC rejects any PPDU whose symbol count exceeds **511** at non-MCS10
+(`lmac error!!!len=... too long for non-mcs10, max 511`) and then **retries the
+frame forever** — one oversized frame jams its AC queue until the tier-2 purge
+(5-15 s) or watchdog reboot (30 s). This was the root cause of the "periodic
+pause" stalls and 100%-loss windows. Max payload per MCS (1 MHz):
+`halow_max_msdu[0][mcs] = {700,1450,2200,3000,4500,6050,6800,7600}`, MCS10≈500.
+`halow_tx_p` bumps the per-frame MCS to the lowest rate whose max MSDU fits the
+frame (+32 B margin, 802.11 hdr) — counters `tx_mcs_bump`/`tx_drop_oversize` in
+`/api/tx_dbg`. ACK-layer agg sizing (`halow_ack_eff_agg_bytes`) uses the same
+table. Any new TX entry point MUST NOT bypass this check. RX decodes each frame
+at its own rate, so a per-frame upshift is transparent to the peer.
+
+Other night-fixed traps (see NIGHT_STATUS.md): binary `lmac rx` task stack is
+only 1024 B — never add stack frames to the RX callback chain; `trap_c` now
+reboots (was `while(1)` while acktk fed the watchdog = permanent dark loop);
+purge/reconfig must reset `queued_count` in the SAME irq-off window that NULLs
+`skb_list[]` (reorder derefs it in ac_pd IRQ).
+
+## Overnight-2026-08-17 traps (see NIGHT_STATUS.md for details)
+
+Throughput work (218->1650 kbit/s unidir) + bug hunt landed in b187. Permanent
+traps to remember:
+- Test tools MUST tag seq 32-bit (16-bit wraps at exactly 65536 frames and
+  fakes a "collapse"); rns_link_test.Node._loop resolves parse_seq in ITS OWN
+  module globals -- monkeypatch `rns_link_test.parse_seq` when reusing Node
+  with a different payload tag.
+- ACK-layer knobs are runtime/configdb: hack.gapms (data-bundle gap, default
+  40, tuned 5), hack.window (16), hack.fids (32) -- POST /api/ack_cfg.
+- TX watchdog ac_pd "moved" must be latched only at TX-complete/purge, never
+  sampled per 10 ms tick (false purge -> false reboot of a live node).
+- Gain pilot: never switch RX gain while a session is active; STABLE4 needs
+  the prod-collapse exit; healthy prod base must be captured in clean air.
+- Never park a frame in g_pend_buf without len <= HALOW_ACK_FRAME_MAX (BSS
+  smash); the binary lmac-rx task stack (1024 B) has ~zero headroom under
+  halow_ack_on_rx -> SHA256 -- no logs/locals there.
+
+## Module layout (post-2026-08-20 refactor)
+
+ACK/reliability layer lives in `src/halow_ack.c` (slots, peers, RA, envelope v1,
+pend FIFO, acktk task; public API in `inc/halow_ack.h`). `src/halow_pkg_handler.c`
+is only the RNS<->TCP bridge (rf_to_tcp / tcp_to_rf / MTU clamp).

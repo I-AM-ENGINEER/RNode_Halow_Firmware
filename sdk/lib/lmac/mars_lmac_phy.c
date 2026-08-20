@@ -33,6 +33,38 @@ extern void lmac_irq_bo_fns_orig(void);
 #define LMAC_CCA_STAT_CLR   0x0ff0u
 #define LMAC_IRQ_CLR_TX_END 0x04u
 
+uint32 lhw_tx_gate_blocked(void) {
+    uint32 fsm = LMAC_HW->FSM_STAT;
+    if (((fsm & LMAC_FSM_MAC_MSK) != LMAC_FSM_MAC_IDLE) ||
+        ((fsm & LMAC_FSM_RX_MSK)  != LMAC_FSM_RX_ARMED)) {
+        return 1u;
+    }
+    return 0u;
+}
+
+uint32 lhw_rf_gates_off(void) {
+    if ((LMAC_HW->COMN_CTRL &
+         (LMAC_RF_TX_EN | LMAC_RF_RX_EN | LMAC_RF_PA_EN | LMAC_RF_DAC_EN)) == 0u) {
+        return 1u;
+    }
+    return 0u;
+}
+
+uint32 lhw_abort_armed_tx(void) {
+    uint32 flag = disable_irq();
+    if (ah_lmac.bo_frame_type == 0u) {
+        enable_irq(flag);
+        return 0u;
+    }
+    lhw_abort_fsm();
+    LMAC_HW->BO_CNT0 = 0u;
+    ah_lmac.bo_frame_type  = 0u;
+    ah_lmac.bo_tx_substate = 0u;
+    lhw_enable_irq_ac();
+    enable_irq(flag);
+    return 1u;
+}
+
 /* EDCA CW parameters in ah_lmac.ce_ctx (set per-AC before lmac_attempt_tx_orig reads them) */
 
 /* ah_lmac_tx defined in mars_lmac_tx.c */

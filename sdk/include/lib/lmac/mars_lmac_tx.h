@@ -809,6 +809,21 @@ void lhw_cfg_dma_list_cnt(uint32 cnt);
  */
 void lhw_enable_irq_ac(void);
 
+/**
+ * @brief TX-start gate from lmac_attempt_tx: FSM MAC idle and RX armed
+ */
+uint32 lhw_tx_gate_blocked(void);
+
+/**
+ * @brief All RF gates (TX/RX/PA/DAC) in COMN_CTRL are off
+ */
+uint32 lhw_rf_gates_off(void);
+
+/**
+ * @brief Abort an armed TX under irq-guard; returns 1 if a TX was aborted
+ */
+uint32 lhw_abort_armed_tx(void);
+
 
 /*
  * GPIO Functions

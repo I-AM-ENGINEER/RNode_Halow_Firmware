@@ -59,18 +59,8 @@ static void lmac_tx_purge_ac_queues(void){
     uint32_t total = 0;
 
     /* An armed FSM owns the selected aggregate (DMA may be reading skb->data
-     * right now): abort it like lmac_irq_tx_tmo before completing those skbs.
-     * IRQ-guarded so a tx_end landing mid-abort cannot restart the FSM. */
-    if( ah_lmac.bo_frame_type != 0u ){
-        uint32_t pflag = disable_irq();
-        if( ah_lmac.bo_frame_type != 0u ){
-            lhw_abort_fsm();
-            ah_lmac.bo_frame_type  = 0u;
-            ah_lmac.bo_tx_substate = 0u;
-            lhw_enable_irq_ac();
-        }
-        enable_irq(pflag);
-    }
+     * right now): abort it like lmac_irq_tx_tmo before completing those skbs. */
+    lhw_abort_armed_tx();
 
     /* Small batches: the irq-off window stays short and completion
      * (sema_up + kfree_skb) runs with IRQs back on. */

@@ -84,6 +84,14 @@ extern bool ota_fw_active( void );
 #define HALOW_FRAG_TIMEOUT_MS   1000
 #define HALOW_FRAG_MAX_TOTAL    8
 
+#define HALOW_TX_BO_TMO_MS          500u
+#define HALOW_TX_BO_TMO_GAP_MS      1000u
+#define HALOW_TX_WEDGE_TMO_MS       5000u
+#define HALOW_TX_WEDGE_CONTEND_MS   15000u
+#define HALOW_TX_WEDGE_REBOOT_MS    30000u
+#define HALOW_TX_WEDGE_STRIKES      3u
+#define HALOW_TX_LEAK_TMO_MS        500u
+
 //#define HALOW_DEBUG
 #ifdef HALOW_DEBUG
 #define halow_debug(fmt, ...)  os_printf("[HALW] " fmt "\r\n", ##__VA_ARGS__)
@@ -106,9 +114,9 @@ halow_tx_dbg_t g_tx_dbg;
 static uint32_t g_tx_wedge_count = 0u;
 
 extern volatile uint8_t lmac_tx_purge_request;
+extern volatile uint32_t lmac_ac_pd_count;
 
 void halow_tx_dbg_get( halow_tx_dbg_t *out ){
-    extern volatile uint32_t lmac_ac_pd_count;
     if( out == NULL ) return;
     uint32_t flag = disable_irq();
     *out = g_tx_dbg;
@@ -200,6 +208,36 @@ static uint8_t halow_bw_index( uint8_t bw ) {
     return (bw >= 8) ? 3 : (bw >= 4) ? 2 : (bw >= 2) ? 1 : 0;
 }
 
+static void rescue_ac_aggregate( uint32_t ac ){
+    lmac_tx_ctx_buff *aggr = &ah_lmac_tx.pTx_ac_aggr_data[ac];
+
+    for (int32_t i = 63; i >= 0; i--) {
+        struct sk_buff *skb = aggr->skb_list[i];
+        if (skb != NULL) {
+            skb_list_queue_head(&ah_lmac_tx.pTx_ac_queues[ac], skb);
+            aggr->skb_list[i] = NULL;
+        }
+    }
+
+    aggr->total_len_bytes = 0u;
+    aggr->symbol_len = 0u;
+    aggr->first_seq = -1;
+    aggr->last_seq = -1;
+    aggr->selected_count = 0u;
+    aggr->queued_count = 0u;
+    aggr->tx_flags &= (uint8_t)~0x04u;
+}
+
+static void kick_ac_pd_if_queued( void ){
+    for (uint32_t ac = 0u; ac < 4u; ac++) {
+        if (skb_list_count(&ah_lmac_tx.pTx_ac_queues[ac]) != 0u) {
+            LMAC_HW->AC_PD = 0u;
+            LMAC_HW->AC_PD = 0xFu;
+            return;
+        }
+    }
+}
+
 static void halow_runtime_reconfig_barrier(void)
 {
     if (g_ops == NULL) {
@@ -217,23 +255,7 @@ static void halow_runtime_reconfig_barrier(void)
     lhw_abort_fsm();
 
     for (uint32_t ac = 0; ac < 4u; ac++) {
-        lmac_tx_ctx_buff *aggr = &ah_lmac_tx.pTx_ac_aggr_data[ac];
-
-        for (int32_t i = 63; i >= 0; i--) {
-            struct sk_buff *skb = aggr->skb_list[i];
-            if (skb != NULL) {
-                skb_list_queue_head(&ah_lmac_tx.pTx_ac_queues[ac], skb);
-                aggr->skb_list[i] = NULL;
-            }
-        }
-
-        aggr->total_len_bytes = 0u;
-        aggr->symbol_len = 0u;
-        aggr->first_seq = -1;
-        aggr->last_seq = -1;
-        aggr->selected_count = 0u;
-        aggr->queued_count = 0u;
-        aggr->tx_flags &= (uint8_t)~0x04u;
+        rescue_ac_aggregate( ac );
     }
 
     ah_lmac.bo_frame_type = 0u;
@@ -252,13 +274,7 @@ static void halow_runtime_reconfig_barrier(void)
     enable_irq(cpsr);
 
     lmac_custom_cfg.defer_ac_pd = 0;
-    for (uint32_t ac = 0; ac < 4u; ac++) {
-        if (skb_list_count(&ah_lmac_tx.pTx_ac_queues[ac]) != 0u) {
-            LMAC_HW->AC_PD = 0u;
-            LMAC_HW->AC_PD = 0xFu;
-            break;
-        }
-    }
+    kick_ac_pd_if_queued();
 }
 
 
@@ -269,6 +285,49 @@ int32_t __wrap_lmac_send_bss_announcement(void){
 
 static inline void mac_bcast(uint8_t mac[6]) {
     memset(mac, 0xff, 6);
+}
+
+static void frag_reasm_reset( uint8_t uuid, uint8_t total ){
+    frag_reasm.active   = false;
+    frag_reasm.uuid     = uuid;
+    frag_reasm.total    = total;
+    frag_reasm.received = 0;
+    memset(frag_reasm.part_len, 0, sizeof(frag_reasm.part_len));
+    frag_reasm.active   = true;
+}
+
+static void frag_reasm_store( uint8_t seq, const uint8_t *fdata, int32_t flen ){
+    bool malformed = (seq >= frag_reasm.total) ||
+                     (flen <= 0) || (flen > HALOW_FRAG_MAX_PAYLOAD);
+    if( malformed ){
+        g_tx_dbg.rx_frag_drop++;
+        return;
+    }
+    if( frag_reasm.part_len[seq] != 0 ){
+        return;
+    }
+
+    uint32_t off = 0;
+    for (uint8_t i = 0; i < seq; i++)
+        off += frag_reasm.part_len[i];
+    if (off + (uint32_t)flen <= sizeof(frag_reasm.buf)) {
+        memcpy(frag_reasm.buf + off, fdata, (uint32_t)flen);
+        frag_reasm.part_len[seq] = (uint16_t)flen;
+        frag_reasm.received++;
+    }else{
+        g_tx_dbg.rx_frag_drop++;
+    }
+}
+
+static bool frag_reasm_complete( void ){
+    return frag_reasm.received == frag_reasm.total;
+}
+
+static uint32_t frag_reasm_length( void ){
+    uint32_t rlen = 0;
+    for (uint8_t i = 0; i < frag_reasm.total; i++)
+        rlen += frag_reasm.part_len[i];
+    return rlen;
 }
 
 static int32_t halow_lmac_rx_mcs10(struct hgic_rx_info *info,
@@ -310,38 +369,14 @@ static int32_t halow_lmac_rx_mcs10(struct hgic_rx_info *info,
     }
 
     if (!frag_reasm.active || frag_reasm.uuid != uuid) {
-        frag_reasm.active = false;
-        frag_reasm.uuid = uuid;
-        frag_reasm.total = total;
-        frag_reasm.received = 0;
-        memset(frag_reasm.part_len, 0, sizeof(frag_reasm.part_len));
-        frag_reasm.active = true;
+        frag_reasm_reset( uuid, total );
     }
 
-    if (seq < frag_reasm.total &&
-        flen > 0 && flen <= HALOW_FRAG_MAX_PAYLOAD &&
-        frag_reasm.part_len[seq] == 0) {
-        uint32_t off = 0;
-        for (uint8_t i = 0; i < seq; i++)
-            off += frag_reasm.part_len[i];
-        if (off + (uint32_t)flen <= sizeof(frag_reasm.buf)) {
-            memcpy(frag_reasm.buf + off, fdata, (uint32_t)flen);
-            frag_reasm.part_len[seq] = (uint16_t)flen;
-            frag_reasm.received++;
-        }else{
-            g_tx_dbg.rx_frag_drop++;
-        }
-    }else if (seq >= frag_reasm.total || flen <= 0 || flen > HALOW_FRAG_MAX_PAYLOAD) {
-        g_tx_dbg.rx_frag_drop++;
-    }
-
+    frag_reasm_store( seq, fdata, flen );
     frag_reasm.last_tick = now;
 
-    if (frag_reasm.received == frag_reasm.total) {
-        uint32_t rlen = 0;
-        for (uint8_t i = 0; i < frag_reasm.total; i++)
-            rlen += frag_reasm.part_len[i];
-        g_rx_cb(info, hdr, frag_reasm.buf, (int32_t)rlen);
+    if (frag_reasm_complete()) {
+        g_rx_cb(info, hdr, frag_reasm.buf, (int32_t)frag_reasm_length());
         frag_reasm.active = false;
     }
 
@@ -386,6 +421,16 @@ static void halow_tx_skb_budget_refund( uint32_t len ){
     if( full ){
         halow_lbt_set_tx_as_deactive();
     }
+}
+
+static bool tx_budget_take( uint32_t len ){
+    uint32_t flag = disable_irq();
+    bool ok = (g_tx_vacated_bytes >= len);
+    if( ok ){
+        g_tx_vacated_bytes -= len;
+    }
+    enable_irq(flag);
+    return ok;
 }
 
 void halow_tx_skb_complete( struct sk_buff *skb ){
@@ -676,157 +721,140 @@ uint32_t halow_get_tx_vacancy( void ){
     return g_tx_vacated_bytes;
 }
 
-static bool lmac_tx_gate_blocked( void ){
-    uint32_t fsm = LMAC_HW->FSM_STAT;
-    return ((fsm & LMAC_FSM_MAC_MSK) != LMAC_FSM_MAC_IDLE) ||
-           ((fsm & LMAC_FSM_RX_MSK)  != LMAC_FSM_RX_ARMED);
+static bool tx_work_pending( void ){
+    if( g_tx_vacated_bytes < TX_BUFFER_SIZE ) return true;
+    for( uint32_t ac = 0u; ac < 4u; ac++ ){
+        if( skb_list_count(&ah_lmac_tx.pTx_ac_queues[ac]) != 0u ) return true;
+        if( ah_lmac_tx.pTx_ac_aggr_data[ac].selected_count != 0u ) return true;
+    }
+    return false;
 }
 
-static bool lmac_rf_gates_off( void ){
-    return (LMAC_HW->COMN_CTRL &
-            (LMAC_RF_TX_EN | LMAC_RF_RX_EN | LMAC_RF_PA_EN | LMAC_RF_DAC_EN)) == 0u;
+static void tx_request_purge( void ){
+    lmac_tx_purge_request = 1u;
+    os_sema_up(&ah_lmac_tx.tx_sem);
 }
 
-void halow_tx_vacancy_watchdog( void ){
-    static uint64_t leak_since = 0u;
+static void tx_watchdog_bo_timeout( uint64_t now ){
+    static uint64_t bo_stuck_since = 0u;
+    static uint64_t bo_last_abort  = 0u;
+    static uint32_t bo_last_end_cnt = 0u, bo_last_acpd = 0u;
+
+    if( ah_lmac.bo_frame_type == 0u ){
+        bo_stuck_since = 0u;
+    }else if( g_tx_dbg.tx_end_count != bo_last_end_cnt ||
+              lmac_ac_pd_count        != bo_last_acpd ){
+        bo_stuck_since = now;
+    }else if( bo_stuck_since == 0u ){
+        bo_stuck_since = now;
+    }
+    bo_last_end_cnt = g_tx_dbg.tx_end_count;
+    bo_last_acpd    = lmac_ac_pd_count;
+
+    if( ah_lmac.bo_frame_type != 0u &&
+        lhw_tx_gate_blocked() && lhw_rf_gates_off() ){
+        if( bo_stuck_since == 0u ) bo_stuck_since = now;
+    }
+
+    if( bo_stuck_since == 0u ||
+        (now - bo_stuck_since) < os_msecs_to_jiffies(HALOW_TX_BO_TMO_MS) ||
+        ( bo_last_abort != 0u &&
+          (now - bo_last_abort) < os_msecs_to_jiffies(HALOW_TX_BO_TMO_GAP_MS) ) ){
+        return;
+    }
+
+    uint32_t stuck_sub = ah_lmac.bo_tx_substate;
+    if( lhw_abort_armed_tx() ){
+        bo_last_abort = now;
+        g_tx_dbg.bo_tmo_recov++;
+    }
+    bo_stuck_since = 0u;
+    log_warn("halow: fast TX bo-timeout (sub=%u frozen >=%ums) -> FSM aborted, TX retried",
+             (unsigned)stuck_sub, HALOW_TX_BO_TMO_MS);
+}
+
+static void tx_watchdog_hard_wedge( uint64_t now ){
     static uint64_t wedge_since = 0u;
     static uint64_t wedge_purge_jiff = 0u;
     static uint32_t wedge_last_seq = 0u;
     static uint32_t wedge_last_acpd = 0u;
     static uint32_t dead_strikes = 0u;
-    extern volatile uint32_t lmac_ac_pd_count;
-    uint64_t now = os_jiffies();
 
-    /* ---- tier 0: fast armed-TX timeout ---- */
-    {
-        static uint64_t bo_stuck_since = 0u;
-        static uint64_t bo_last_abort  = 0u;
-        static uint32_t bo_last_end_cnt = 0u, bo_last_acpd = 0u;
-#define HALOW_TX_BO_TMO_MS      500u
-#define HALOW_TX_BO_TMO_GAP_MS  1000u
-
-        if( ah_lmac.bo_frame_type == 0u ){
-            bo_stuck_since = 0u;
-        }else if( g_tx_dbg.tx_end_count != bo_last_end_cnt ||
-                  lmac_ac_pd_count        != bo_last_acpd ){
-            bo_stuck_since = now;
-        }else if( bo_stuck_since == 0u ){
-            bo_stuck_since = now;
-        }
-        bo_last_end_cnt = g_tx_dbg.tx_end_count;
-        bo_last_acpd    = lmac_ac_pd_count;
-
-        if( ah_lmac.bo_frame_type != 0u &&
-            lmac_tx_gate_blocked() && lmac_rf_gates_off() ){
-            if( bo_stuck_since == 0u ) bo_stuck_since = now;
-        }
-
-        if( bo_stuck_since != 0u &&
-            (now - bo_stuck_since) >= os_msecs_to_jiffies(HALOW_TX_BO_TMO_MS) &&
-            ( bo_last_abort == 0u ||
-              (now - bo_last_abort) >= os_msecs_to_jiffies(HALOW_TX_BO_TMO_GAP_MS) ) ){
-
-            uint32_t stuck_sub = ah_lmac.bo_tx_substate;
-            uint32_t flag = disable_irq();
-            if( ah_lmac.bo_frame_type != 0u ){
-                bo_last_abort = now;
-                lhw_abort_fsm();
-                LMAC_HW->BO_CNT0 = 0u;
-                ah_lmac.bo_frame_type  = 0u;
-                ah_lmac.bo_tx_substate = 0u;
-                lhw_enable_irq_ac();
-                g_tx_dbg.bo_tmo_recov++;
-            }
-            enable_irq(flag);
-            bo_stuck_since = 0u;
-            log_warn("halow: fast TX bo-timeout (sub=%u frozen >=%ums) -> FSM aborted, TX retried",
-                     (unsigned)stuck_sub, HALOW_TX_BO_TMO_MS);
-        }
-    }
-
-    /* ---- tier 2: hard wedge (pending TX + zero TX-complete progress) ---- */
-    bool pending = (g_tx_vacated_bytes < TX_BUFFER_SIZE);
-    if( !pending ){
-        for( uint32_t ac = 0u; ac < 4u; ac++ ){
-            if( skb_list_count(&ah_lmac_tx.pTx_ac_queues[ac]) != 0u ){
-                pending = true;
-                break;
-            }
-            if( ah_lmac_tx.pTx_ac_aggr_data[ac].selected_count != 0u ){
-                pending = true;
-                break;
-            }
-        }
-    }
-    if( !pending ){
+    if( !tx_work_pending() ){
         wedge_since = 0u;
         wedge_purge_jiff = 0u;
         dead_strikes = 0u;
-    }else if( g_tx_complete_seq != wedge_last_seq ){
+        return;
+    }
+    if( g_tx_complete_seq != wedge_last_seq ){
         wedge_since = 0u;
         wedge_purge_jiff = 0u;
         wedge_last_seq  = g_tx_complete_seq;
         wedge_last_acpd = lmac_ac_pd_count;
-    }else{
-        if( wedge_since == 0u ) wedge_since = now;
-        uint64_t stuck_ms = os_jiffies_to_msecs(now - wedge_since);
-        uint32_t acpd_moved = (lmac_ac_pd_count != wedge_last_acpd) ? 1u : 0u;
-        uint32_t wedge_thresh_ms = acpd_moved ? 15000u : 5000u;
-        bool purge_due = ( stuck_ms >= wedge_thresh_ms &&
-                           ( wedge_purge_jiff == 0u ||
-                             (now - wedge_purge_jiff) >= os_msecs_to_jiffies(wedge_thresh_ms) ) );
-        if( purge_due ){
-            wedge_purge_jiff = now;
-            wedge_last_acpd  = lmac_ac_pd_count;
-            if( acpd_moved == 0u ) dead_strikes++;
-            else                   dead_strikes = 0u;
-            halow_tx_wedge_snapshot();
-            log_warn("halow: TX hard wedge #%u (budget=%lu, no complete %lums, acpd_move=%u, dead=%u) -> purge",
-                     (unsigned)g_tx_wedge_count,
-                     (unsigned long)g_tx_vacated_bytes, (unsigned long)stuck_ms,
-                     (unsigned)acpd_moved, (unsigned)dead_strikes);
-            lmac_tx_purge_request = 1u;
-            os_sema_up(&ah_lmac_tx.tx_sem);
-        }else if( stuck_ms >= 30000u && dead_strikes >= 3u ){
-            if( ota_wota_active() || ota_fw_active() ){
-                log_warn("halow: TX still wedged after purges, OTA active - no reboot");
-                lmac_tx_purge_request = 1u;
-                os_sema_up(&ah_lmac_tx.tx_sem);
-            }else{
-                log_error("halow: TX dead after %u purges -> reboot",
-                          (unsigned)g_tx_wedge_count);
-                os_sleep_ms(50);
-                device_reboot();
-            }
-        }
-    }
-
-    /* ---- tier 1: soft budget leak with idle queues ---- */
-    if( g_tx_vacated_bytes >= TX_BUFFER_SIZE ){
-        leak_since = 0u;
         return;
     }
-    for( uint32_t ac = 0u; ac < 4u; ac++ ){
-        if( skb_list_count(&ah_lmac_tx.pTx_ac_queues[ac]) != 0u ){
-            leak_since = 0u;
-            return;
+
+    if( wedge_since == 0u ) wedge_since = now;
+    uint64_t stuck_ms = os_jiffies_to_msecs(now - wedge_since);
+    uint32_t acpd_moved = (lmac_ac_pd_count != wedge_last_acpd) ? 1u : 0u;
+    uint32_t wedge_thresh_ms = acpd_moved ? HALOW_TX_WEDGE_CONTEND_MS : HALOW_TX_WEDGE_TMO_MS;
+    bool purge_due = ( stuck_ms >= wedge_thresh_ms &&
+                       ( wedge_purge_jiff == 0u ||
+                         (now - wedge_purge_jiff) >= os_msecs_to_jiffies(wedge_thresh_ms) ) );
+    if( !purge_due ){
+        if( stuck_ms >= HALOW_TX_WEDGE_REBOOT_MS && dead_strikes >= HALOW_TX_WEDGE_STRIKES &&
+            !(ota_wota_active() || ota_fw_active()) ){
+            log_error("halow: TX dead after %u purges -> reboot",
+                      (unsigned)g_tx_wedge_count);
+            os_sleep_ms(50);
+            device_reboot();
         }
-        if( ah_lmac_tx.pTx_ac_aggr_data[ac].selected_count != 0u ){
-            leak_since = 0u;
-            return;
-        }
+        return;
+    }
+
+    wedge_purge_jiff = now;
+    wedge_last_acpd  = lmac_ac_pd_count;
+    if( acpd_moved == 0u ) dead_strikes++;
+    else                   dead_strikes = 0u;
+    halow_tx_wedge_snapshot();
+    log_warn("halow: TX hard wedge #%u (budget=%lu, no complete %lums, acpd_move=%u, dead=%u) -> purge",
+             (unsigned)g_tx_wedge_count,
+             (unsigned long)g_tx_vacated_bytes, (unsigned long)stuck_ms,
+             (unsigned)acpd_moved, (unsigned)dead_strikes);
+    tx_request_purge();
+    if( dead_strikes >= HALOW_TX_WEDGE_STRIKES &&
+        stuck_ms >= HALOW_TX_WEDGE_REBOOT_MS &&
+        (ota_wota_active() || ota_fw_active()) ){
+        log_warn("halow: TX still wedged after purges, OTA active - no reboot");
+        tx_request_purge();
+    }
+}
+
+static void tx_watchdog_budget_leak( uint64_t now ){
+    static uint64_t leak_since = 0u;
+
+    if( tx_work_pending() ){
+        leak_since = 0u;
+        return;
     }
     if( leak_since == 0u ){
         leak_since = now;
         return;
     }
-    if( (now - leak_since) < os_msecs_to_jiffies(500u) ) return;
+    if( (now - leak_since) < os_msecs_to_jiffies(HALOW_TX_LEAK_TMO_MS) ) return;
     leak_since = 0u;
     log_warn("halow: TX vacancy leak (budget=%lu, queues idle) -> resync",
              (unsigned long)g_tx_vacated_bytes);
     g_tx_vacated_bytes = TX_BUFFER_SIZE;
     halow_lbt_set_tx_as_deactive();
     os_sema_up(&g_tx_vacated_sem);
+}
+
+void halow_tx_vacancy_watchdog( void ){
+    uint64_t now = os_jiffies();
+    tx_watchdog_bo_timeout( now );
+    tx_watchdog_hard_wedge( now );
+    tx_watchdog_budget_leak( now );
 }
 
 static int32_t halow_send_frame(const uint8_t *payload, uint32_t len,
@@ -859,16 +887,10 @@ static int32_t halow_send_frame(const uint8_t *payload, uint32_t len,
 
     skb->priority = tid & 7u;
     skb->tx       = 1;
-    {
-        uint32_t flag = disable_irq();
-        if( g_tx_vacated_bytes < skb->len ){
-            enable_irq(flag);
-            kfree_skb(skb);
-            g_tx_dbg.tx_drop_budget++;
-            return -6;
-        }
-        g_tx_vacated_bytes -= skb->len;
-        enable_irq(flag);
+    if( !tx_budget_take( skb->len ) ){
+        kfree_skb(skb);
+        g_tx_dbg.tx_drop_budget++;
+        return -6;
     }
 
     int32_t res;
@@ -970,6 +992,23 @@ static void halow_cfg_mcs_bw_cached( uint8_t *mcs_out, uint8_t *bw_out ){
     *bw_out  = cfg_cache_bw;
 }
 
+static uint8_t mcs_fit_len( uint8_t mcs, uint32_t len ){
+    uint8_t cfg_mcs, cfg_bw;
+    halow_cfg_mcs_bw_cached(&cfg_mcs, &cfg_bw);
+    uint8_t bw_idx = halow_bw_index(cfg_bw);
+
+    if( len + 32u <= halow_max_msdu[bw_idx][mcs] ){
+        return mcs;
+    }
+    for( uint8_t m = (uint8_t)(mcs + 1u); m <= 7u; m++ ){
+        if( len + 32u <= halow_max_msdu[bw_idx][m] ){
+            g_tx_dbg.tx_mcs_bump++;
+            return m;
+        }
+    }
+    return HALOW_MCS_DEFAULT;
+}
+
 int32_t halow_tx_p( const uint8_t *data, uint32_t len, const uint8_t destination_mac[6], uint8_t mcs, uint8_t tid ) {
     if (g_ops == NULL)  return -1;
     if (data == NULL)   return -2;
@@ -986,20 +1025,10 @@ int32_t halow_tx_p( const uint8_t *data, uint32_t len, const uint8_t destination
         return halow_tx_mcs10_frag(data, len, destination_mac, mcs, tid);
     }
 
-    uint8_t cfg_mcs, cfg_bw;
-    halow_cfg_mcs_bw_cached(&cfg_mcs, &cfg_bw);
-    uint8_t bw_idx = halow_bw_index(cfg_bw);
-    if( len + 32u > halow_max_msdu[bw_idx][mcs] ){
-        uint8_t bumped = 0u;
-        for( uint8_t m = (uint8_t)(mcs + 1u); m <= 7u; m++ ){
-            if( len + 32u <= halow_max_msdu[bw_idx][m] ){ bumped = m; break; }
-        }
-        if( bumped == 0u ){
-            g_tx_dbg.tx_drop_oversize++;
-            return -4;
-        }
-        mcs = bumped;
-        g_tx_dbg.tx_mcs_bump++;
+    mcs = mcs_fit_len( mcs, len );
+    if( mcs == HALOW_MCS_DEFAULT ){
+        g_tx_dbg.tx_drop_oversize++;
+        return -4;
     }
 
     return halow_send_frame(data, len, destination_mac, mcs, tid);
