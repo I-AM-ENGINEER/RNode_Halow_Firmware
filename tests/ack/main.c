@@ -528,25 +528,41 @@ static void t_throttle_pend_park_drain( void ){
     node_start(&cfg);
     test_vacancy_set(100);
 
-    for( uint8_t i = 0; i < 4; i++ ){
-        fill_payload(f, sizeof(f), i);
+    fill_payload(f, sizeof(f), 1);
+    CHECK( halow_ack_tx(f, sizeof(f), PEER_A) == 0 );
+    fill_payload(f, sizeof(f), 2);
+    CHECK( halow_ack_tx(f, sizeof(f), PEER_A) == 0 );
+    for( int i = 0; i < 15; i++ ){
+        fill_payload(f, sizeof(f), (uint8_t)(i + 3));
         CHECK( halow_ack_tx(f, sizeof(f), PEER_A) == 0 );
     }
-    fill_payload(f, sizeof(f), 9);
+    fill_payload(f, sizeof(f), 0x55);
     CHECK( halow_ack_tx(f, sizeof(f), PEER_A) == HALOW_ACK_TX_THROTTLE );
     CHECK( test_tx_count() == 0 );
 
     test_vacancy_set(100000);
-    run_ticks(3, 5);
-    CHECK( test_tx_count() == 2 );
-    CHECK( test_tx_at(0)->buf[0] == 0xA5 && test_tx_at(0)->buf[1] == 0xAD );
-    CHECK( test_tx_at(0)->buf[2] == 2 );
-    CHECK( test_tx_at(1)->buf[2] == 2 );
+    for( int k = 0; k < 200; k++ ){
+        run_ticks(2, 5);
+        halow_ack_stats_get(&st);
+        if( st.outstanding == 0 && test_tx_count() == 16 ) break;
+        for( int i = 0; i < test_tx_count(); i++ ){
+            ack_fid(PEER_A, (uint16_t)(fnv1a(test_tx_at(i)->buf, test_tx_at(i)->len) & 0xFFFFu));
+        }
+    }
+    CHECK( test_tx_count() == 16 );
+    {
+        int bundles = 0;
+        for( int i = 0; i < 16; i++ ){
+            if( test_tx_at(i)->buf[0] == 0xA5 && test_tx_at(i)->buf[1] == 0xAD ) bundles++;
+        }
+        CHECK( bundles == 1 );
+    }
 
     halow_ack_stats_get(&st);
     CHECK( st.dropped == 0 );
     CHECK( st.drop_throttle == 0 );
-    CHECK( st.outstanding == 2 );
+    CHECK( st.outstanding == 0 );
+    CHECK( st.acked == 16 );
 }
 
 static void t_window_gate( void ){
@@ -833,8 +849,9 @@ static void t_pool_exhaustion( void ){
 
     peer_mac(m, 9);
     fill_payload(f, sizeof(f), 9);
-    CHECK( halow_ack_tx(f, sizeof(f), m) == 0 );
-    CHECK( halow_ack_tx(f, sizeof(f), m) == 0 );
+    for( int i = 0; i < 8; i++ ){
+        CHECK( halow_ack_tx(f, sizeof(f), m) == 0 );
+    }
     CHECK( halow_ack_tx(f, sizeof(f), m) == HALOW_ACK_TX_THROTTLE );
     CHECK( test_tx_count() == 8 );
 
@@ -1449,34 +1466,41 @@ static void t_edge_blockack_bitmap_extremes( void ){
     CHECK( st.acked == 3 );
 }
 
-static void t_edge_pend_max_tries( void ){
+static void t_edge_park_timeout( void ){
     halow_ack_config_t cfg;
     halow_ack_stats_t st;
     uint8_t f[100];
-    int zeros = 0;
-    int throttles = 0;
+    uint16_t fid1;
 
     cfg_base(&cfg);
     cfg.agg = 0;
     cfg.window = 1;
+    cfg.timeout_ms = 300;
+    cfg.max_retries = 8;
     node_start(&cfg);
 
     fill_payload(f, sizeof(f), 1);
     CHECK( halow_ack_tx(f, sizeof(f), PEER_A) == 0 );
     CHECK( test_tx_count() == 1 );
+    fid1 = fid_of(f, sizeof(f));
 
-    for( int i = 0; i < 1510; i++ ){
-        fill_payload(f, sizeof(f), (uint8_t)(i + 2));
-        int32_t r = halow_ack_tx(f, sizeof(f), PEER_A);
-        if( r == 0 ) zeros++;
-        else if( r == HALOW_ACK_TX_THROTTLE ) throttles++;
-    }
+    fill_payload(f, sizeof(f), 2);
+    CHECK( halow_ack_tx(f, sizeof(f), PEER_A) == 0 );
+    CHECK( test_tx_count() == 1 );
+
+    run_ticks(90, 50);
 
     halow_ack_stats_get(&st);
     CHECK( st.drop_throttle == 1 );
     CHECK( st.dropped == 1 );
-    CHECK( zeros == 3 );
-    CHECK( throttles >= 1490 );
+    CHECK( st.drop_deadline == 0 );
+
+    ack_fid(PEER_A, fid1);
+    halow_ack_stats_get(&st);
+    CHECK( st.outstanding == 0 );
+
+    fill_payload(f, sizeof(f), 3);
+    CHECK( halow_ack_tx(f, sizeof(f), PEER_A) == 0 );
 }
 
 static void t_edge_ack_hold_extremes( void ){
@@ -1640,6 +1664,9 @@ static void t_edge_rapid_reconfig( void ){
 }
 
 int main( void ){
+#ifndef __csky__
+    setvbuf(stdout, NULL, _IONBF, 0);
+#endif
     struct { const char *name; void (*fn)(void); } tests[] = {
         {"init_defaults",               t_init_defaults},
         {"config_clamp",                t_config_clamp},
@@ -1681,7 +1708,7 @@ int main( void ){
         {"edge_ack_len_parity",         t_edge_ack_len_parity},
         {"edge_fid_zero_and_ack_storm", t_edge_fid_zero_and_ack_storm},
         {"edge_blockack_bitmap_extremes", t_edge_blockack_bitmap_extremes},
-        {"edge_pend_max_tries",         t_edge_pend_max_tries},
+        {"edge_park_timeout",           t_edge_park_timeout},
         {"edge_ack_hold_extremes",      t_edge_ack_hold_extremes},
         {"edge_env_bundle_nsub_zero",   t_edge_env_bundle_nsub_zero},
         {"edge_stale_reheard_compat_reset", t_edge_stale_reheard_compat_reset},

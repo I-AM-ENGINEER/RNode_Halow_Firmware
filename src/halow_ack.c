@@ -15,6 +15,7 @@
 #define ACK_CFG_VER     3
 
 #define ACK_BUF_N       16u
+/* Reticulum packets up to 2000 B must be trackable: 2000 + 2 len + 6 reserve */
 #define ACK_WIRE_MAX    2048u
 #define ACK_MAX_PEERS   16u
 #define ACK_DEDUP_WIN   HALOW_ACK_ACK_FIDS_MAX
@@ -24,9 +25,7 @@
 #define ACK_TX_VACANCY_LOW    8000u
 #define ACK_SLOT_LIFE_MAX_MS  6000u
 #define ACK_AGG_MAX_HOLD_MS   1000u
-
-#define ACK_PEND_N            2u
-#define ACK_PEND_MAX_TRIES    1500u
+#define ACK_PARK_MAX_MS       4000u
 
 #define ACK_L0_STRIKES        12u
 #define ACK_BACKOFF_SHIFT_MAX 3u
@@ -55,9 +54,10 @@ enum halow_l1_compat {
 
 enum ack_buf_state {
     ACK_BUF_FREE     = 0,
-    ACK_BUF_STAGING  = 1,
-    ACK_BUF_INFLIGHT = 2,
-    ACK_BUF_SENDING  = 3,
+    ACK_BUF_PARKED   = 1,
+    ACK_BUF_STAGING  = 2,
+    ACK_BUF_INFLIGHT = 3,
+    ACK_BUF_SENDING  = 4,
 };
 
 typedef struct {
@@ -136,13 +136,6 @@ static jiffy_t g_step_gap8_j;
 static jiffy_t g_dflt_ttl_j;
 static uint16_t g_ra_up_q8;
 static uint16_t g_ra_down_q8;
-
-static uint8_t  g_pend_buf[ACK_PEND_N][ACK_WIRE_MAX];
-static uint16_t g_pend_len[ACK_PEND_N];
-static uint8_t  g_pend_mac[ACK_PEND_N][6];
-static uint32_t g_pend_head, g_pend_count;
-static uint16_t g_pend_tries[ACK_PEND_N];
-static bool     g_pend_draining;
 
 static uint8_t  g_dflt_mcs_cache = 0xFFu;
 static jiffy_t  g_dflt_mcs_jiff;
@@ -998,23 +991,17 @@ static int32_t tx_plain_locked( ack_peer_t *p, const uint8_t *payload,
 
 static int32_t ack_tx_uc( const uint8_t *payload, uint16_t len, const uint8_t dest_mac[6] );
 
-static void pend_drain( void );
-
 int32_t halow_ack_tx( const uint8_t *payload, uint16_t len, const uint8_t dest_mac[6] ){
     if( payload == NULL || dest_mac == NULL ) return -1;
 
-    pend_drain();
-
     int32_t r = ack_tx_uc(payload, len, dest_mac);
-    if( r == HALOW_ACK_TX_THROTTLE ){
+    if( r == HALOW_ACK_TX_THROTTLE && len <= ACK_WIRE_MAX ){
         ack_lock();
-        if( g_pend_count < ACK_PEND_N && len <= ACK_WIRE_MAX ){
-            uint32_t idx = (g_pend_head + g_pend_count) % ACK_PEND_N;
-            memcpy(g_pend_buf[idx], payload, len);
-            g_pend_len[idx] = len;
-            memcpy(g_pend_mac[idx], dest_mac, 6);
-            g_pend_tries[idx] = 0u;
-            g_pend_count++;
+        ack_buf_t *pb = buf_alloc(ACK_BUF_PARKED, dest_mac);
+        if( pb != NULL ){
+            pb->ofs = 0u;
+            pb->len = len;
+            memcpy(pb->data, payload, len);
             ack_unlock();
             return 0;
         }
@@ -1025,41 +1012,32 @@ int32_t halow_ack_tx( const uint8_t *payload, uint16_t len, const uint8_t dest_m
     return r;
 }
 
-static void pend_drain( void ){
+static void tick_unpark( void ){
     ack_lock();
-    if( g_pend_draining || g_pend_count == 0u ){
-        ack_unlock();
-        return;
-    }
-    g_pend_draining = true;
-    ack_unlock();
-
-    while( g_pend_count > 0u ){
-        uint32_t idx = g_pend_head % ACK_PEND_N;
-        int32_t r = ack_tx_uc(g_pend_buf[idx], g_pend_len[idx], g_pend_mac[idx]);
-        if( r == HALOW_ACK_TX_THROTTLE ){
-            if( ++g_pend_tries[idx] >= ACK_PEND_MAX_TRIES ){
-                log_warn("pend: frame to %02x:%02x:%02x:%02x:%02x:%02x undeliverable, dropping",
-                         g_pend_mac[idx][0],g_pend_mac[idx][1],g_pend_mac[idx][2],
-                         g_pend_mac[idx][3],g_pend_mac[idx][4],g_pend_mac[idx][5]);
-                g_ack_stats.dropped++;
-                g_ack_stats.drop_throttle++;
-                ack_lock();
-                g_pend_head = (g_pend_head + 1u) % ACK_PEND_N;
-                g_pend_count--;
-                ack_unlock();
-                continue;
-            }
-            break;
+    for( uint32_t i = 0; i < ACK_BUF_N; i++ ){
+        ack_buf_t *b = &g_bufs[i];
+        if( b->state != ACK_BUF_PARKED ) continue;
+        if( (now_j() - b->born_jiff) >= ms_j(ACK_PARK_MAX_MS) ){
+            buf_release(b);
+            g_ack_stats.dropped++;
+            g_ack_stats.drop_throttle++;
+            continue;
         }
-        ack_lock();
-        g_pend_head = (g_pend_head + 1u) % ACK_PEND_N;
-        g_pend_count--;
-        ack_unlock();
-    }
+        if( g_inflight_n >= g_window ) continue;
+        if( halow_get_tx_vacancy() < ACK_TX_VACANCY_LOW ) continue;
 
-    ack_lock();
-    g_pend_draining = false;
+        ack_peer_t *p = peer_find(b->dest_mac);
+        uint8_t pmcs = ( p != NULL ) ? p->tx_mcs : HALOW_MCS_DEFAULT;
+        b->fid = (uint16_t)(fnv1a(b->data, b->len) & 0xFFFFu);
+        if( b->fid == 0u ) b->fid = 0xFFFFu;
+        b->ofs = 0u;
+        b->retries_used = 0u;
+        b->tx_jiff = now_j();
+        g_inflight_n++;
+        if( p != NULL ) peer_note_tx(p, b->len, b->len);
+        else statistics_radio_register_tx_package(b->len);
+        buf_tx_send(b, pmcs);
+    }
     ack_unlock();
 }
 
@@ -1400,7 +1378,7 @@ static void tick_flush_deferred_acks( jiffy_t now ){
 
 void halow_ack_tick( void ){
     halow_tx_vacancy_watchdog();
-    pend_drain();
+    tick_unpark();
 
     if( g_ack_cfg.max_retries == 0u ) return;
     jiffy_t now = now_j();
@@ -1448,9 +1426,6 @@ void halow_ack_init( void ){
     g_used_n = 0;
     g_inflight_n = 0;
     g_peers_n = 0;
-    g_pend_count = 0;
-    g_pend_head = 0;
-    g_pend_draining = false;
     g_window = g_ack_cfg.window;
     config_cache();
 

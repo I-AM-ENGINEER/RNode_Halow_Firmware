@@ -258,12 +258,14 @@ is only the RNS<->TCP bridge (rf_to_tcp / tcp_to_rf / MTU clamp).
 
 ## ACK module budget (2026-08-20 rewrite)
 
-Static pool only, zero heap: 16 bufs x 2048 B wire frames (states FREE/STAGING/
-INFLIGHT/SENDING), 16 peers, pend 2x2048. Host size test (tests/ack/size_test.c)
-enforces the 50 KB RAM cap. Window = inflight gate over the pool (no semaphore,
-no resize migration). Bundle bodies stage at data[6..]; legacy header written at
-data[3] on flush, envelope at data[0] -- no memmove, no second copy. SENDING
-state guards a buf against free/claim while halow_tx runs unlocked.
+Static pool only, zero heap: 16 bufs x 2048 B wire frames (states FREE/PARKED/
+STAGING/INFLIGHT/SENDING), 16 peers, no separate pend RAM (THROTTLE'd frames
+park inside pool bufs; the tick sends them straight from the buf and drops
+them at 4 s). ACK_WIRE_MAX 2048 must stay >= 2008: Reticulum packets up to
+2000 B are tracked. Host size test (tests/ack/size_test.c) enforces the 50 KB
+cap (36.2 KB used on target). Window = inflight gate over the pool. Bundle
+bodies stage at data[6..]; legacy header at data[3] on flush, envelope at
+data[0] -- no second copy. SENDING guards a buf across the unlocked halow_tx.
 
 ## Test running (tests/ack)
 

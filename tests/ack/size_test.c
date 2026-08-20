@@ -15,12 +15,11 @@
 int main( void ){
     size_t bufs  = sizeof(g_bufs);
     size_t peers = sizeof(g_peers);
-    size_t pend  = sizeof(g_pend_buf) + sizeof(g_pend_len) + sizeof(g_pend_mac);
-    size_t misc  = sizeof(g_ack_cfg) + sizeof(g_ack_stats) + sizeof(g_pend_tries);
-    size_t total = bufs + peers + pend + misc;
+    size_t misc  = sizeof(g_ack_cfg) + sizeof(g_ack_stats);
+    size_t total = bufs + peers + misc;
 
-    printf("ack static RAM: bufs=%zu peers=%zu pend=%zu misc=%zu total=%zu limit=%u\n",
-           bufs, peers, pend, misc, total, RAM_LIMIT);
+    printf("ack static RAM: bufs=%zu peers=%zu misc=%zu total=%zu limit=%u\n",
+           bufs, peers, misc, total, RAM_LIMIT);
     if( total > RAM_LIMIT ){
         printf("FAIL: over budget by %zu B\n", total - RAM_LIMIT);
         return 1;
