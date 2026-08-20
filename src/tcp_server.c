@@ -355,6 +355,10 @@ static void tcp_client_loop( struct netconn *client ){
         err = netconn_recv(client, &nb);
 
         if( err == ERR_WOULDBLOCK ){
+            /* lwIP has nothing more buffered: whatever the ACK layer is
+             * staging must go out NOW, incomplete -- waiting for a fuller
+             * frame would add latency for nothing. */
+            halow_ack_flush();
             os_sleep_ms(1);
             continue;
         }

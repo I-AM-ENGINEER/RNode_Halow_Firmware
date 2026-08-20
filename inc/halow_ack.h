@@ -12,11 +12,13 @@
 #define HALOW_ACK_ACK_MCS_MIN      1u
 #define HALOW_ACK_ACK_MCS_MAX      6u
 
-/* A-MSDU bundle: [A5][AD][nsub]([len_le16][payload])* */
+/* A-MSDU bundle: [A5][AD][nsub]([len_le16][payload])*
+ * One tracked frame carries at most 4000 payload bytes (2x2000 or 8x500 MTU
+ * packets) so high-MCS peers get long airtime-efficient frames. */
 #define HALOW_ACK_AGG_MAGIC0          0xA5u
 #define HALOW_ACK_AGG_MAGIC1          0xADu
 #define HALOW_ACK_AGG_MAX_SUB         8u
-#define HALOW_ACK_AGG_HOLD_MS_DEF     2u
+#define HALOW_ACK_AGG_PAYLOAD_MAX     4000u
 #define HALOW_ACK_ACK_HOLD_MS_DEF     20u   /* < timeout_ms/2 */
 
 #define HALOW_ACK_DEFAULT_MAX_RETRIES   3u
@@ -60,14 +62,10 @@ typedef struct {
     uint8_t  ack_fids;
     uint8_t  agg;
     uint16_t agg_bytes;
-    uint16_t agg_hold_ms;
     uint16_t ack_hold_ms;
     uint8_t  bc_repeat;
     uint8_t  env;
-    uint16_t data_gap_ms;
 } halow_ack_config_t;
-
-#define HALOW_ACK_DATA_GAP_MS_DEF       40u
 
 typedef struct {
     uint32_t tx_frames;
@@ -104,6 +102,8 @@ typedef struct {
     uint32_t ra_blocked_gap;
     uint32_t ra_blocked_max;
     uint32_t bc_repeats;
+    uint32_t heap_fail;       /* frame-buffer malloc failures -> THROTTLE */
+    uint32_t heap_bytes;      /* live frame-buffer bytes held right now */
 } halow_ack_stats_t;
 
 typedef struct {
@@ -137,6 +137,9 @@ bool     halow_ack_is_internal_frame(const uint8_t *data, uint16_t len);
 void     halow_ack_env_malformed(void);
 int32_t  halow_ack_tx(const uint8_t *payload, uint16_t len, const uint8_t dest_mac[6]);
 bool     halow_ack_tx_ready(void);
+/* Send staged bundle data now: called when the TCP side has no more bytes
+ * buffered (recv would block) -- an incomplete frame beats waiting. */
+void     halow_ack_flush(void);
 
 /* TX path saturated: backpressure for the TCP recv loop, not an error. */
 #define HALOW_ACK_TX_THROTTLE   (-7)

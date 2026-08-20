@@ -12,11 +12,12 @@
 
 #define ACK_CFG_PREFIX  CONFIGDB_ADD_MODULE("hack")
 #define ACK_CFG(k)      ACK_CFG_PREFIX "." k
-#define ACK_CFG_VER     3
+#define ACK_CFG_VER     4
 
 #define ACK_BUF_N       16u
-/* Reticulum packets up to 2000 B must be trackable: 2000 + 2 len + 6 reserve */
-#define ACK_WIRE_MAX    2048u
+/* One ACK-tracked wire frame: payload sum <= HALOW_ACK_AGG_PAYLOAD_MAX
+ * (2x2000 or 8x500 RNS packets); wire adds env hdr 6 + per-sub len 2*8. */
+#define ACK_WIRE_MAX    (HALOW_ACK_AGG_PAYLOAD_MAX + 6u + 2u*HALOW_ACK_AGG_MAX_SUB)
 #define ACK_MAX_PEERS   16u
 #define ACK_DEDUP_WIN   HALOW_ACK_ACK_FIDS_MAX
 #define ACK_TICK_MS     10u
@@ -25,7 +26,6 @@
 #define ACK_TX_VACANCY_LOW    8000u
 #define ACK_SLOT_LIFE_MAX_MS  6000u
 #define ACK_AGG_MAX_HOLD_MS   1000u
-#define ACK_PARK_MAX_MS       4000u
 
 #define ACK_L0_STRIKES        12u
 #define ACK_BACKOFF_SHIFT_MAX 3u
@@ -53,24 +53,27 @@ enum halow_l1_compat {
 };
 
 enum ack_buf_state {
-    ACK_BUF_FREE     = 0,
-    ACK_BUF_PARKED   = 1,
     ACK_BUF_STAGING  = 2,
     ACK_BUF_INFLIGHT = 3,
     ACK_BUF_SENDING  = 4,
 };
 
+/* One heap node per frame, sized to the peer's rate: a far MCS0 peer burns
+ * ~730 B, a near MCS7 peer ~4 KB. The 16-slot pointer table below is the
+ * only static buffer storage left. */
 typedef struct {
     uint8_t  state;
     uint8_t  retries_used;
     uint8_t  ofs;
+    uint8_t  idx;
     uint16_t len;
+    uint16_t cap;
     uint16_t fid;
     uint16_t seq;
     uint8_t  dest_mac[6];
     jiffy_t  born_jiff;
     jiffy_t  tx_jiff;
-    uint8_t  data[ACK_WIRE_MAX];
+    uint8_t  data[];
 } ack_buf_t;
 
 typedef struct {
@@ -116,17 +119,17 @@ static halow_ack_config_t g_ack_cfg;
 static halow_ack_stats_t  g_ack_stats;
 static struct os_mutex    g_ack_mutex;
 
-static ack_buf_t   g_bufs[ACK_BUF_N];
+static ack_buf_t   *g_bufs[ACK_BUF_N];
 static uint8_t     g_window;
 static ack_peer_t  g_peers[ACK_MAX_PEERS];
 
 static uint8_t  g_used_n;
 static uint8_t  g_inflight_n;
 static uint8_t  g_peers_n;
+static uint32_t g_heap_bytes;
 
 static jiffy_t g_last_data_tx_jiff;
 
-static jiffy_t g_gap_j;
 static jiffy_t g_ack_hold_j;
 static jiffy_t g_stale_j;
 static jiffy_t g_quiet_j;
@@ -191,18 +194,32 @@ void halow_ack_env_malformed( void ){
     g_ack_stats.rx_env_unk++;
 }
 
-/* ================= buffer pool ================= */
+/* ================= frame buffers (heap, exact size per frame) ================= */
 
-static ack_buf_t *buf_alloc( uint8_t state, const uint8_t mac[6] ){
+static uint32_t buf_alloc_sz( uint16_t cap ){
+    return (uint32_t)sizeof(ack_buf_t) + (uint32_t)cap;
+}
+
+static ack_buf_t *buf_alloc( uint8_t state, const uint8_t mac[6], uint16_t cap ){
     for( uint32_t i = 0; i < ACK_BUF_N; i++ ){
-        ack_buf_t *b = &g_bufs[i];
-        if( b->state != ACK_BUF_FREE ) continue;
+        if( g_bufs[i] != NULL ) continue;
+        ack_buf_t *b = os_malloc(buf_alloc_sz(cap));
+        if( b == NULL ){
+            g_ack_stats.heap_fail++;
+            return NULL;
+        }
         b->state        = state;
         b->retries_used = 0;
+        b->ofs          = 0;
+        b->idx          = (uint8_t)i;
+        b->len          = 0;
+        b->cap          = cap;
         b->seq          = 0xFFFFu;
         b->born_jiff    = now_j();
         memcpy(b->dest_mac, mac, 6);
+        g_bufs[i]    = b;
         g_used_n++;
+        g_heap_bytes += buf_alloc_sz(cap);
         if( state == ACK_BUF_INFLIGHT ) g_inflight_n++;
         return b;
     }
@@ -211,19 +228,22 @@ static ack_buf_t *buf_alloc( uint8_t state, const uint8_t mac[6] ){
 
 static void buf_release( ack_buf_t *b ){
     if( b->state >= ACK_BUF_INFLIGHT ) g_inflight_n--;
-    b->state = ACK_BUF_FREE;
+    g_heap_bytes -= buf_alloc_sz(b->cap);
+    g_bufs[b->idx] = NULL;
+    os_free(b);
     g_used_n--;
 }
 
-static ack_buf_t *buf_claim_inflight( const uint8_t mac[6] ){
+static ack_buf_t *buf_claim_inflight( const uint8_t mac[6], uint16_t wire_len ){
     if( g_inflight_n >= g_window ) return NULL;
-    return buf_alloc(ACK_BUF_INFLIGHT, mac);
+    return buf_alloc(ACK_BUF_INFLIGHT, mac, wire_len);
 }
 
 static ack_buf_t *buf_match( const uint8_t mac[6], uint16_t fid ){
     for( uint32_t i = 0; i < ACK_BUF_N; i++ ){
-        ack_buf_t *b = &g_bufs[i];
-        if( b->state == ACK_BUF_INFLIGHT &&
+        ack_buf_t *b = g_bufs[i];
+        if( b != NULL &&
+            b->state == ACK_BUF_INFLIGHT &&
             b->fid == fid &&
             mac_eq(b->dest_mac, mac) )
             return b;
@@ -233,8 +253,8 @@ static ack_buf_t *buf_match( const uint8_t mac[6], uint16_t fid ){
 
 static ack_buf_t *buf_for_peer( const uint8_t mac[6] ){
     for( uint32_t i = 0; i < ACK_BUF_N; i++ ){
-        ack_buf_t *b = &g_bufs[i];
-        if( b->state != ACK_BUF_FREE && mac_eq(b->dest_mac, mac) )
+        ack_buf_t *b = g_bufs[i];
+        if( b != NULL && mac_eq(b->dest_mac, mac) )
             return b;
     }
     return NULL;
@@ -531,12 +551,10 @@ void halow_ack_config_set_default( halow_ack_config_t *cfg ){
     cfg->window        = HALOW_ACK_DEFAULT_WINDOW;
     cfg->ack_fids      = HALOW_ACK_DEFAULT_ACK_FIDS;
     cfg->agg           = 1u;
-    cfg->agg_bytes     = ACK_WIRE_MAX;
-    cfg->agg_hold_ms   = HALOW_ACK_AGG_HOLD_MS_DEF;
+    cfg->agg_bytes     = HALOW_ACK_AGG_PAYLOAD_MAX;
     cfg->ack_hold_ms   = HALOW_ACK_ACK_HOLD_MS_DEF;
     cfg->bc_repeat     = HALOW_ACK_BC_REPEAT_DEF;
     cfg->env           = 1u;
-    cfg->data_gap_ms   = HALOW_ACK_DATA_GAP_MS_DEF;
 }
 
 static void config_clamp( halow_ack_config_t *cfg ){
@@ -555,20 +573,17 @@ static void config_clamp( halow_ack_config_t *cfg ){
     if( cfg->ack_fids == 0u ) cfg->ack_fids = 1u;
     if( cfg->ack_fids > HALOW_ACK_ACK_FIDS_MAX ) cfg->ack_fids = HALOW_ACK_ACK_FIDS_MAX;
     cfg->agg = cfg->agg ? 1u : 0u;
-    cfg->agg_bytes = (uint16_t)ACK_WIRE_MAX;
-    if( cfg->agg_hold_ms == 0u ) cfg->agg_hold_ms = 1u;
-    if( cfg->agg_hold_ms > 100u ) cfg->agg_hold_ms = 100u;
+    if( cfg->agg_bytes == 0u || cfg->agg_bytes > HALOW_ACK_AGG_PAYLOAD_MAX )
+        cfg->agg_bytes = HALOW_ACK_AGG_PAYLOAD_MAX;
     if( cfg->ack_hold_ms > 100u ) cfg->ack_hold_ms = 100u;
     if( cfg->timeout_ms > 2u && cfg->ack_hold_ms > (uint16_t)(cfg->timeout_ms / 2u) )
         cfg->ack_hold_ms = (uint16_t)(cfg->timeout_ms / 2u);
     if( cfg->bc_repeat < 1u )                      cfg->bc_repeat = 1u;
     if( cfg->bc_repeat > HALOW_ACK_BC_REPEAT_MAX ) cfg->bc_repeat = HALOW_ACK_BC_REPEAT_MAX;
     cfg->env = cfg->env ? 1u : 0u;
-    if( cfg->data_gap_ms > 250u ) cfg->data_gap_ms = 250u;
 }
 
 static void config_cache( void ){
-    g_gap_j       = ms_j(g_ack_cfg.data_gap_ms);
     g_ack_hold_j  = ms_j(g_ack_cfg.ack_hold_ms);
     g_stale_j     = ms_j(HALOW_ACK_RA_STALE_MS);
     g_quiet_j     = ms_j(1000u);
@@ -607,11 +622,10 @@ void halow_ack_config_load( halow_ack_config_t *cfg ){
     configdb_get_i8 (ACK_CFG("window"),   (int8_t *)&cfg->window);
     configdb_get_i8 (ACK_CFG("fids"),     (int8_t *)&cfg->ack_fids);
     configdb_get_i8 (ACK_CFG("agg"),      (int8_t *)&cfg->agg);
-    configdb_get_i16(ACK_CFG("agghold"),  (int16_t *)&cfg->agg_hold_ms);
-    configdb_get_i16(ACK_CFG("ackhold"),  (int16_t *)&cfg->ack_hold_ms);
+    configdb_get_i16(ACK_CFG("aggbytes"), (int16_t *)&cfg->agg_bytes);
+    configdb_get_i8 (ACK_CFG("ackhold"),  (int8_t *)&cfg->ack_hold_ms);
     configdb_get_i8 (ACK_CFG("bcrep"),    (int8_t *)&cfg->bc_repeat);
     configdb_get_i8 (ACK_CFG("env"),      (int8_t *)&cfg->env);
-    configdb_get_i16(ACK_CFG("gapms"),    (int16_t *)&cfg->data_gap_ms);
     config_clamp(cfg);
 }
 
@@ -625,11 +639,10 @@ void halow_ack_config_save( const halow_ack_config_t *cfg ){
     configdb_set_i8 (ACK_CFG("window"),   (int8_t *)&cfg->window);
     configdb_set_i8 (ACK_CFG("fids"),     (int8_t *)&cfg->ack_fids);
     configdb_set_i8 (ACK_CFG("agg"),      (int8_t *)&cfg->agg);
-    configdb_set_i16(ACK_CFG("agghold"),  (int16_t *)&cfg->agg_hold_ms);
-    configdb_set_i16(ACK_CFG("ackhold"),  (int16_t *)&cfg->ack_hold_ms);
+    configdb_set_i16(ACK_CFG("aggbytes"), (int16_t *)&cfg->agg_bytes);
+    configdb_set_i8 (ACK_CFG("ackhold"),  (int8_t *)&cfg->ack_hold_ms);
     configdb_set_i8 (ACK_CFG("bcrep"),    (int8_t *)&cfg->bc_repeat);
     configdb_set_i8 (ACK_CFG("env"),      (int8_t *)&cfg->env);
-    configdb_set_i16(ACK_CFG("gapms"),    (int16_t *)&cfg->data_gap_ms);
 }
 
 void halow_ack_config_get_live( halow_ack_config_t *cfg ){
@@ -796,10 +809,10 @@ static void send_ack( int8_t evm, const uint8_t dest_mac[6],
 /* ================= bundle staging & flush ================= */
 
 static void agg_reset( ack_peer_t *p ){
-    if( p->agg_idx != 0u ){
-        buf_release(&g_bufs[p->agg_idx - 1u]);
-        p->agg_idx = 0u;
+    if( p->agg_idx != 0u && g_bufs[p->agg_idx - 1u] != NULL ){
+        buf_release(g_bufs[p->agg_idx - 1u]);
     }
+    p->agg_idx = 0u;
     p->agg_len = 0u;
     p->agg_nsub = 0u;
     p->agg_first_jiff = 0u;
@@ -812,15 +825,15 @@ static void peer_note_tx( ack_peer_t *p, uint32_t wire_bytes, uint16_t flen ){
     statistics_radio_register_tx_package(flen);
 }
 
+/* Gates are hard HW limits only (DMA room, in-flight window); the hold/gap
+ * waits are gone -- assembly rides the TCP window, and the incomplete frame
+ * goes out the moment the TCP side has nothing more buffered. */
 static bool agg_flush_locked( ack_peer_t *p ){
     if( p == NULL || p->agg_idx == 0u ) return true;
-    if( (jiffy_t)(now_j() - g_last_data_tx_jiff) < g_gap_j ){
-        return false;
-    }
     if( halow_get_tx_vacancy() < ACK_TX_VACANCY_LOW ) return false;
     if( g_inflight_n >= g_window ) return false;
 
-    ack_buf_t *b = &g_bufs[p->agg_idx - 1u];
+    ack_buf_t *b = g_bufs[p->agg_idx - 1u];
     uint8_t  pmcs   = p->tx_mcs;
     uint16_t staged = p->agg_len;
     uint8_t  nsub   = p->agg_nsub;
@@ -922,36 +935,48 @@ static int32_t tx_broadcast( const uint8_t *payload, uint16_t len, const uint8_t
     return first_ok ? 0 : HALOW_ACK_TX_THROTTLE;
 }
 
-static bool bundle_full_for( ack_peer_t *p, uint16_t len, uint16_t eff_bytes ){
-    uint32_t env_len = (uint32_t)p->agg_len + 2u + len;
-    return env_len > eff_bytes ||
-           p->agg_nsub + 1u > HALOW_ACK_AGG_MAX_SUB ||
-           env_len > ACK_WIRE_MAX;
+static bool bundle_full_for( ack_peer_t *p, ack_buf_t *sb,
+                             uint16_t len, uint16_t eff_payload ){
+    uint32_t payload_now = (uint32_t)p->agg_len - ACK_AGG_RESERVE - 2u*p->agg_nsub;
+    uint32_t wire_now    = (uint32_t)p->agg_len + 2u + len;
+    return ( payload_now + len > eff_payload ) ||
+           ( wire_now > ACK_WIRE_MAX ) ||
+           ( wire_now > (uint32_t)sb->cap ) ||
+           ( p->agg_nsub + 1u > HALOW_ACK_AGG_MAX_SUB );
+}
+
+static uint16_t staging_alloc_cap( uint16_t eff_payload ){
+    uint32_t cap = (uint32_t)ACK_AGG_RESERVE + eff_payload
+                 + 2u*HALOW_ACK_AGG_MAX_SUB;
+    return ( cap > ACK_WIRE_MAX ) ? (uint16_t)ACK_WIRE_MAX : (uint16_t)cap;
 }
 
 static int32_t tx_bundle_locked( ack_peer_t *p, const uint8_t *payload,
                                  uint16_t len, const uint8_t dest_mac[6],
-                                 uint8_t pmcs, uint16_t eff_bytes ){
-    if( p->agg_idx != 0u && bundle_full_for(p, len, eff_bytes) ){
+                                 uint8_t pmcs, uint16_t eff_payload ){
+    ack_buf_t *sb = ( p->agg_idx != 0u ) ? g_bufs[p->agg_idx - 1u] : NULL;
+    if( sb != NULL && bundle_full_for(p, sb, len, eff_payload) ){
         (void)agg_flush_locked(p);
-    }
-    if( p->agg_idx != 0u && bundle_full_for(p, len, eff_bytes) ){
-        ack_unlock();
-        return HALOW_ACK_TX_THROTTLE;
+        sb = ( p->agg_idx != 0u ) ? g_bufs[p->agg_idx - 1u] : NULL;
+        if( sb != NULL && bundle_full_for(p, sb, len, eff_payload) ){
+            ack_unlock();
+            return HALOW_ACK_TX_THROTTLE;
+        }
     }
 
     if( p->agg_idx == 0u ){
-        ack_buf_t *b = buf_alloc(ACK_BUF_STAGING, dest_mac);
+        ack_buf_t *b = buf_alloc(ACK_BUF_STAGING, dest_mac,
+                                 staging_alloc_cap(eff_payload));
         if( b == NULL ){
             ack_unlock();
             return HALOW_ACK_TX_THROTTLE;
         }
-        p->agg_idx = (uint8_t)((uint32_t)(b - g_bufs) + 1u);
-        p->agg_len = ACK_AGG_RESERVE;
-        p->agg_nsub = 0u;
+        p->agg_idx        = (uint8_t)((uint32_t)b->idx + 1u);
+        p->agg_len        = ACK_AGG_RESERVE;
+        p->agg_nsub       = 0u;
         p->agg_first_jiff = now_j();
+        sb = b;
     }
-    ack_buf_t *sb = &g_bufs[p->agg_idx - 1u];
 
     sb->data[p->agg_len]     = (uint8_t)(len & 0xFFu);
     sb->data[p->agg_len + 1] = (uint8_t)((len >> 8) & 0xFFu);
@@ -959,9 +984,11 @@ static int32_t tx_bundle_locked( ack_peer_t *p, const uint8_t *payload,
     p->agg_len  = (uint16_t)(p->agg_len + 2u + len);
     p->agg_nsub++;
 
+    uint32_t payload_sum = (uint32_t)p->agg_len - ACK_AGG_RESERVE - 2u*p->agg_nsub;
     if( p->agg_nsub >= HALOW_ACK_AGG_MAX_SUB ||
-        (uint32_t)p->agg_len > eff_bytes ){
-        agg_flush_locked(p);
+        (uint32_t)p->agg_len + 2u > sb->cap ||
+        payload_sum >= eff_payload ){
+        (void)agg_flush_locked(p);
     }
     ack_unlock();
     return 0;
@@ -973,7 +1000,7 @@ static int32_t tx_plain_locked( ack_peer_t *p, const uint8_t *payload,
         ack_unlock();
         return HALOW_ACK_TX_THROTTLE;
     }
-    ack_buf_t *b = buf_claim_inflight(dest_mac);
+    ack_buf_t *b = buf_claim_inflight(dest_mac, len);
     if( b == NULL ){
         ack_unlock();
         return HALOW_ACK_TX_THROTTLE;
@@ -995,48 +1022,15 @@ int32_t halow_ack_tx( const uint8_t *payload, uint16_t len, const uint8_t dest_m
     if( payload == NULL || dest_mac == NULL ) return -1;
 
     int32_t r = ack_tx_uc(payload, len, dest_mac);
-    if( r == HALOW_ACK_TX_THROTTLE && len <= ACK_WIRE_MAX ){
-        ack_lock();
-        ack_buf_t *pb = buf_alloc(ACK_BUF_PARKED, dest_mac);
-        if( pb != NULL ){
-            pb->ofs = 0u;
-            pb->len = len;
-            memcpy(pb->data, payload, len);
-            ack_unlock();
-            return 0;
-        }
-        ack_unlock();
-        return HALOW_ACK_TX_THROTTLE;
-    }
-    g_ack_stats.tx_frames++;
+    if( r == 0 ) g_ack_stats.tx_frames++;
     return r;
 }
 
-static void tick_unpark( void ){
+void halow_ack_flush( void ){
     ack_lock();
-    for( uint32_t i = 0; i < ACK_BUF_N; i++ ){
-        ack_buf_t *b = &g_bufs[i];
-        if( b->state != ACK_BUF_PARKED ) continue;
-        if( (now_j() - b->born_jiff) >= ms_j(ACK_PARK_MAX_MS) ){
-            buf_release(b);
-            g_ack_stats.dropped++;
-            g_ack_stats.drop_throttle++;
-            continue;
-        }
-        if( g_inflight_n >= g_window ) continue;
-        if( halow_get_tx_vacancy() < ACK_TX_VACANCY_LOW ) continue;
-
-        ack_peer_t *p = peer_find(b->dest_mac);
-        uint8_t pmcs = ( p != NULL ) ? p->tx_mcs : HALOW_MCS_DEFAULT;
-        b->fid = (uint16_t)(fnv1a(b->data, b->len) & 0xFFFFu);
-        if( b->fid == 0u ) b->fid = 0xFFFFu;
-        b->ofs = 0u;
-        b->retries_used = 0u;
-        b->tx_jiff = now_j();
-        g_inflight_n++;
-        if( p != NULL ) peer_note_tx(p, b->len, b->len);
-        else statistics_radio_register_tx_package(b->len);
-        buf_tx_send(b, pmcs);
+    for( uint32_t i = 0; i < ACK_MAX_PEERS; i++ ){
+        ack_peer_t *p = &g_peers[i];
+        if( p->in_use && p->agg_idx != 0u ) (void)agg_flush_locked(p);
     }
     ack_unlock();
 }
@@ -1059,11 +1053,9 @@ static int32_t ack_tx_uc( const uint8_t *payload, uint16_t len, const uint8_t de
         return tx_plain_untracked(payload, len, dest_mac, pmcs);
     }
 
-    uint16_t eff_bytes = eff_agg_bytes(pmcs);
-    if( g_ack_cfg.agg != 0u &&
-        (uint32_t)len + 8u <= eff_bytes &&
-        (uint32_t)len + 8u <= ACK_WIRE_MAX ){
-        return tx_bundle_locked(p, payload, len, dest_mac, pmcs, eff_bytes);
+    uint16_t eff_payload = eff_agg_bytes(pmcs);
+    if( g_ack_cfg.agg != 0u && (uint32_t)len <= eff_payload ){
+        return tx_bundle_locked(p, payload, len, dest_mac, pmcs, eff_payload);
     }
     return tx_plain_locked(p, payload, len, dest_mac, pmcs);
 }
@@ -1090,8 +1082,8 @@ static void rx_env_ack_locked( ack_peer_t *p, const uint8_t *payload ){
         bm |= (uint64_t)payload[6u + b] << (8u * b);
     }
     for( uint32_t i = 0u; i < ACK_BUF_N; i++ ){
-        ack_buf_t *b = &g_bufs[i];
-        if( b->state != ACK_BUF_INFLIGHT ) continue;
+        ack_buf_t *b = g_bufs[i];
+        if( b == NULL || b->state != ACK_BUF_INFLIGHT ) continue;
         if( !mac_eq(b->dest_mac, p->mac) ) continue;
         if( b->seq == 0xFFFFu ) continue;
         uint16_t diff = (uint16_t)(b->seq - base);
@@ -1326,8 +1318,8 @@ static void tick_service_bufs( jiffy_t now ){
     if( timeout_j == 0u ) timeout_j = 1u;
 
     for( uint32_t i = 0; i < ACK_BUF_N; i++ ){
-        ack_buf_t *b = &g_bufs[i];
-        if( b->state != ACK_BUF_INFLIGHT ) continue;
+        ack_buf_t *b = g_bufs[i];
+        if( b == NULL || b->state != ACK_BUF_INFLIGHT ) continue;
         if( (now - b->born_jiff) >= life_j ){
             buf_drop_deadline(b);
             continue;
@@ -1338,19 +1330,20 @@ static void tick_service_bufs( jiffy_t now ){
     }
 }
 
+/* Safety net only: bundles normally leave via halow_ack_flush() the moment
+ * the TCP side runs dry. A bundle still staged here means the RF gates have
+ * been closed for a full second -- drop rather than wedge the peer. */
 static void tick_flush_held_bundles( jiffy_t now ){
     if( g_ack_cfg.agg == 0u ) return;
 
-    jiffy_t hold_j = ms_j(g_ack_cfg.agg_hold_ms);
-    if( hold_j == 0u ) hold_j = 1u;
     for( uint32_t i = 0; i < ACK_MAX_PEERS; i++ ){
         ack_peer_t *p = &g_peers[i];
         if( !p->in_use || p->agg_idx == 0u ) continue;
-        if( (now - p->agg_first_jiff) < hold_j ) continue;
         if( agg_flush_locked(p) ) continue;
         if( (now - p->agg_first_jiff) >= ms_j(ACK_AGG_MAX_HOLD_MS) ){
-            g_ack_stats.dropped += p->agg_nsub;
-            p->dropped         += p->agg_nsub;
+            g_ack_stats.dropped       += p->agg_nsub;
+            g_ack_stats.drop_throttle += p->agg_nsub;
+            p->dropped               += p->agg_nsub;
             agg_reset(p);
         }
     }
@@ -1378,7 +1371,6 @@ static void tick_flush_deferred_acks( jiffy_t now ){
 
 void halow_ack_tick( void ){
     halow_tx_vacancy_watchdog();
-    tick_unpark();
 
     if( g_ack_cfg.max_retries == 0u ) return;
     jiffy_t now = now_j();
@@ -1426,6 +1418,7 @@ void halow_ack_init( void ){
     g_used_n = 0;
     g_inflight_n = 0;
     g_peers_n = 0;
+    g_heap_bytes = 0;
     g_window = g_ack_cfg.window;
     config_cache();
 
@@ -1448,6 +1441,7 @@ void halow_ack_stats_get( halow_ack_stats_t *out ){
     *out = g_ack_stats;
     out->outstanding = g_inflight_n;
     out->peers       = g_peers_n;
+    out->heap_bytes  = g_heap_bytes;
     ack_unlock();
 }
 

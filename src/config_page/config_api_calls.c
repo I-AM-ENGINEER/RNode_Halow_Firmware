@@ -1494,9 +1494,7 @@ int32_t web_api_ack_cfg_get( const cJSON *in, cJSON *out ){
     cJSON_AddNumberToObject(out, "fids",     (double)cfg.ack_fids);
     cJSON_AddNumberToObject(out, "agg",      (double)cfg.agg);
     cJSON_AddNumberToObject(out, "agg_bytes",   (double)cfg.agg_bytes);
-    cJSON_AddNumberToObject(out, "agg_hold_ms", (double)cfg.agg_hold_ms);
     cJSON_AddNumberToObject(out, "ack_hold_ms", (double)cfg.ack_hold_ms);
-    cJSON_AddNumberToObject(out, "gap_ms",      (double)cfg.data_gap_ms);
     cJSON_AddNumberToObject(out, "bc_repeat", (double)cfg.bc_repeat);
     cJSON_AddNumberToObject(out, "env",       (double)cfg.env);
 #ifdef FW_BUILD_BETA
@@ -1558,8 +1556,6 @@ int32_t web_api_ack_cfg_post( const cJSON *in, cJSON *out ){
     if (json_get_int(in, "fids",   &v)) { if (v >= 1 && v <= 32) cfg.ack_fids  = (uint8_t)v; }
     if (json_get_int(in, "bc_repeat", &v)) { if (v >= 1 && v <= HALOW_ACK_BC_REPEAT_MAX) cfg.bc_repeat = (uint8_t)v; }
     if (json_get_int(in, "env",       &v)) { cfg.env = (uint8_t)(v ? 1u : 0u); }   /* 0 = force legacy formats (interop test gate) */
-    if (json_get_int(in, "gap_ms",      &v)) { if (v >= 0 && v <= 250) cfg.data_gap_ms = (uint16_t)v; }
-    if (json_get_int(in, "agg_hold_ms", &v)) { if (v >= 1 && v <= 100) cfg.agg_hold_ms  = (uint16_t)v; }
     if (json_get_int(in, "ack_hold_ms", &v)) { if (v >= 0 && v <= 100) cfg.ack_hold_ms  = (uint16_t)v; }
     halow_ack_config_apply(&cfg);
     return web_api_ack_cfg_get(NULL, out);

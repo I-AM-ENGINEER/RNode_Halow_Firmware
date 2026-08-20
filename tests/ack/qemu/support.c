@@ -137,19 +137,60 @@ char *strncpy( char *dst, const char *src, size_t n ){
 
 time_t time( time_t *t ){ if( t ) *t = 0; return 0; }
 
-static uint8_t g_heap[4096];
-static uint32_t g_heap_used;
+/* First-fit free-list heap: ACK frame buffers live here and are freed on
+ * ACK/drop, so a bump allocator would run the 16 MB RAM dry in soaks. */
+#define HEAP_ARENA_SIZE (512u * 1024u)
+
+struct blk {
+    uint32_t size;   /* payload bytes, header excluded */
+    uint32_t used;
+};
+
+static uint8_t g_heap[HEAP_ARENA_SIZE] __attribute__((aligned(8)));
+static int g_heap_init;
+
+static void heap_init( void ){
+    struct blk *b = (struct blk *)(void *)g_heap;
+    b->size = sizeof(g_heap) - sizeof(struct blk);
+    b->used = 0;
+    g_heap_init = 1;
+}
 
 void *malloc( size_t n ){
+    if( !g_heap_init ) heap_init();
     n = ( n + 7u ) & ~7u;
-    if( g_heap_used + n > sizeof(g_heap) ) return NULL;
-    void *p = &g_heap[g_heap_used];
-    g_heap_used += n;
-    return p;
+
+    struct blk *b = (struct blk *)(void *)g_heap;
+    for( ;; ){
+        uint8_t *base = (uint8_t *)b;
+        if( base >= g_heap + sizeof(g_heap) ) return NULL;
+
+        if( !b->used ){
+            for( ;; ){
+                struct blk *nxt =
+                    (struct blk *)(void *)(base + sizeof(struct blk) + b->size);
+                if( (uint8_t *)nxt >= g_heap + sizeof(g_heap) || nxt->used ) break;
+                b->size += sizeof(struct blk) + nxt->size;
+            }
+            if( b->size >= n ) break;
+        }
+        b = (struct blk *)(void *)(base + sizeof(struct blk) + b->size);
+    }
+
+    if( b->size >= n + sizeof(struct blk) + 16u ){
+        struct blk *rest = (struct blk *)(void *)((uint8_t *)b + sizeof(struct blk) + n);
+        rest->size = b->size - n - sizeof(struct blk);
+        rest->used = 0;
+        b->size    = n;
+    }
+    b->used = 1;
+    return (uint8_t *)b + sizeof(struct blk);
 }
 
 void free( void *p ){
-    (void)p;
+    if( p == NULL ) return;
+    struct blk *b = (struct blk *)(void *)((uint8_t *)p - sizeof(struct blk));
+    if( b->used ) b->used = 0;
 }
 
 void c_start( void ){

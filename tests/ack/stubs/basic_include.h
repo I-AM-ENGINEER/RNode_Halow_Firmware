@@ -22,6 +22,7 @@ struct os_mutex     { int32_t dummy; };
 struct os_task      { int32_t dummy; };
 
 #define OS_TASK_PRIORITY_REALTIME 0
+#define OS_TASK_PRIORITY_LOW      3
 
 uint64_t os_jiffies(void);
 uint64_t os_msecs_to_jiffies(uint32_t ms);
@@ -37,6 +38,7 @@ void     os_task_set_stacksize(struct os_task *t, uint32_t sz);
 void     os_task_set_priority(struct os_task *t, uint8_t prio);
 void     os_task_run(struct os_task *t);
 void     os_sleep_ms(uint32_t ms);
+void     os_sleep(int sec);
 void     *os_malloc(uint32_t size);
 void     os_free(void *p);
 

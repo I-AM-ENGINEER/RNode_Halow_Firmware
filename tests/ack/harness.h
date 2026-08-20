@@ -5,7 +5,7 @@
 #include <stdbool.h>
 
 #define TEST_TX_CAP_LEN 4200
-#define TEST_TX_CAP_N   128
+#define TEST_TX_CAP_N   256
 
 typedef struct {
     uint8_t buf[TEST_TX_CAP_LEN];
@@ -23,6 +23,29 @@ void test_tx_reset(void);
 int  test_tx_count(void);
 const test_tx_cap_t *test_tx_at(int i);
 const test_tx_cap_t *test_tx_last(void);
+
+/* heap accounting + fault injection for os_malloc/os_free */
+void     test_malloc_reset(void);
+void     test_malloc_fail_next(int n);
+uint32_t test_malloc_live_blocks(void);
+uint32_t test_malloc_live_bytes(void);
+
+/* RF->TCP delivery capture (tcp_server_send) */
+#define TEST_TCP_CAP_LEN 4400
+#define TEST_TCP_CAP_N   256
+
+typedef struct {
+    uint8_t buf[TEST_TCP_CAP_LEN];
+    uint16_t len;
+} test_tcp_cap_t;
+
+void test_tcp_reset(void);
+int  test_tcp_count(void);
+const test_tcp_cap_t *test_tcp_at(int i);
+void test_tcp_full_set(int full);
+
+/* halow_get_mtu row override (per-MCS max MSDU) */
+void test_mtu_row_set(const uint32_t row[8]);
 
 void configdb_reset(void);
 int  test_kv_get(const char *key, int16_t *val);

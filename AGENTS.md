@@ -240,8 +240,9 @@ traps to remember:
   fakes a "collapse"); rns_link_test.Node._loop resolves parse_seq in ITS OWN
   module globals -- monkeypatch `rns_link_test.parse_seq` when reusing Node
   with a different payload tag.
-- ACK-layer knobs are runtime/configdb: hack.gapms (data-bundle gap, default
-  40, tuned 5), hack.window (16), hack.fids (32) -- POST /api/ack_cfg.
+- ACK-layer knobs are runtime/configdb: hack.window (16), hack.fids (32) --
+  POST /api/ack_cfg. (gapms/agghold removed 2026-08-20: assembly no longer
+  waits, the TCP recv window paces TX.)
 - TX watchdog ac_pd "moved" must be latched only at TX-complete/purge, never
   sampled per 10 ms tick (false purge -> false reboot of a live node).
 - Gain pilot: never switch RX gain while a session is active; STABLE4 needs
@@ -252,27 +253,43 @@ traps to remember:
 
 ## Module layout (post-2026-08-20 refactor)
 
-ACK/reliability layer lives in `src/halow_ack.c` (slots, peers, RA, envelope v1,
-pend FIFO, acktk task; public API in `inc/halow_ack.h`). `src/halow_pkg_handler.c`
-is only the RNS<->TCP bridge (rf_to_tcp / tcp_to_rf / MTU clamp).
+ACK/reliability layer lives in `src/halow_ack.c` (frame buffers, peers, RA,
+envelope v1, acktk task; public API in `inc/halow_ack.h`). `src/halow_pkg_handler.c`
+is only the RNS<->TCP bridge (rf_to_tcp / tcp_to_rf / MTU clamp); the RNS stream
+framing (SLIP-like 0x7E/0x7D) is `src/rns/stream_parser.c` and holds ONE
+THROTTLE-rejected frame for retry.
 
-## ACK module budget (2026-08-20 rewrite)
+## ACK module design (2026-08-20 heap rewrite)
 
-Static pool only, zero heap: 16 bufs x 2048 B wire frames (states FREE/PARKED/
-STAGING/INFLIGHT/SENDING), 16 peers, no separate pend RAM (THROTTLE'd frames
-park inside pool bufs; the tick sends them straight from the buf and drops
-them at 4 s). ACK_WIRE_MAX 2048 must stay >= 2008: Reticulum packets up to
-2000 B are tracked. Host size test (tests/ack/size_test.c) enforces the 50 KB
-cap (36.2 KB used on target). Window = inflight gate over the pool. Bundle
-bodies stage at data[6..]; legacy header at data[3] on flush, envelope at
-data[0] -- no second copy. SENDING guards a buf across the unlocked halow_tx.
+One heap node per tracked frame, exact-size (os_malloc, flexible-array `data[]`),
+16 pointer slots (STAGING/INFLIGHT/SENDING — no PARKED, no static pool). Static
+RAM: 3.2 KB of the 50 KB cap (size_test.c). Heap use is rate-shaped: staging
+alloc = 6 + eff_agg + 16 (~730 B for an MCS0 peer, ~4 KB for MCS7), so far nodes
+never pay for near-node frames; malloc failure returns THROTTLE (TCP window
+closes) and is counted in `heap_fail`/`heap_bytes` stats.
+
+Max ACK-tracked frame: payload sum 4000 B per bundle (`HALOW_ACK_AGG_PAYLOAD_MAX`,
+2x2000 or 8x500 MTU packets), wire cap ACK_WIRE_MAX = 4000+6+16 = 4022. Bigger
+frames go out untracked/broadcast. Single max-size sub unwraps to plain on flush.
+
+Aggregation never waits (no gap/hold timers — removed with cfg ver 4): frames
+glue while lwIP has bytes, the bundle leaves the moment it is full, and
+`halow_ack_flush()` (called from tcp_server.c when netconn_recv returns
+WOULDBLOCK) sends the incomplete frame when the TCP side runs dry. The tick only
+retries gated flushes and drops staging stuck >= 1 s (drop_throttle). Backpressure
+contract: THROTTLE → stream decoder holds the frame + reports *consumed → tcps
+skips netconn_recv → lwIP recv window closes; no frame is ever fire-and-forgotten.
 
 ## Test running (tests/ack)
 
-Host: `make` (gcc). Target ISA: `make qemu` — cross-builds the same suite for
-ck803 and runs it in the T-Head simulator (CDKRepo/Simulator cskysim = QEMU 9
-fork, board soccfg/cskyv2/smartl_803_cfg.xml: ck803efr3, unaligned_access=off,
-UART 0x40015000 console, write to 0x10002000 exits). qemu/support.c carries the
-bare-metal runtime (mini-printf, memcpy, bump malloc); startup.s + qemu/test.ld
-place everything in D-SRAM 0x20000000. Target RAM budget measured on-target:
-40872 B of the 51200 B cap.
+Host: `make` (gcc; use ucrt64 `mingw32-make`, plain msys make mangles TMP).
+Target ISA: `make qemu` — cross-builds the same suite for ck803 and runs it in
+the T-Head simulator (CDKRepo/Simulator cskysim = QEMU 9 fork, board
+soccfg/cskyv2/smartl_803_cfg.xml: ck803efr3, unaligned_access=off, UART
+0x40015000 console, write to 0x10002000 exits). qemu/support.c carries the
+bare-metal runtime (mini-printf, memcpy, first-fit free-list malloc for the
+heap-frame path); startup.s + qemu/test.ld place everything in D-SRAM 0x20000000.
+The suite links the REAL pkg_handler/rns/sha256 chain: full-path tests feed TCP
+bytes (SLIP, escapes, split chunks) through stream_parser → link_db → bundle
+builder → captured halow_tx, and back via rf_to_tcp → captured tcp_server_send.
+206,754 checks green on host and emulated ck803.

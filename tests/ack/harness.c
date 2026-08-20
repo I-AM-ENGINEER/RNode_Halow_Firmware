@@ -5,7 +5,16 @@
 #include "configdb.h"
 #include "harness.h"
 
+#include <stdarg.h>
+
 const uint8_t mac_broadcast[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+
+halow_tx_dbg_t g_tx_dbg;
+
+/* link_db links with live log_warn calls -- swallow them in tests */
+void log_log( int level, const char *file, int line, const char *fmt, ... ){
+    (void)level; (void)file; (void)line; (void)fmt;
+}
 
 static uint64_t g_jiff;
 static uint32_t g_vacancy = 100000;
@@ -43,9 +52,42 @@ void os_task_set_priority(struct os_task *t, uint8_t prio){ (void)t; (void)prio;
 void os_task_run(struct os_task *t){ (void)t; }
 int test_task_inits(void){ return g_task_inits; }
 
-void *os_malloc(uint32_t size){ return malloc((size_t)size); }
-void os_free(void *p){ free(p); }
+/* os_malloc with an 8-byte header: exact live-block/live-byte accounting and
+ * deterministic fault injection for the heap-frame paths. */
+static int      g_fail_next;
+static uint32_t g_live_blocks;
+static uint32_t g_live_bytes;
+
+void test_malloc_reset(void){ g_fail_next = 0; }
+void test_malloc_fail_next(int n){ g_fail_next = n; }
+uint32_t test_malloc_live_blocks(void){ return g_live_blocks; }
+uint32_t test_malloc_live_bytes(void){ return g_live_bytes; }
+
+void *os_malloc(uint32_t size){
+    if( g_fail_next > 0 ){
+        g_fail_next--;
+        return NULL;
+    }
+    uint8_t *p = (uint8_t *)malloc((size_t)size + 8u);
+    if( p == NULL ) return NULL;
+    *(uint32_t *)(void *)p       = size;
+    *(uint32_t *)(void *)(p + 4) = 0xC0DEBA5Fu;
+    g_live_blocks++;
+    g_live_bytes += size;
+    return p + 8;
+}
+
+void os_free(void *pv){
+    if( pv == NULL ) return;
+    uint8_t *p = (uint8_t *)pv - 8;
+    if( *(uint32_t *)(void *)(p + 4) != 0xC0DEBA5Fu ) return;
+    g_live_blocks--;
+    g_live_bytes -= *(uint32_t *)(void *)p;
+    free(p);
+}
+
 void os_sleep_ms(uint32_t ms){ (void)ms; }
+void os_sleep(int sec){ (void)sec; }
 
 void halow_config_load(halow_config_t *cfg){ cfg->mcs = g_dflt_mcs; }
 
@@ -91,6 +133,41 @@ int32_t halow_tx_p(const uint8_t *buf, uint16_t len, const uint8_t dest_mac[6],
 uint32_t halow_get_tx_vacancy(void){ return g_vacancy; }
 void test_vacancy_set(uint32_t v){ g_vacancy = v; }
 void halow_tx_vacancy_watchdog(void){}
+
+static uint32_t g_mtu_row[8] = {700, 1450, 2200, 3000, 4500, 6050, 6800, 7600};
+
+uint32_t halow_get_mtu(uint8_t mcs){
+    return (mcs <= 7u) ? g_mtu_row[mcs] : 700u;
+}
+
+void test_mtu_row_set(const uint32_t row[8]){
+    memcpy(g_mtu_row, row, sizeof(g_mtu_row));
+}
+
+uint8_t halow_cfg_mcs_get_cached(void){ return g_dflt_mcs; }
+
+/* RF->TCP delivered frames (tcp_server_send) */
+static test_tcp_cap_t g_tcp[TEST_TCP_CAP_N];
+static int g_tcpn;
+static int g_tcp_full;
+
+void test_tcp_reset(void){ g_tcpn = 0; g_tcp_full = 0; }
+int test_tcp_count(void){ return g_tcpn; }
+const test_tcp_cap_t *test_tcp_at(int i){
+    return (i >= 0 && i < g_tcpn && i < TEST_TCP_CAP_N) ? &g_tcp[i] : NULL;
+}
+void test_tcp_full_set(int full){ g_tcp_full = full; }
+
+int32_t tcp_server_send(const uint8_t *data, uint32_t len){
+    if( g_tcp_full ) return -1;
+    if( len == 0u || len > TEST_TCP_CAP_LEN ) return -2;
+    if( g_tcpn < TEST_TCP_CAP_N ){
+        memcpy(g_tcp[g_tcpn].buf, data, len);
+        g_tcp[g_tcpn].len = (uint16_t)len;
+    }
+    g_tcpn++;
+    return 0;
+}
 
 static uint32_t g_stat_tx_pkgs;
 void statistics_radio_register_tx_package(uint16_t len){ (void)len; g_stat_tx_pkgs++; }

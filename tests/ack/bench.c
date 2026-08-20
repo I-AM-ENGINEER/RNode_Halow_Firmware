@@ -45,11 +45,9 @@ int main( void ){
     halow_ack_config_set_default(&cfg);
     cfg.timeout_ms  = 50;
     cfg.max_retries = 8;
-    cfg.agg_hold_ms = 2;
     cfg.ack_hold_ms = 0;
     cfg.rate_adapt  = 0;
     cfg.window      = 16;
-    cfg.data_gap_ms = 0;
 
     test_time_reset();
     configdb_reset();
