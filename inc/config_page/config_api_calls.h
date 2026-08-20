@@ -60,8 +60,6 @@ int32_t web_api_log_cfg_post( const cJSON *in, cJSON *out );
 int32_t web_api_privacy_cfg_get( const cJSON *in, cJSON *out );
 int32_t web_api_privacy_cfg_post( const cJSON *in, cJSON *out );
 
-int32_t web_api_rns_mtu_cfg_get( const cJSON *in, cJSON *out );
-int32_t web_api_rns_mtu_cfg_post( const cJSON *in, cJSON *out );
 
 int32_t web_api_ack_cfg_get( const cJSON *in, cJSON *out );
 int32_t web_api_ack_cfg_post( const cJSON *in, cJSON *out );

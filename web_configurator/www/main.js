@@ -18,7 +18,6 @@
         tcp: '',
         telemetry: '',
         privacy: '',
-        rns_mtu: '',
         ack: ''
     };
     const DASHBOARD_REFRESH_MS = 1000;
@@ -27,27 +26,6 @@
         timer: null,
         loading: false
     };
-
-    const MAX_MSDU = [
-        /* 1MHz */ [ 700, 1450, 2200, 3000, 4500, 6050, 6800, 7600 ],
-        /* 2MHz */ [1600, 3200, 4900, 6500, 8192, 8192, 8192, 8192 ],
-        /* 4MHz */ [3400, 6800, 8192, 8192, 8192, 8192, 8192, 8192 ],
-        /* 8MHz */ [7400, 8192, 8192, 8192, 8192, 8192, 8192, 8192 ]
-    ];
-    const MCS10_MAX = 500;
-
-    function computeMtuMax(mcs, bandwidth) {
-        if (mcs === 10) return MCS10_MAX;
-        const bwRow = { '1 MHz': 0, '2 MHz': 1, '4 MHz': 2, '8 MHz': 3 }[bandwidth];
-        if (bwRow === undefined || mcs < 0 || mcs > 7) return '--';
-        return MAX_MSDU[bwRow][mcs];
-    }
-
-    function updateMtuMaxDisplay() {
-        const mcs = parseInt((document.getElementById('halow_mcs_index').value || '0').replace('MCS', ''), 10);
-        const bw = document.getElementById('halow_bandwidth').value;
-        setText('reticulum_mtu_max', computeMtuMax(mcs, bw));
-    }
 
     const nearbyState = {
         timer: null,
@@ -174,33 +152,6 @@
         };
     }
 
-    function readRnsMtuForm() {
-        return {
-            mtu: parseInt(document.getElementById('reticulum_link_mtu').value, 10) || 0
-        };
-    }
-
-    function validateRnsMtuField() {
-        const el = document.getElementById('reticulum_link_mtu');
-        const v = parseInt(el.value, 10);
-        const mcs = parseInt((document.getElementById('halow_mcs_index').value || '0').replace('MCS', ''), 10);
-        const bw = document.getElementById('halow_bandwidth').value;
-        const hwMax = computeMtuMax(mcs, bw);
-        const invalid = isNaN(v) || v < 500 || v > 29200 || (hwMax !== '--' && v > hwMax);
-        el.classList.toggle('error', invalid);
-        updateSaveButton('rns_mtu');
-    }
-
-    function isRnsMtuFormValid() {
-        const v = parseInt(document.getElementById('reticulum_link_mtu').value, 10);
-        if (isNaN(v) || v < 500 || v > 29200) return false;
-        const mcs = parseInt((document.getElementById('halow_mcs_index').value || '0').replace('MCS', ''), 10);
-        const bw = document.getElementById('halow_bandwidth').value;
-        const hwMax = computeMtuMax(mcs, bw);
-        if (hwMax !== '--' && v > hwMax) return false;
-        return true;
-    }
-
     function updateSaveButton(group) {
         let current = '';
         let btn = null;
@@ -249,11 +200,6 @@
             current = jsonSnapshot(readPrivacyForm());
             btn = document.getElementById('save_privacy');
         }
-        if (group === 'rns_mtu') {
-            current = jsonSnapshot(readRnsMtuForm());
-            btn = document.getElementById('save_rns_mtu');
-            isValid = isRnsMtuFormValid();
-        }
         if (group === 'ack') {
             current = jsonSnapshot(readAckForm());
             btn = document.getElementById('save_ack');
@@ -274,7 +220,6 @@
         if (group === 'tcp') { baselines.tcp = jsonSnapshot(readTcpForm()); }
         if (group === 'telemetry') { baselines.telemetry = jsonSnapshot(readTelemetryForm()); }
         if (group === 'privacy') { baselines.privacy = jsonSnapshot(readPrivacyForm()); }
-        if (group === 'rns_mtu') { baselines.rns_mtu = jsonSnapshot(readRnsMtuForm()); }
         if (group === 'ack') { baselines.ack = jsonSnapshot(readAckForm()); }
         updateSaveButton(group);
     }
@@ -288,7 +233,6 @@
         snapshotGroup('tcp');
         snapshotGroup('telemetry');
         snapshotGroup('privacy');
-        snapshotGroup('rns_mtu');
     }
 
     function setupDirtyTracking() {
@@ -309,7 +253,6 @@
                 ]
             },
             { group: 'privacy', btn: 'save_privacy', ids: ['privacy_mac_rotation', 'privacy_mac_broadcast'] },
-            { group: 'rns_mtu', btn: 'save_rns_mtu', ids: ['reticulum_link_mtu'] },
             { group: 'ack', btn: 'save_ack', ids: ['ack_retries', 'ack_rate_adapt', 'ack_ra_loss_up', 'ack_ra_loss_down', 'ack_agg', 'ack_bc_repeat'] }
         ];
 
@@ -611,10 +554,6 @@
         freqField.addEventListener('input', validateHalowFields);
 
         document.getElementById('halow_mcs_index').addEventListener('change', updateBandwidthDisabled);
-        document.getElementById('halow_mcs_index').addEventListener('change', updateMtuMaxDisplay);
-        document.getElementById('halow_mcs_index').addEventListener('change', validateRnsMtuField);
-        document.getElementById('halow_bandwidth').addEventListener('change', updateMtuMaxDisplay);
-        document.getElementById('halow_bandwidth').addEventListener('change', validateRnsMtuField);
         document.getElementById('save_halow').addEventListener('click', saveHalow);
 
         document.getElementById('save_lbt').addEventListener('click', saveLbt);
@@ -663,11 +602,8 @@
         document.getElementById('stat_reset_btn').addEventListener('click', resetStats);
 
         document.getElementById('save_privacy').addEventListener('click', savePrivacy);
-        document.getElementById('save_rns_mtu').addEventListener('click', saveRnsMtu);
         const saveAckBtn = document.getElementById('save_ack');
         if (saveAckBtn) saveAckBtn.addEventListener('click', saveAck);
-        document.getElementById('reticulum_link_mtu').addEventListener('input', validateRnsMtuField);
-        document.getElementById('reticulum_link_mtu').addEventListener('change', validateRnsMtuField);
 
         document.getElementById('privacy_mac_rotation').addEventListener('change', () => {
             if (document.getElementById('privacy_mac_rotation').value !== '0') {
@@ -786,18 +722,6 @@
         }
     }
 
-    async function loadRnsMtuConfig() {
-        try {
-            const res = await fetch('/api/rns_mtu_cfg');
-            if (!res.ok) return;
-            const data = await res.json();
-            setInput('reticulum_link_mtu', data.mtu || 0);
-            snapshotGroup('rns_mtu');
-        } catch (err) {
-            // ignore
-        }
-    }
-
     async function loadAckConfig() {
         try {
             const res = await fetch('/api/ack_cfg');
@@ -837,7 +761,6 @@
             state = await res.json();
             populateFromState();
             snapshotAll();
-            loadRnsMtuConfig();
             loadAckConfig();
             return true;
         } catch (err) {
@@ -1278,7 +1201,6 @@
 
             setText('nearby_self_mac', formatMac(data?.m ?? '--'));
             setText('nearby_count', total);
-            setText('nearby_tx_mcs', (data?.tx_mcs != null) ? ('MCS' + data.tx_mcs) : '--');
             nearbyState.rows = rows;
             renderNearby();
         } catch (err) {
@@ -1507,7 +1429,6 @@
         setSelect('halow_mcs_index', halow.mcs_index);
         setSelect('halow_bandwidth', halow.bandwidth);
         updateBandwidthDisabled();
-        updateMtuMaxDisplay();
 
         const cca = pick(state?.cca, state?.api_cca_cfg, state?.cca_cfg);
         setCheckbox('cca_en', cca.en ?? 1);
@@ -1688,18 +1609,6 @@
             console.error('savePrivacy error', err);
         }
         loadAll();
-    }
-
-    async function saveRnsMtu() {
-        const payload = readRnsMtuForm();
-        try {
-            await postJson('/api/rns_mtu_cfg', payload);
-        } catch (err) {
-            console.error('saveRnsMtu error', err);
-        }
-        loadAll();
-        loadRnsMtuConfig();
-        loadAckConfig();
     }
 
     function readAckForm() {

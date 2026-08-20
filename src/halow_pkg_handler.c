@@ -10,12 +10,11 @@
 #include "rns/stream_parser.h"
 #include "utils.h"
 #include "halow.h"
-#include "configdb.h"
 #include "tcp_server.h"
 
-#define RNS_MTU_LIMIT_KEY   CONFIGDB_ADD_MODULE("rns") ".mtu"
-#define RNS_MTU_LIMIT_DEF   (500U)
-#define RNS_MTU_CACHE_MS    5000u
+/* Reticulum link MTU is FIXED at 500 B: on-air packets look like ordinary
+ * LoRa-sized traffic; the ACK layer still glues them into large blocks. */
+#define RNS_LINK_MTU_FIXED  500u
 
 volatile uint32_t g_dbg_rns_rx_calls;
 volatile uint32_t g_dbg_rns_rx_parse_fail;
@@ -24,37 +23,11 @@ volatile uint32_t g_dbg_rns_rx_reg_ok;
 volatile uint32_t g_dbg_rns_rx_reg_fail;
 volatile uint32_t g_dbg_rns_tx_parse_fail;
 
-/* ================= RNS MTU limit (configdb, cached) ================= */
-
-static int16_t g_rns_mtu_cache;
-static uint64_t g_rns_mtu_cache_jiff;
-static bool g_rns_mtu_cache_valid;
-
-int16_t rns_mtu_limit_get( void ){
-    if( !g_rns_mtu_cache_valid ||
-        (os_jiffies() - g_rns_mtu_cache_jiff) >= os_msecs_to_jiffies(RNS_MTU_CACHE_MS) ){
-        int16_t val = RNS_MTU_LIMIT_DEF;
-        configdb_get_i16(RNS_MTU_LIMIT_KEY, &val);
-        g_rns_mtu_cache = val;
-        g_rns_mtu_cache_jiff = os_jiffies();
-        g_rns_mtu_cache_valid = true;
-    }
-    return g_rns_mtu_cache;
-}
-
-void rns_mtu_limit_set( int16_t mtu ){
-    configdb_set_i16(RNS_MTU_LIMIT_KEY, &mtu);
-    g_rns_mtu_cache = mtu;
-    g_rns_mtu_cache_jiff = os_jiffies();
-    g_rns_mtu_cache_valid = true;
-}
-
 /* ================= RF -> TCP ================= */
 
 static uint32_t link_mtu_limit( void ){
     uint32_t hw = halow_get_mtu(halow_cfg_mcs_get_cached());
-    uint32_t rl = (uint32_t)rns_mtu_limit_get();
-    return (rl < hw) ? rl : hw;
+    return ( RNS_LINK_MTU_FIXED < hw ) ? RNS_LINK_MTU_FIXED : hw;
 }
 
 static uint32_t link_effective_mtu( uint32_t advertised ){

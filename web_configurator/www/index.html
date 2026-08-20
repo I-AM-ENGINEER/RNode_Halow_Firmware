@@ -476,7 +476,6 @@
                     <tbody>
                     <tr><th>WiFi MAC</th><td id="nearby_self_mac">--</td></tr>
                     <tr><th>Heard devices</th><td id="nearby_count">--</td></tr>
-                    <tr><th>Default MCS index</th><td id="nearby_tx_mcs">--</td></tr>
                     </tbody>
                 </table>
 
@@ -513,15 +512,7 @@
             <div class="panel">
                 <h3>Reticulum</h3>
 
-                <label>
-                    <span>Link MTU (bytes)</span>
-                    <input type="number" id="reticulum_link_mtu" min="500" max="29200" step="1" value="500">
-                </label>
-                <p class="note">Max 802.11 payload size. Valid values: 500-<span id="reticulum_mtu_max">--</span> bytes.</p>
-
-                <div class="panel-actions">
-                    <button type="button" id="save_rns_mtu" disabled>Save</button>
-                </div>
+                <p class="note">Link MTU is fixed at 500 bytes.</p>
 
                 <table class="stats-table nearby-summary-table">
                     <tbody>

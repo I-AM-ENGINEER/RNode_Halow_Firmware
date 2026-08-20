@@ -1722,7 +1722,6 @@ static void fp_node_start( const halow_ack_config_t *cfg ){
     test_tcp_reset();
     test_vacancy_set(100000);
     test_malloc_reset();
-    rns_mtu_limit_set(500);
     rns_stream_decoder_init(&g_dec, fp_frame_cb);
     halow_pkg_handler_init();
     if( cfg != NULL ) halow_ack_config_apply(cfg);
@@ -1988,12 +1987,12 @@ static void t_fp_mtu_clamp( void ){
     uint16_t plen, wlen, consumed = 0;
     rns_link_db_link_t link;
     rns_link_packet_info_t info;
-    uint8_t link_id[16];
 
     cfg_base(&cfg);
     fp_node_start(&cfg);
 
-    /* advertise 1280 -> clamped to the 500 limit on the wire */
+    /* the link MTU is FIXED at 500: anything advertised above clamps down,
+     * anything below passes -- exactly min(advertised, 500) on the wire */
     plen = rns_lr_build(pkt, 0x77, 1280);
     wlen = slip_encode(stream, pkt, plen);
     CHECK( fp_feed(stream, wlen, &consumed) == 0 );
@@ -2003,7 +2002,13 @@ static void t_fp_mtu_clamp( void ){
     CHECK( rns_link_db_link_snapshot_by_id(info.link_id, &link) );
     CHECK( link.effective_mtu == 500 );
 
-    /* under the limit: left untouched */
+    test_tx_reset();
+    plen = rns_lr_build(pkt, 0x79, 5000);
+    wlen = slip_encode(stream, pkt, plen);
+    CHECK( fp_feed(stream, wlen, &consumed) == 0 );
+    CHECK( test_tx_count() == 1 );
+    CHECK( rns_lr_mtu_of(test_tx_at(0)->buf, test_tx_at(0)->len) == 500 );
+
     test_tx_reset();
     plen = rns_lr_build(pkt, 0x78, 300);
     wlen = slip_encode(stream, pkt, plen);
@@ -2011,23 +2016,12 @@ static void t_fp_mtu_clamp( void ){
     CHECK( test_tx_count() == 1 );
     CHECK( rns_lr_mtu_of(test_tx_at(0)->buf, test_tx_at(0)->len) == 300 );
 
-    /* limit raised to 2000: 5000 clamps to 2000, 1280 stays */
-    rns_mtu_limit_set(2000);
     test_tx_reset();
-    plen = rns_lr_build(pkt, 0x79, 5000);
+    plen = rns_lr_build(pkt, 0x7B, 500);
     wlen = slip_encode(stream, pkt, plen);
     CHECK( fp_feed(stream, wlen, &consumed) == 0 );
     CHECK( test_tx_count() == 1 );
-    CHECK( rns_lr_mtu_of(test_tx_at(0)->buf, test_tx_at(0)->len) == 2000 );
-
-    test_tx_reset();
-    plen = rns_lr_build(pkt, 0x7A, 1280);
-    wlen = slip_encode(stream, pkt, plen);
-    CHECK( fp_feed(stream, wlen, &consumed) == 0 );
-    CHECK( test_tx_count() == 1 );
-    CHECK( rns_lr_mtu_of(test_tx_at(0)->buf, test_tx_at(0)->len) == 1280 );
-
-    (void)link_id;
+    CHECK( rns_lr_mtu_of(test_tx_at(0)->buf, test_tx_at(0)->len) == 500 );
 }
 
 static void t_fp_bundle_glue( void ){
@@ -2160,7 +2154,6 @@ static void t_fp_two_x_2000_bundle( void ){
 
     cfg_base(&cfg);
     fp_node_start(&cfg);
-    rns_mtu_limit_set(2000);
 
     plen[0] = rns_pkt_build(pkt[0], 0x60, 0x60, 100, RNS_PACKET_TYPE_DATA, RNS_DESTINATION_TYPE_LINK);
     n = slip_encode(stream, pkt[0], plen[0]);
@@ -2333,7 +2326,6 @@ static void t_fp_roundtrip_soak( void ){
     cfg_base(&cfg);
     cfg.window = 16;
     fp_node_start(&cfg);
-    rns_mtu_limit_set(2000);
 
     /* packet 0: broadcast warmup (learns the peer MAC on delivery) */
     plen[0] = rns_pkt_build(pkt[0], 0x01, 0x01, 111, RNS_PACKET_TYPE_DATA, RNS_DESTINATION_TYPE_LINK);

@@ -272,6 +272,10 @@ Max ACK-tracked frame: payload sum 4000 B per bundle (`HALOW_ACK_AGG_PAYLOAD_MAX
 2x2000 or 8x500 MTU packets), wire cap ACK_WIRE_MAX = 4000+6+16 = 4022. Bigger
 frames go out untracked/broadcast. Single max-size sub unwraps to plain on flush.
 
+Reticulum link MTU is FIXED at 500 B (RNS_LINK_MTU_FIXED in halow_pkg_handler.c,
+no configdb key, /api/rns_mtu_cfg removed): 500-B packets look like ordinary
+LoRa traffic on air and still glue into large blocks in the ACK layer.
+
 Aggregation never waits (no gap/hold timers — removed with cfg ver 4): frames
 glue while lwIP has bytes, the bundle leaves the moment it is full, and
 `halow_ack_flush()` (called from tcp_server.c when netconn_recv returns

@@ -1459,27 +1459,6 @@ int32_t web_api_nearby_modems_get( const cJSON *in, cJSON *out ){
     return WEB_API_RC_OK;
 }
 
-int32_t web_api_rns_mtu_cfg_get( const cJSON *in, cJSON *out ){
-    (void)in;
-    if (out == NULL) return WEB_API_RC_BAD_REQUEST;
-    (void)cJSON_AddNumberToObject(out, "mtu", (double)rns_mtu_limit_get());
-    return WEB_API_RC_OK;
-}
-
-int32_t web_api_rns_mtu_cfg_post( const cJSON *in, cJSON *out ){
-    int v;
-    if (json_get_int(in, "mtu", &v)) {
-        /* clamp mirroring the UI */
-        if (v >= 500 && v <= 2048) {
-            rns_mtu_limit_set((int16_t)v);
-        }else{
-            log_warn("rns_mtu post out of range (%d), ignored", v);
-        }
-    }
-
-    return web_api_rns_mtu_cfg_get(NULL, out);
-}
-
 int32_t web_api_ack_cfg_get( const cJSON *in, cJSON *out ){
     halow_ack_config_t cfg;
     (void)in;
