@@ -52,13 +52,9 @@ clean:
 	-rm -fv ./build/Debug/*.hex ./build/Debug/*.bin ./build/Debug/*.s19
 	-rm -rfv ./build/Debug/.obj
 
-# Bump the per-build counter + regenerate inc/build_info_gen.h on every make
-# invocation. $(shell) runs at parse time, before any target; stderr is
-# discarded so a counter-file hiccup never breaks the build.
-_ := $(shell sh pack/bump_build.sh 2>/dev/null)
-
 prebuild:
 	@printf "$(COLOR_INF)prebuild ...$(COLOR_END)\n"
+	python pack/build_info.py beta
 	rm -rf "out" && mkdir "out"
 
 ./build/Debug/.obj/csky/csi_kernel/rhino/adapter:

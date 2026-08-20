@@ -1,6 +1,7 @@
 // TODO
 // Checksum cheking
 #include "sys_config.h"
+#include "build_info_gen.h"
 //#define LOG_LOCAL_LEVEL     LOG_LEVEL_OTA
 #include "lib/logc/log.h"
 
@@ -436,7 +437,7 @@ static int ota_cmd_get_ip( struct netif *nif, uint8_t *data, uint32_t len ){
     resp.mask = mask;
 
     resp.version[0] = 0;
-    strncpy(resp.version, FW_FULL_VERSION, sizeof(resp.version) - 1);
+    strncpy(resp.version, FW_BUILD_VERSION, sizeof(resp.version) - 1);
     resp.version[sizeof(resp.version) - 1] = 0;
 
     struct pbuf *p = pbuf_alloc(PBUF_RAW, (uint16_t)sizeof(resp), PBUF_RAM);

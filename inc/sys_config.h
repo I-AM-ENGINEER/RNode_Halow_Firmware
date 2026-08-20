@@ -3,7 +3,6 @@
 
 #define PROJECT_TYPE           PRO_TYPE_WNB
 #define FW_VERSION              "2.3.0"
-#define FW_FULL_VERSION         FW_VERSION " (" __DATE__ " " __TIME__ ")"
 
 #define IP_SOF_BROADCAST       1
 #define LWIP_RAW               1

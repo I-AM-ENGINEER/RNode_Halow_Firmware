@@ -1,5 +1,6 @@
 #define LOG_LOCAL_LEVEL LOG_DEBUG
 #include "lib/logc/log.h"
+#include "build_info_gen.h"
 #include "basic_include.h"
 #include "lib/lmac/lmac.h"
 #include "lib/skb/skb.h"
@@ -264,7 +265,7 @@ sysevt_hdl_res sys_event_hdl(uint32 event_id, uint32 data, uint32 priv) {
 
 static uint32_t firmware_build_hash( void ){
     uint32_t hash = 0x811C9DC5;
-    const char *s = FW_FULL_VERSION;
+    const char *s = FW_BUILD_VERSION;
 
     while (*s) {
         hash ^= (uint8_t)(*s++);
