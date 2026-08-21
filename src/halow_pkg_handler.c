@@ -44,8 +44,6 @@ static bool peer_mac_known( const uint8_t mac[6] ){
 static void deliver_rns_frame( const uint8_t *pkg, uint16_t len,
                                const uint8_t *src_mac, bool unicast_to_me ){
     rns_link_packet_info_t packet_info;
-    uint8_t *allocated_rx = NULL;
-    uint32_t allocated_len = 0u;
 
     int32_t res = rns_link_parser_parse(pkg, len, &packet_info);
     if( res != RNS_RET_OK ){
@@ -69,19 +67,27 @@ static void deliver_rns_frame( const uint8_t *pkg, uint16_t len,
         else                   g_dbg_rns_rx_reg_fail++;
     }
 
-    res = rns_stream_encode_alloc(pkg, len, &allocated_rx, &allocated_len);
-    if( res != 0 || allocated_rx == NULL || allocated_len == 0u ){
-        log_warn("rx rns tcp encoding fail res=%d in_len=%u out_len=%u",
-                 (int)res, (unsigned int)len, (unsigned int)allocated_len);
-        return;
+    /* SLIP-encode straight into one os_malloc'd buffer and hand OWNERSHIP to
+     * the TX ring: no second allocation, no memcpy (send_owned frees it after
+     * netconn_write, or here on ring-full). One size scan + one write. */
+    {
+        uint32_t esc = rns_stream_escape_size(pkg, len);
+        uint32_t frame_len = esc + 2u;
+        uint8_t *frame = os_malloc(frame_len);
+
+        if( frame == NULL ){
+            log_warn("rx rns tcp alloc fail len=%u", (unsigned int)frame_len);
+            return;
+        }
+        frame[0] = 0x7Eu;   /* SLIP FLAG */
+        rns_stream_escape_write(frame + 1u, pkg, len);
+        frame[frame_len - 1u] = 0x7Eu;
+        if( tcp_server_send_owned(frame, frame_len) != 0 ){
+            extern halow_tx_dbg_t g_tx_dbg;
+            g_tx_dbg.rf_tcp_dropped++;
+            log_warn("rf->tcp ring full, drop len=%u", (unsigned int)frame_len);
+        }
     }
-    res = tcp_server_send(allocated_rx, allocated_len);
-    if( res != 0 ){
-        extern halow_tx_dbg_t g_tx_dbg;
-        g_tx_dbg.rf_tcp_dropped++;
-        log_warn("rf->tcp ring full res=%d, drop len=%u", (int)res, (unsigned int)allocated_len);
-    }
-    free(allocated_rx);
 }
 
 static bool bundle_walk_valid( const uint8_t *pkg, uint16_t len,

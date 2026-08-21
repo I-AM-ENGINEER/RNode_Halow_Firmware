@@ -103,9 +103,13 @@ static volatile uint32_t g_sink;
  * copies are outside this bench. */
 extern void *__real_memcpy(void *, const void *, size_t);
 uint32_t g_mc_calls, g_mc_bytes;
+uint32_t g_mc_mis_big;   /* copies >64 B with (src|dst)%4 != 0 */
 void *__wrap_memcpy( void *d, const void *s, size_t n ){
     g_mc_calls++;
     g_mc_bytes += (uint32_t)n;
+    if( n > 64u && ((((uint32_t)(uintptr_t)d) | ((uint32_t)(uintptr_t)s)) & 3u) != 0u ){
+        g_mc_mis_big++;
+    }
     return __real_memcpy(d, s, n);
 }
 
@@ -115,8 +119,8 @@ static void sim_time_init( void ){
     SIM_TIMER[2] = 7u;              /* EN | periodic | irq masked */
     (void)SIM_TIMER[3];             /* EOI */
 }
-static uint32_t g_mc0, g_mb0;
-#define TK_BEGIN() do{ g_tk0 = SIM_TIMER[1]; g_mc0 = g_mc_calls; g_mb0 = g_mc_bytes; }while(0)
+static uint32_t g_mc0, g_mb0, g_mm0;
+#define TK_BEGIN() do{ g_tk0 = SIM_TIMER[1]; g_mc0 = g_mc_calls; g_mb0 = g_mc_bytes; g_mm0 = g_mc_mis_big; }while(0)
 static void tk_report( const char *name, uint32_t iters, uint32_t payload_bytes ){
     uint32_t d = g_tk0 - SIM_TIMER[1];
     uint32_t cyc_op = (iters != 0u && d >= iters) ? d / iters : 0u;
@@ -128,9 +132,10 @@ static void tk_report( const char *name, uint32_t iters, uint32_t payload_bytes 
         uint64_t kbps = ((uint64_t)payload_bytes * 8ull * 128000ull) / cyc_op;
         printf(" kbps128=%u", (unsigned)kbps);
     }
-    printf(" mc_op=%u mcb_op=%u\n",
+    printf(" mc_op=%u mcb_op=%u mc_mis_op=%u\n",
            (iters != 0u) ? (g_mc_calls - g_mc0) / iters : 0u,
-           (iters != 0u) ? (g_mc_bytes - g_mb0) / iters : 0u);
+           (iters != 0u) ? (g_mc_bytes - g_mb0) / iters : 0u,
+           (iters != 0u) ? (g_mc_mis_big - g_mm0) / iters : 0u);
 }
 
 enum { PKT_N = 64, PLAIN_LEN = 500 };
@@ -281,6 +286,70 @@ int main( void ){
             printf("stage:tx_plain stats outstanding=%u acked=%u retx=%u env=%u drops=%u\n",
                    (unsigned)st.outstanding, (unsigned)st.acked,
                    (unsigned)st.retransmitted, (unsigned)st.env_tx_bundles,
+                   (unsigned)st.dropped);
+        }
+    }
+
+    /* ---- stage 5b: full TX pipeline, MULTI-SUB bundles (production shape:
+     * the real tcps loop only flushes on WOULDBLOCK/window-full, so bundles
+     * carry 7-8 subs; stage 5 flushes per packet = always 1 sub, always
+     * aligned staging) ---- */
+    printf("stage:tx_agg iters=3780\n");
+    rns_stream_decoder_init(&g_dec, bench_tx_cb);
+    {
+        int acked_upto = 0;
+        uint16_t consumed = 0;
+
+        (void)rns_stream_decoder_process(&g_dec, g_slip[0], g_slen[0], NULL, &consumed);
+        halow_ack_flush();
+        halow_pkg_handler_rf_to_tcp((uint8_t *)test_tx_at(0)->buf, test_tx_at(0)->len,
+                                    PEER, MAC_ME, EVM_M10);
+        test_tx_reset();
+
+        TK_BEGIN();
+        for( int k = 0; k < 60; k++ ){
+            for( int i = 1; i < PKT_N; i++ ){
+                uint32_t off = 0;
+                while( off < g_slen[i] ){
+                    consumed = 0;
+                    int32_t rr = rns_stream_decoder_process(&g_dec, &g_slip[i][off],
+                                                            (uint16_t)(g_slen[i] - off),
+                                                            NULL, &consumed);
+                    if( rr != HALOW_ACK_TX_THROTTLE ){
+                        off += (consumed != 0u) ? consumed : (uint16_t)(g_slen[i] - off);
+                        continue;
+                    }
+                    if( consumed != 0u ){ off += consumed; continue; }
+                    /* no tick here: the tick's hold-timer flushes staging and
+                     * would collapse bundles to 1 sub; at 0% loss ACKs alone
+                     * free the window (production shape: ticks are rare vs
+                     * packet rate) */
+                    ack_new_frames(&acked_upto);
+                    if( rns_stream_decoder_retry_held(&g_dec, NULL) == HALOW_ACK_TX_THROTTLE ){
+                        ack_new_frames(&acked_upto);
+                    }
+                }
+            }
+            halow_ack_flush();      /* ONE flush per 63 packets */
+            ack_new_frames(&acked_upto);
+            if( k == 59 ){  /* wire shape of the last block, outside timing */
+                int big = 0, small = 0;
+                for( int q = 0; q < test_tx_count() && q < TEST_TX_CAP_N; q++ ){
+                    if( test_tx_at(q)->len > 1000 ) big++; else small++;
+                }
+                printf("stage:tx_agg wire big=%d small=%d total=%d\n",
+                       big, small, test_tx_count());
+            }
+            test_tx_reset();
+            acked_upto = 0;
+        }
+        tk_report("tx_agg", 3780u, 500u);
+        {
+            halow_ack_stats_t st;
+            halow_ack_stats_get(&st);
+            printf("stage:tx_agg stats outstanding=%u acked=%u retx=%u bundles=%u drops=%u\n",
+                   (unsigned)st.outstanding, (unsigned)st.acked,
+                   (unsigned)st.retransmitted, (unsigned)st.tx_frames,
                    (unsigned)st.dropped);
         }
     }

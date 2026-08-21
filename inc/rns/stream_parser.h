@@ -32,6 +32,19 @@ int32_t rns_stream_decoder_retry_held( rns_stream_decoder_t *decoder, void *user
  * *consumed reports the taken bytes -- the caller must re-feed the tail. */
 int32_t rns_stream_decoder_process( rns_stream_decoder_t *decoder, const uint8_t *data, uint16_t data_len, void *user, uint16_t *consumed );
 
+/* Escaped size of payload (scan only). */
+uint32_t rns_stream_escape_size( const uint8_t *payload, uint32_t payload_len );
+
+/* Escape payload into dst; dst MUST hold rns_stream_escape_size() bytes. */
+void rns_stream_escape_write( uint8_t *dst, const uint8_t *payload, uint32_t payload_len );
+
+/* SLIP-frame payload into dst: FLAG + escaped payload + FLAG. Returns the
+ * total frame length; when dst is NULL or dst_cap is too small, nothing is
+ * written and the REQUIRED length is returned -- size-first, then encode
+ * into a caller buffer (no malloc inside). */
+uint32_t rns_stream_encode_frame( uint8_t *dst, uint32_t dst_cap,
+                                  const uint8_t *payload, uint32_t payload_len );
+
 int32_t rns_stream_encode_alloc(
     const uint8_t *payload,
     uint32_t payload_len,

@@ -529,43 +529,71 @@ void tcp_server_init( tcp_server_rx_cb_t cb ){
     log_info("tcp server init ok");
 }
 
-int32_t tcp_server_send( const uint8_t *data, uint32_t len ){
-    int32_t res;
+/* mutex HELD: descriptor push, buffer ownership transfers to the ring */
+static int32_t tcp_server_push_owned_locked( uint8_t *os_buf, uint32_t len ){
     struct rb_tx_package pkg;
     uint32_t writen;
 
     /* Check free space INSIDE the mutex: a TOCTOU here could let lwrb_write
      * do a PARTIAL write, leaving a torn rb_tx_package in the ring. */
-    res = os_mutex_lock(&g_tx_rb_mutex, 0);
-    if( res != 0 ){
-        return -3;
-    }
     if( lwrb_get_free(&g_tx_rb) < sizeof(pkg) ){
-        os_mutex_unlock(&g_tx_rb_mutex);
+        os_free(os_buf);
         log_trace("send queue full");
         return -1;
     }
 
-    pkg.data = os_malloc(len);
-    if( pkg.data == NULL ){
-        os_mutex_unlock(&g_tx_rb_mutex);
-        log_warn("send malloc failed len=%u", (unsigned)len);
-        return -2;
-    }
-
-    memcpy(pkg.data, data, len);
+    pkg.data = os_buf;
     pkg.len = len;
 
     writen = lwrb_write(&g_tx_rb, &pkg, sizeof(pkg));
     if( writen != sizeof(pkg) ){
-        os_free(pkg.data);
-        os_mutex_unlock(&g_tx_rb_mutex);
+        os_free(os_buf);
         log_warn("send rb write failed wr=%u need=%u",
                  (unsigned)writen,
                  (unsigned)sizeof(pkg));
         return -4;
     }
 
-    os_mutex_unlock(&g_tx_rb_mutex);
     return 0;
+}
+
+/* Zero-copy: the ring takes ownership of os_buf (os_malloc'd). On success it
+ * is freed by the tcps task after netconn_write; on failure it is freed
+ * here. Either way the caller must not touch/free it afterwards. */
+int32_t tcp_server_send_owned( uint8_t *os_buf, uint32_t len ){
+    int32_t res;
+
+    if( os_buf == NULL ){
+        return -2;
+    }
+
+    res = os_mutex_lock(&g_tx_rb_mutex, 0);
+    if( res != 0 ){
+        os_free(os_buf);
+        return -3;
+    }
+    res = tcp_server_push_owned_locked(os_buf, len);
+    os_mutex_unlock(&g_tx_rb_mutex);
+    return res;
+}
+
+int32_t tcp_server_send( const uint8_t *data, uint32_t len ){
+    uint8_t *buf;
+    int32_t res;
+
+    if( data == NULL ){
+        return -2;
+    }
+    buf = os_malloc(len);
+    if( buf == NULL ){
+        log_warn("send malloc failed len=%u", (unsigned)len);
+        return -2;
+    }
+    memcpy(buf, data, len);
+    res = tcp_server_send_owned(buf, len);
+    if( res != 0 ){
+        /* send_owned freed the buffer on failure */
+        log_trace("send owned push failed res=%d", (int)res);
+    }
+    return res;
 }

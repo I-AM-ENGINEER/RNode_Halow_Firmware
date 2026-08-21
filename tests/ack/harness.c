@@ -184,6 +184,19 @@ int32_t tcp_server_send(const uint8_t *data, uint32_t len){
     return 0;
 }
 
+/* Mirrors the firmware contract: the ring takes ownership of the os_malloc'd
+ * buffer and frees it on every exit path (the real tcps task frees it after
+ * netconn_write; the harness has no async writer, so free right after the
+ * capture copy). */
+int32_t tcp_server_send_owned(uint8_t *os_buf, uint32_t len){
+    int32_t r;
+
+    if( os_buf == NULL ) return -2;
+    r = tcp_server_send(os_buf, len);
+    os_free(os_buf);
+    return r;
+}
+
 static uint32_t g_stat_tx_pkgs;
 void statistics_radio_register_tx_package(uint16_t len){ (void)len; g_stat_tx_pkgs++; }
 

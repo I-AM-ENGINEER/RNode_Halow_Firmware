@@ -214,6 +214,17 @@ void free( void *p ){
     if( b->used ) b->used = 0;
 }
 
+/* -O2 turns malloc+memset into calloc (matches the firmware's _os_calloc) */
+void *calloc( size_t n, size_t sz ){
+    void *p = malloc(n * sz);
+    if( p != NULL ){
+        uint8_t *d = (uint8_t *)p;
+        size_t total = n * sz;
+        while( total-- ) *d++ = 0;
+    }
+    return p;
+}
+
 void c_start( void ){
     uint32_t *p = (uint32_t *)&__bss_start;
     uint32_t *e = (uint32_t *)&__bss_end;
