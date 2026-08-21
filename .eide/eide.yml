@@ -116,6 +116,11 @@ targets:
           asm-compiler:
             ASM_FLAGS: -mcpu=ck803 -g -pipe -D__NO_BOARD_INIT -DTXW4002ACK803
           beforeBuildTasks:
+            - name: Small tests
+              abortAfterFailed: false
+              command: python tests/ack/run_small.py
+              disable: false
+              stopBuildAfterFailed: true
             - name: Build info
               abortAfterFailed: false
               command: python pack/build_info.py beta
@@ -262,6 +267,11 @@ targets:
           asm-compiler:
             ASM_FLAGS: -mcpu=ck803 -pipe -D__NO_BOARD_INIT -DTXW4002ACK803
           beforeBuildTasks:
+            - name: Small tests
+              abortAfterFailed: false
+              command: python tests/ack/run_small.py
+              disable: false
+              stopBuildAfterFailed: true
             - name: Build info
               abortAfterFailed: false
               command: python pack/build_info.py release
