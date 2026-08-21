@@ -110,8 +110,8 @@ For full debugging, use a Blue Pill flashed as CKLink. The chip **must** be STM3
 Requirements: DebugServer + GDB, CKLink debugger connected.
 
 ```bash
-python flash.py                        # flash firmware
-python flashlog.py --port COM3 -n 500  # flash + capture boot logs
+python utils/flash.py                        # flash firmware
+python utils/flashlog.py --port COM3 -n 500  # flash + capture boot logs
 ```
 
 Tool paths are read from env vars `CSKY_DEBUGSERVER`, `CSKY_GDB` (and `CSKY_MINGW_BIN` on Windows). Defaults are in `utils/flash_env.sh`.
@@ -228,8 +228,8 @@ IP адресс можно узнать через DHCP сервер на роу
 Требования: DebugServer + GDB, подключенный CKLink.
 
 ```bash
-python flash.py                        # прошить прошивку
-python flashlog.py --port COM3 -n 500  # прошить + захватить логи загрузки
+python utils/flash.py                        # прошить прошивку
+python utils/flashlog.py --port COM3 -n 500  # прошить + захватить логи загрузки
 ```
 
 Пути к инструментам берутся из переменных окружения `CSKY_DEBUGSERVER`, `CSKY_GDB` (и `CSKY_MINGW_BIN` на Windows). По умолчанию — из `utils/flash_env.sh`.

@@ -45,3 +45,7 @@ build_number.txt
 ga*.json
 nm*.json
 **/build_q/
+
+# local-only: agent MCP config and host utility scripts
+.mcp.json
+/utils/

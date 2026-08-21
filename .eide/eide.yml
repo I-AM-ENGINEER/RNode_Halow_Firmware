@@ -155,7 +155,7 @@ targets:
     uploadConfigMap:
       Custom:
         bin: ""
-        commandLine: python ${workspaceFolder}/flash.py --elf ${OutDir}/${ProjectName}.elf
+        commandLine: python ${workspaceFolder}/utils/flash.py --elf ${OutDir}/${ProjectName}.elf
         eraseChipCommand: ""
       JLink:
         baseAddr: ""
@@ -306,7 +306,7 @@ targets:
     uploadConfigMap:
       Custom:
         bin: ""
-        commandLine: python ${workspaceFolder}/flash.py --elf ${OutDir}/${ProjectName}.elf
+        commandLine: python ${workspaceFolder}/utils/flash.py --elf ${OutDir}/${ProjectName}.elf
         eraseChipCommand: ""
       JLink:
         baseAddr: ""
