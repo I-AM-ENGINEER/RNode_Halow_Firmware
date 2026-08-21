@@ -1707,6 +1707,7 @@ static void t_edge_rapid_reconfig( void ){
 #include "rns/stream_parser.h"
 #include "rns/link_db.h"
 #include "rns/link_parser.h"
+#include "rns/link_utils.h"
 
 static rns_stream_decoder_t g_dec;
 
@@ -2473,6 +2474,962 @@ static void t_fp_tcp_ring_full( void ){
     CHECK( test_tcp_count() == 1 );
 }
 
+
+/* ============ virtual RF channel: lossy full round-trip ============ */
+
+typedef struct {
+    uint8_t  drop_pct;
+    uint32_t lcg;
+    uint32_t sent;
+    uint32_t dropped;
+    int      cursor;
+} vchan_t;
+
+static bool vchan_loss( vchan_t *c ){
+    c->lcg = c->lcg * 1103515245u + 12345u;
+    return ((c->lcg >> 16u) % 100u) < c->drop_pct;
+}
+
+/* Closed-loop model over the TX capture ring: data frames are RECEIVED by
+ * the peer (rf_to_tcp, which queues the peer's ACKs back on the ring),
+ * ACK frames come back to the sender (halow_ack_on_rx). Every frame crosses
+ * the lossy channel first. */
+static void vlink_pump( vchan_t *c ){
+    while( c->cursor < test_tx_count() && c->cursor < TEST_TX_CAP_N ){
+        const test_tx_cap_t *t = test_tx_at(c->cursor++);
+        if( t == NULL || t->len == 0 || t->len > TEST_TX_CAP_LEN ) continue;
+        bool internal = halow_ack_is_internal_frame(t->buf, t->len);
+        c->sent++;
+        if( vchan_loss(c) ){ c->dropped++; continue; }
+        if( internal ){
+            const uint8_t *o = NULL;
+            uint16_t ol = 0;
+            (void)halow_ack_on_rx(t->buf, t->len, t->mac, MAC_ME, 0, &o, &ol);
+        }else{
+            /* data frames count as peer traffic at the far node: the source
+             * is the PEER, never the frame's own dest (a broadcast frame
+             * must not register FF:FF:.. as the link's remote MAC) */
+            halow_pkg_handler_rf_to_tcp((uint8_t *)t->buf, t->len,
+                                        PEER_A, MAC_ME, EVM_M10);
+        }
+    }
+}
+
+static void vlink_run( vchan_t *c, uint32_t ms ){
+    for( uint32_t t = 0; t < ms; t += 5u ){
+        test_advance_ms(5);
+        halow_ack_tick();
+        vlink_pump(c);
+    }
+}
+
+/* feed TCP bytes; when the TX path THROTTLEs, let virtual time run so the
+ * lossy channel can return ACKs and free slots, then resume */
+static void vlink_feed( vchan_t *c, const uint8_t *data, uint16_t len ){
+    uint32_t off = 0;
+    int guard = 0;
+    while( off < len ){
+        uint16_t consumed = 0;
+        int32_t r = fp_feed(&data[off], (uint16_t)(len - off), &consumed);
+        if( r != HALOW_ACK_TX_THROTTLE ){
+            off += (consumed != 0u) ? consumed : (uint16_t)(len - off);
+            continue;
+        }
+        if( consumed != 0u ){
+            off += consumed;
+            continue;
+        }
+        CHECK( ++guard < 5000 );
+        vlink_run(c, 25);
+        if( rns_stream_decoder_retry_held(&g_dec, NULL) == HALOW_ACK_TX_THROTTLE ){
+            vlink_run(c, 25);
+        }
+    }
+}
+
+/* Pipeline adds ZERO virtual time when nothing is lost: feed -> bundle ->
+ * wire -> receive -> decode -> TCP all happen at the same jiffy, and no
+ * os_sleep is ever called on the synchronous path. */
+static void t_vlink_zero_wait_invariant( void ){
+    halow_ack_config_t cfg;
+    static uint8_t pkt[520];
+    static uint8_t stream[1100];
+    uint16_t plen, wlen;
+    uint64_t j0, j1;
+    uint32_t sleeps0;
+    vchan_t vc;
+
+    cfg_base(&cfg);
+    fp_node_start(&cfg);
+    memset(&vc, 0, sizeof(vc));
+
+    plen = rns_pkt_build(pkt, 0xC1, 0xC1, 400, RNS_PACKET_TYPE_DATA, RNS_DESTINATION_TYPE_LINK);
+    wlen = slip_encode(stream, pkt, plen);
+
+    j0 = test_time_jiff();
+    sleeps0 = test_sleep_calls();
+    vlink_feed(&vc, stream, wlen);
+    fp_idle();
+    vlink_pump(&vc);
+    j1 = test_time_jiff();
+
+    CHECK( j0 == j1 );
+    CHECK( test_sleep_calls() == sleeps0 );
+    CHECK( test_tcp_count() == 1 );
+    CHECK( test_tcp_at(0)->at_jiff == j0 );
+    {
+        slipdec_t dec;
+        slipdec_init(&dec);
+        slipdec_feed(&dec, test_tcp_at(0)->buf, test_tcp_at(0)->len);
+        CHECK( dec.n == 1 );
+        CHECK( dec.len[0] == plen );
+        CHECK( memcmp(dec.buf[0], pkt, plen) == 0 );
+    }
+}
+
+/* full pipeline over a 20% loss channel: every packet delivered exactly
+ * once, in order, byte-exact; retries absorb all losses; heap drains */
+static void t_vlink_lossy_roundtrip( void ){
+    halow_ack_config_t cfg;
+    enum { N = 100 };
+    static uint8_t pkt[N][520];
+    static uint8_t stream[4 * 1100];
+    static slipdec_t dec;
+    uint16_t plen[N];
+    vchan_t vc;
+    halow_ack_stats_t st;
+
+    cfg_base(&cfg);
+    cfg.window = 16;
+    cfg.timeout_ms = 40;
+    cfg.max_retries = 8;
+    cfg.ack_fids = 4;
+    fp_node_start(&cfg);
+    memset(&vc, 0, sizeof(vc));
+    vc.drop_pct = 20;
+    slipdec_init(&dec);
+
+    /* warmup: learn the peer MAC over the lossy channel (the first frame
+     * rides the untracked broadcast path -- re-feed until it gets through) */
+    plen[0] = rns_pkt_build(pkt[0], 0xC2, 0xC2, 300, RNS_PACKET_TYPE_DATA, RNS_DESTINATION_TYPE_LINK);
+    for( int k = 0; k < 40 && test_tcp_count() == 0; k++ ){
+        vlink_feed(&vc, stream, slip_encode(stream, pkt[0], plen[0]));
+        fp_idle();
+        vlink_run(&vc, 60);
+    }
+    CHECK( test_tcp_count() == 1 );
+    test_tcp_reset();
+    test_tx_reset();
+    vc.cursor = 0;
+
+    for( int i = 1; i < N; ){
+        uint32_t n = 0;
+        for( uint8_t k = 0; k < 4 && i < N; k++, i++ ){
+            plen[i] = rns_pkt_build(pkt[i], 0xC2, (uint8_t)i, 481,
+                                    RNS_PACKET_TYPE_DATA, RNS_DESTINATION_TYPE_LINK);
+            n += slip_encode(&stream[n], pkt[i], plen[i]);
+        }
+        vlink_feed(&vc, stream, (uint16_t)n);
+        fp_idle();
+        vlink_run(&vc, 15);
+    }
+    vlink_run(&vc, 6000);   /* drain: slot lifetime is capped at 6 s */
+
+    halow_ack_stats_get(&st);
+    CHECK( st.outstanding == 0 );
+    CHECK( st.dropped <= 3 );                    /* rare all-retry loss streaks */
+    CHECK( st.tx_frames >= (uint32_t)N );       /* + warmup re-feed attempts */
+    CHECK( st.acked >= 5 );                     /* bundles ACKed through loss */
+    CHECK( st.retransmitted >= 3 );             /* losses actually happened */
+    CHECK( st.heap_bytes == 0 );
+
+    for( int i = 0; i < test_tcp_count(); i++ ){
+        slipdec_feed(&dec, test_tcp_at(i)->buf, test_tcp_at(i)->len);
+    }
+    CHECK( dec.n <= N - 1 );
+    {
+        /* retransmits may reorder wire frames; "dropped" means the ACK never
+         * came back (the data itself may still have been delivered), so the
+         * hard invariants are: every packet delivered AT MOST once, almost
+         * all delivered at least once, undelivered only among the dropped */
+        int undelivered = 0;
+        for( int i = 1; i < N; i++ ){
+            int hits = 0;
+            for( int k = 0; k < dec.n && hits <= 1; k++ ){
+                if( dec.len[k] == plen[i] && memcmp(dec.buf[k], pkt[i], plen[i]) == 0 )
+                    hits++;
+            }
+            CHECK( hits <= 1 );
+            if( hits == 0 ) undelivered++;
+        }
+        CHECK( undelivered <= (int)st.dropped );
+        CHECK( (int)st.dropped - undelivered <= 3 );
+    }
+}
+
+/* brutal loss: retries exhaust, the dropped frames are counted, everything
+ * else arrives exactly once (no dups despite retransmits + dup ACKs) */
+static void t_vlink_lossy_deadline( void ){
+    halow_ack_config_t cfg;
+    enum { N = 12 };
+    static uint8_t pkt[N][520];
+    static uint8_t stream[1100];
+    static slipdec_t dec;
+    uint16_t plen[N];
+    vchan_t vc;
+    halow_ack_stats_t st;
+
+    cfg_base(&cfg);
+    cfg.window = 8;
+    cfg.timeout_ms = 15;
+    cfg.max_retries = 2;
+    cfg.agg = 0;
+    fp_node_start(&cfg);
+    memset(&vc, 0, sizeof(vc));
+    vc.drop_pct = 70;
+    slipdec_init(&dec);
+
+    plen[0] = rns_pkt_build(pkt[0], 0xC3, 0xC3, 300, RNS_PACKET_TYPE_DATA, RNS_DESTINATION_TYPE_LINK);
+    for( int k = 0; k < 40 && test_tcp_count() == 0; k++ ){
+        vlink_feed(&vc, stream, slip_encode(stream, pkt[0], plen[0]));
+        fp_idle();
+        vlink_run(&vc, 60);
+    }
+    CHECK( test_tcp_count() == 1 );
+    test_tcp_reset();
+    test_tx_reset();
+    vc.cursor = 0;
+
+    for( int i = 1; i < N; i++ ){
+        plen[i] = rns_pkt_build(pkt[i], 0xC3, (uint8_t)(i + 1), 400,
+                                RNS_PACKET_TYPE_DATA, RNS_DESTINATION_TYPE_LINK);
+        vlink_feed(&vc, stream, slip_encode(stream, pkt[i], plen[i]));
+        fp_idle();
+        vlink_run(&vc, 40);
+    }
+    vlink_run(&vc, 1500);
+
+    halow_ack_stats_get(&st);
+    CHECK( st.outstanding == 0 );
+    CHECK( st.drop_exhaust >= 1 );
+    CHECK( st.dropped == st.drop_exhaust + st.drop_deadline );
+
+    for( int i = 0; i < test_tcp_count(); i++ ){
+        slipdec_feed(&dec, test_tcp_at(i)->buf, test_tcp_at(i)->len);
+    }
+    CHECK( dec.n >= 1 );
+    CHECK( dec.n <= N - 1 );
+    {
+        /* every packet delivered at most once; the undelivered set is a
+         * subset of the dropped set (a frame can be delivered yet die for
+         * lack of ACK) */
+        int undelivered = 0;
+        for( int idx = 1; idx < N; idx++ ){
+            int hits = 0;
+            for( int k = 0; k < dec.n && hits <= 1; k++ ){
+                if( dec.len[k] == plen[idx] &&
+                    memcmp(dec.buf[k], pkt[idx], plen[idx]) == 0 ) hits++;
+            }
+            CHECK( hits <= 1 );
+            if( hits == 0 ) undelivered++;
+        }
+        CHECK( undelivered <= (int)st.dropped );
+    }
+    CHECK( st.heap_bytes == 0 );
+}
+
+/* latency through the lossy pipeline, in virtual ms */
+static void t_vlink_latency_profile( void ){
+    halow_ack_config_t cfg;
+    enum { N = 40 };
+    static uint8_t pkt[520];
+    static uint8_t stream[1100];
+    uint16_t plen;
+    uint64_t feed_j[N];
+    uint32_t lat[N];
+    vchan_t vc;
+    halow_ack_stats_t st;
+
+    cfg_base(&cfg);
+    cfg.window = 16;
+    cfg.timeout_ms = 50;
+    cfg.max_retries = 8;
+    cfg.agg = 0;
+    fp_node_start(&cfg);
+    memset(&vc, 0, sizeof(vc));
+    vc.drop_pct = 30;
+
+    plen = rns_pkt_build(pkt, 0xC4, 0xC4, 300, RNS_PACKET_TYPE_DATA, RNS_DESTINATION_TYPE_LINK);
+    for( int k = 0; k < 40 && test_tcp_count() == 0; k++ ){
+        vlink_feed(&vc, stream, slip_encode(stream, pkt, plen));
+        fp_idle();
+        vlink_run(&vc, 60);
+    }
+    CHECK( test_tcp_count() == 1 );
+    test_tcp_reset();
+    test_tx_reset();
+    vc.cursor = 0;
+
+    uint32_t lost_forever = 0;
+    for( int i = 0; i < N; i++ ){
+        halow_ack_stats_t st0;
+        plen = rns_pkt_build(pkt, 0xC4, (uint8_t)(i + 1), 450,
+                             RNS_PACKET_TYPE_DATA, RNS_DESTINATION_TYPE_LINK);
+        halow_ack_stats_get(&st0);
+        feed_j[i] = test_time_jiff();
+        int tcp0 = test_tcp_count();
+        vlink_feed(&vc, stream, slip_encode(stream, pkt, plen));
+        fp_idle();
+        vlink_pump(&vc);          /* first attempt: delivered at the SAME jiffy */
+        int guard = 0;
+        while( test_tcp_count() == tcp0 ){
+            /* serial mode -- only THIS frame can exhaust (agg off, one buf) */
+            halow_ack_stats_get(&st);
+            if( st.dropped > st0.dropped ) break;   /* lost on every retry */
+            vlink_run(&vc, 10);
+            if( ++guard >= 600 ) break;
+        }
+        if( test_tcp_count() > tcp0 ){
+            lat[i] = (uint32_t)(test_tcp_at(tcp0)->at_jiff - feed_j[i]);
+            CHECK( lat[i] < 3000 );
+        }else{
+            lat[i] = 0;
+            lost_forever++;
+        }
+    }
+    vlink_run(&vc, 3000);
+
+    uint32_t lmax = 0, lsum = 0, lretx = 0;
+    for( int i = 0; i < N; i++ ){
+        if( lat[i] > lmax ) lmax = lat[i];
+        lsum += lat[i];
+        if( lat[i] > 0 ) lretx++;
+    }
+    printf("    vlink latency (%u%% loss, tmo %ums): max=%ums avg=%ums retransmitted=%u/%u lost=%u\n",
+           (unsigned)vc.drop_pct, (unsigned)cfg.timeout_ms,
+           (unsigned)lmax, (unsigned)(lsum / N), (unsigned)lretx, (unsigned)N,
+           (unsigned)lost_forever);
+    CHECK( lmax < 3000 );
+    CHECK( (uint32_t)(N - lretx - lost_forever) >= 20 );  /* most survive attempt 1 */
+    CHECK( lost_forever <= 2 );
+
+    halow_ack_stats_get(&st);
+    printf("    vlink stats: dropped=%u exhaust=%u deadline=%u throttle=%u acked=%u rtt=%u tx=%u dups=%u acks_rx=%u acks_tx=%u\n",
+           (unsigned)st.dropped, (unsigned)st.drop_exhaust, (unsigned)st.drop_deadline,
+           (unsigned)st.drop_throttle, (unsigned)st.acked, (unsigned)st.ack_rtt_hits,
+           (unsigned)st.tx_frames, (unsigned)st.acks_rx_dup,
+           (unsigned)st.acks_rx_frames, (unsigned)st.acks_sent);
+    {
+        /* dump the fids carried by the last few ACK frames vs expectation */
+        int shown = 0;
+        for( int i = test_tx_count() - 1; i >= 0 && shown < 3; i-- ){
+            const test_tx_cap_t *t = test_tx_at(i);
+            if( t == NULL || !halow_ack_is_internal_frame(t->buf, t->len) ) continue;
+            if( t->len == 14 ) continue;   /* env ack */
+            shown++;
+        }
+        shown = 0;
+        for( int i = test_tx_count() - 1; i >= 0 && shown < 3; i-- ){
+            const test_tx_cap_t *t = test_tx_at(i);
+            if( t == NULL || t->len > TEST_TX_CAP_LEN ) continue;
+            if( halow_ack_is_internal_frame(t->buf, t->len) ) continue;
+            if( memcmp(t->mac, mac_broadcast, 6) == 0 ) continue;
+            shown++;
+        }
+    }
+    CHECK( st.outstanding == 0 );
+    CHECK( st.heap_bytes == 0 );
+    CHECK( st.ack_rtt_hits >= 30 );
+}
+
+/* ============ coverage: uncovered branches from the gcov map ============ */
+
+static void t_cov_ack_misc( void ){
+    halow_ack_config_t cfg, live;
+    halow_ack_stats_t st;
+    const uint8_t *o = NULL;
+    uint16_t ol = 0;
+
+    node_start(NULL);
+
+    /* radio_quiet / link_busy transitions (fresh boot: quiet) */
+    CHECK( halow_ack_radio_quiet() );
+    CHECK( !halow_ack_link_busy() );
+    {
+        uint8_t f[64];
+        fill_payload(f, sizeof(f), 1);
+        CHECK( halow_ack_tx(f, sizeof(f), PEER_A) == 0 );
+        CHECK( !halow_ack_radio_quiet() );
+        CHECK( halow_ack_link_busy() );
+        run_ticks(2, 5);
+        CHECK( !halow_ack_radio_quiet() );   /* outstanding buf */
+        ack_fid(PEER_A, fid_of(f, sizeof(f)));
+        {
+            halow_ack_stats_t dbg;
+            halow_ack_stats_get(&dbg);
+        }
+        {
+            halow_ack_stats_t dbg;
+            halow_ack_stats_get(&dbg);
+        }
+        CHECK( halow_ack_link_busy() );      /* recent TX window still open */
+        test_advance_ms(10000);
+        CHECK( !halow_ack_link_busy() );
+        CHECK( halow_ack_radio_quiet() );
+    }
+
+    /* on_rx argument guards */
+    CHECK( halow_ack_on_rx(NULL, 5, PEER_A, MAC_ME, 0, &o, &ol) );
+    o = NULL; ol = 0;
+    CHECK( halow_ack_on_rx((const uint8_t *)"x", 1, PEER_A, MAC_ME, 0, NULL, &ol) );
+    o = NULL; ol = 0;
+    CHECK( halow_ack_on_rx((const uint8_t *)"x", 1, PEER_A, MAC_ME, 0, &o, NULL) );
+
+    /* config_load happy path: version matches -> keys are read back */
+    test_kv_set("cfg.hack.ver", 4);
+    test_kv_set("cfg.hack.tmo", 33);
+    test_kv_set("cfg.hack.aggbytes", 1000);
+    test_kv_set("cfg.hack.ra", 0);
+    halow_ack_config_load(&cfg);
+    CHECK( cfg.timeout_ms == 33 );
+    CHECK( cfg.agg_bytes == 1000 );
+    halow_ack_config_apply(&cfg);
+    halow_ack_config_get_live(&live);
+    CHECK( live.agg_bytes == 1000 );
+
+    /* apply with RA on converts DEFAULT-mcs peers to the RA start rate */
+    {
+        halow_ack_peer_stats_t ps;
+        uint8_t f[32];
+        fill_payload(f, sizeof(f), 2);
+        CHECK( rx_frame(PEER_B, f, sizeof(f), EVM_M10) );
+        cfg.rate_adapt = 1;
+        halow_ack_config_apply(&cfg);
+        CHECK( halow_ack_peer_stats_by_mac(PEER_B, &ps) && ps.tx_mcs == 7 );
+    }
+
+    /* zero-length payload: single-sub unwrap rejects the empty sub */
+    {
+        uint8_t f[8];
+        CHECK( halow_ack_tx(f, 0, PEER_A) == 0 );
+        halow_ack_flush();
+        halow_ack_stats_get(&st);
+        CHECK( st.dropped >= 1 );
+        CHECK( st.heap_bytes == 0 );
+    }
+}
+
+static void t_cov_ra_walk_and_stale( void ){
+    halow_ack_config_t cfg;
+    halow_ack_peer_stats_t ps;
+    halow_ack_stats_t st;
+    uint8_t ack[5];
+    uint8_t data[16];
+
+    cfg_base(&cfg);
+    cfg.rate_adapt = 1;
+    node_start(&cfg);
+
+    fill_payload(data, sizeof(data), 1);
+    CHECK( rx_frame(PEER_R, data, sizeof(data), EVM_M10) );
+    CHECK( halow_ack_peer_stats_by_mac(PEER_R, &ps) && ps.tx_mcs == 4 );
+
+    /* walk MCS 4 -> 5 -> 6 -> 7 one step per gap */
+    for( int m = 5; m <= 7; m++ ){
+        test_advance_ms(300);
+        rx_ack_frame(PEER_R, ack, build_legacy_ack(ack, EVM_M10, 0));
+        CHECK( halow_ack_peer_stats_by_mac(PEER_R, &ps) && ps.tx_mcs == (uint8_t)m );
+    }
+
+    /* stale peer (no ACK for > RA_STALE) resets to the EVM ceiling on tick */
+    test_advance_ms(61000);
+    halow_ack_tick();
+    CHECK( halow_ack_peer_stats_by_mac(PEER_R, &ps) );
+    CHECK( ps.tx_mcs == 7 );
+    halow_ack_stats_get(&st);
+    CHECK( st.outstanding == 0 );
+}
+
+static void t_cov_slot_exhaust_untracked( void ){
+    halow_ack_config_t cfg;
+    halow_ack_stats_t st;
+    uint8_t m[6];
+    uint8_t f[100];
+
+    cfg_base(&cfg);
+    cfg.agg = 0;
+    cfg.window = 16;
+    node_start(&cfg);
+
+    /* 16 peers, one in-flight frame each */
+    for( uint8_t id = 1; id <= 16; id++ ){
+        peer_mac(m, id);
+        fill_payload(f, sizeof(f), id);
+        CHECK( halow_ack_tx(f, sizeof(f), m) == 0 );
+    }
+    CHECK( test_tx_count() == 16 );
+
+    /* 17th peer: no slot, no eviction candidate (all protected) -> the
+     * frame still leaves, untracked (no retry slot, counted as TX) */
+    peer_mac(m, 0x71);
+    fill_payload(f, sizeof(f), 0x71);
+    CHECK( halow_ack_tx(f, sizeof(f), m) == 0 );
+    CHECK( test_tx_count() == 17 );
+    CHECK( test_tx_last()->len == 100 );
+
+    halow_ack_stats_get(&st);
+    CHECK( st.outstanding == 16 );
+    CHECK( st.tx_frames == 17 );
+    CHECK( st.heap_bytes > 0 );
+}
+
+static void t_cov_ack_tx_fail( void ){
+    halow_ack_config_t cfg;
+    halow_ack_stats_t st;
+    uint8_t f[100];
+
+    cfg_base(&cfg);
+    cfg.bc_repeat = 2;
+    node_start(&cfg);
+
+    /* fid-ACK TX fails */
+    fill_payload(f, sizeof(f), 1);
+    CHECK( rx_frame(PEER_E, f, sizeof(f), EVM_M10) );
+    test_tx_reset();
+    test_tx_fail_next(1);
+    fill_payload(f, sizeof(f), 2);
+    CHECK( rx_frame(PEER_E, f, sizeof(f), EVM_M10) );
+    halow_ack_stats_get(&st);
+    CHECK( st.acks_tx_fail == 1 );
+
+    /* broadcast with failing radio -> THROTTLE to the caller */
+    fill_payload(f, sizeof(f), 3);
+    test_tx_fail_next(1);
+    CHECK( halow_ack_tx(f, sizeof(f), mac_broadcast) == HALOW_ACK_TX_THROTTLE );
+
+    /* env-ACK TX fails */
+    {
+        halow_ack_peer_stats_t ps;
+        env_peer_ready(PEER_D);
+        CHECK( halow_ack_peer_stats_by_mac(PEER_D, &ps) && ps.compat == 2 );
+        test_tx_fail_next(1);
+        fill_payload(f, sizeof(f), 4);
+        CHECK( rx_frame(PEER_D, f, sizeof(f), EVM_M10) );
+        halow_ack_stats_get(&st);
+        CHECK( st.acks_tx_fail == 2 );
+    }
+}
+
+static void t_cov_env_seq_jump( void ){
+    halow_ack_config_t cfg;
+    halow_ack_stats_t st;
+    uint8_t sub[64];
+    uint8_t env[6 + 2 + 64];
+    uint16_t slen;
+
+    cfg_base(&cfg);
+    node_start(&cfg);
+    env_peer_ready(PEER_D);
+
+    slen = rns_pkt_build(sub, 0xD1, 0xD2, 40, RNS_PACKET_TYPE_DATA,
+                         RNS_DESTINATION_TYPE_LINK);
+    for( uint16_t seq = 0; seq < 300; seq += 100 ){
+        env[0] = 0xA5; env[1] = 0x5A; env[2] = 0x10;
+        env[3] = (uint8_t)(seq & 0xFF);
+        env[4] = (uint8_t)(seq >> 8);
+        env[5] = 1;
+        env[6] = (uint8_t)(slen & 0xFF);
+        env[7] = (uint8_t)(slen >> 8);
+        memcpy(&env[8], sub, slen);
+        CHECK( rx_frame(PEER_D, env, (uint16_t)(8 + slen), 0) );
+    }
+    halow_ack_stats_get(&st);
+    CHECK( st.env_rx_bundles == 4 );   /* ready probe + 3 jumps (>= 64 resets) */
+}
+
+static void t_cov_type2_and_parse_fail( void ){
+    halow_ack_config_t cfg;
+    static uint8_t pkt[300];
+    static uint8_t stream[700];
+    uint16_t plen, wlen, consumed = 0;
+    extern volatile uint32_t g_dbg_rns_tx_parse_fail;
+
+    cfg_base(&cfg);
+    fp_node_start(&cfg);
+
+    /* valid type-2 header packet: [flags|0x40][hops][dest16][tid16][ctx] */
+    plen = rns_pkt_build(pkt, 0xD3, 0xD3, 100, RNS_PACKET_TYPE_DATA,
+                         RNS_DESTINATION_TYPE_LINK);
+    pkt[0] |= 0x40;
+    memmove(&pkt[35], &pkt[19], 100);
+    memcpy(&pkt[19], pkt, 16);      /* transport id */
+    pkt[34] = 0;
+    pkt[18] = 16;                   /* keep dest sane */
+    wlen = slip_encode(stream, pkt, 35 + 100);
+    CHECK( fp_feed(stream, wlen, &consumed) == 0 );
+    CHECK( test_tx_count() == 1 );
+    CHECK( test_tx_at(0)->len == 35 + 100 );
+
+    /* short type-2 packet -> parser rejects, counted, nothing on air */
+    test_tx_reset();
+    plen = rns_pkt_build(pkt, 0xD4, 0xD4, 5, RNS_PACKET_TYPE_DATA,
+                         RNS_DESTINATION_TYPE_LINK);
+    pkt[0] |= 0x40;
+    wlen = slip_encode(stream, pkt, plen);
+    {
+        uint32_t f0 = g_dbg_rns_tx_parse_fail;
+        CHECK( fp_feed(stream, wlen, &consumed) == 0 );
+        CHECK( g_dbg_rns_tx_parse_fail == f0 + 1 );
+        CHECK( test_tx_count() == 0 );
+    }
+
+    /* garbage frame from TCP: parse fail, no crash, stream stays in sync */
+    {
+        static uint8_t junk[40];
+        for( uint8_t i = 0; i < sizeof(junk); i++ ) junk[i] = (uint8_t)(i + 1);
+        wlen = slip_encode(stream, junk, sizeof(junk));
+        CHECK( fp_feed(stream, wlen, &consumed) == 0 );
+        CHECK( g_dbg_rns_tx_parse_fail >= 1 );
+    }
+}
+
+static void t_cov_utils_guards( void ){
+    rns_link_packet_info_t info;
+    uint8_t pkt[140];
+    uint32_t orig = 0;
+    uint16_t plen;
+
+    plen = rns_pkt_build(pkt, 0xD5, 0xD5, 96, RNS_PACKET_TYPE_DATA,
+                         RNS_DESTINATION_TYPE_LINK);
+    CHECK( rns_link_parser_parse(pkt, plen, &info) == RNS_RET_OK );
+
+    CHECK( rns_link_utils_clamp_mtu(NULL, plen, &info, 500, &orig) == RNS_RET_NULLPTR );
+    CHECK( rns_link_utils_clamp_mtu(pkt, plen, NULL, 500, &orig) == RNS_RET_NULLPTR );
+    CHECK( rns_link_utils_clamp_mtu(pkt, plen, &info, 500, &orig) == RNS_RET_INVALID_PACKET_TYPE );
+    CHECK( rns_link_utils_get_mtu(NULL, plen, &info, &orig) == RNS_RET_NULLPTR );
+    CHECK( rns_link_utils_get_mtu(pkt, plen, NULL, &orig) == RNS_RET_NULLPTR );
+    CHECK( rns_link_utils_get_mtu(pkt, plen, &info, NULL) == RNS_RET_NULLPTR );
+    CHECK( rns_link_utils_get_mtu(pkt, plen, &info, &orig) == RNS_RET_INVALID_PACKET_TYPE );
+
+    /* LINKREQUEST with a too-short payload */
+    plen = rns_pkt_build(pkt, 0xD6, 0xD6, 10, RNS_PACKET_TYPE_LINKREQUEST,
+                         RNS_DESTINATION_TYPE_SINGLE);
+    CHECK( rns_link_parser_parse(pkt, plen, &info) == RNS_RET_OK );
+    CHECK( rns_link_utils_get_mtu(pkt, plen, &info, &orig) == RNS_RET_PACKET_TOO_SHORT );
+    CHECK( rns_link_utils_clamp_mtu(pkt, plen, &info, 500, &orig) == RNS_RET_PACKET_TOO_SHORT );
+
+    /* parser guards */
+    CHECK( rns_link_parser_parse(NULL, plen, &info) == RNS_RET_NULLPTR );
+    CHECK( rns_link_parser_parse(pkt, plen, NULL) == RNS_RET_NULLPTR );
+    CHECK( rns_link_parser_parse(pkt, 5, &info) == RNS_RET_PACKET_TOO_SHORT );
+}
+
+static int fp_null_cb( uint8_t *payload, uint16_t len, void *user ){
+    (void)payload; (void)len; (void)user;
+    return 0;
+}
+
+static void t_cov_stream_guards( void ){
+    static rns_stream_decoder_t d;
+    static uint8_t buf[11000];
+    uint8_t small[8];
+    uint16_t consumed = 0;
+    uint8_t *out = NULL;
+    uint32_t outlen = 0;
+
+    rns_stream_decoder_init(NULL, fp_null_cb);
+    rns_stream_decoder_reset(NULL);
+    CHECK( rns_stream_decoder_retry_held(NULL, NULL) == 0 );
+    CHECK( rns_stream_decoder_process(NULL, small, 1, NULL, &consumed) == 0 );
+    CHECK( consumed == 0 );
+    CHECK( rns_stream_decoder_process(&d, NULL, 5, NULL, &consumed) == 0 );
+
+    rns_stream_decoder_init(&d, NULL);      /* no callback: frames dropped */
+    small[0] = 0x7E; small[1] = 1; small[2] = 2; small[3] = 0x7E;
+    CHECK( rns_stream_decoder_process(&d, small, 4, NULL, &consumed) == 0 );
+    CHECK( consumed == 4 );
+
+    rns_stream_decoder_init(&d, fp_null_cb);
+    CHECK( rns_stream_decoder_retry_held(&d, NULL) == 0 );   /* nothing held */
+    rns_stream_decoder_reset(&d);
+    CHECK( d.state == 0 && d.frame_len == 0 && !d.held );
+
+    /* frame larger than the 10 KB buffer: overflow, decoder resyncs */
+    buf[0] = 0x7E;
+    for( uint32_t i = 1; i < sizeof(buf) - 1; i++ ) buf[i] = (uint8_t)(i & 0x7D);
+    buf[sizeof(buf) - 1] = 0x7E;
+    CHECK( rns_stream_decoder_process(&d, buf, sizeof(buf), NULL, &consumed) == 0 );
+    CHECK( consumed == sizeof(buf) );
+    small[0] = 0x7E; small[1] = 9; small[2] = 0x7E;
+    CHECK( rns_stream_decoder_process(&d, small, 3, NULL, &consumed) == 0 );
+
+    /* encode_alloc argument guards */
+    CHECK( rns_stream_encode_alloc(NULL, 5, &out, &outlen) == -1 );
+    CHECK( rns_stream_encode_alloc(small, 0, &out, &outlen) == -1 );
+    CHECK( rns_stream_encode_alloc(small, 3, NULL, &outlen) == -1 );
+    CHECK( rns_stream_encode_alloc(small, 3, &out, NULL) == -1 );
+}
+
+static void t_cov_linkdb_fill_close_hijack( void ){
+    halow_ack_config_t cfg;
+    rns_link_db_link_t link;
+    rns_link_packet_info_t info;
+    static uint8_t pkt[300];
+    static uint8_t big[300];
+    uint8_t data[64];
+    uint16_t plen;
+    uint8_t count0;
+
+    cfg_base(&cfg);
+    fp_node_start(&cfg);
+
+    count0 = rns_link_db_link_count_get();
+
+    /* 1) LINKCLOSE removes an existing link; with no link it is a no-op */
+    plen = rns_pkt_build(pkt, 0xE1, 0xE1, 100, RNS_PACKET_TYPE_DATA,
+                         RNS_DESTINATION_TYPE_LINK);
+    CHECK( rns_link_parser_parse(pkt, plen, &info) == RNS_RET_OK );
+    CHECK( rns_link_db_package_register(&info, RNS_PACKET_DIRECTION_TX,
+                                        NULL, 0, false, false) == RNS_RET_OK );
+    CHECK( rns_link_db_link_count_get() == (uint8_t)(count0 + 1) );
+    pkt[18] = (uint8_t)RNS_CONTEXT_LINKCLOSE;
+    CHECK( rns_link_parser_parse(pkt, plen, &info) == RNS_RET_OK );
+    CHECK( rns_link_db_package_register(&info, RNS_PACKET_DIRECTION_TX,
+                                        NULL, 0, false, false) == RNS_RET_OK );
+    CHECK( rns_link_db_link_count_get() == count0 );
+    CHECK( rns_link_db_package_register(&info, RNS_PACKET_DIRECTION_TX,
+                                        NULL, 0, false, false) == RNS_RET_OK );
+    CHECK( rns_link_db_link_count_get() == count0 );
+
+    /* 2) the peer's TX MAC can't be hijacked by a broadcast-dest replay */
+    plen = rns_pkt_build(pkt, 0xE2, 0xE2, 100, RNS_PACKET_TYPE_DATA,
+                         RNS_DESTINATION_TYPE_LINK);
+    CHECK( rns_link_parser_parse(pkt, plen, &info) == RNS_RET_OK );
+    CHECK( rns_link_db_package_register(&info, RNS_PACKET_DIRECTION_RX,
+                                        PEER_A, 0, false, true) == RNS_RET_OK );
+    CHECK( rns_link_db_link_snapshot_by_id(info.link_id, &link) );
+    CHECK( memcmp(link.remote_mac, PEER_A, 6) == 0 );
+    CHECK( rns_link_db_package_register(&info, RNS_PACKET_DIRECTION_RX,
+                                        PEER_B, 0, false, false) == RNS_RET_OK );
+    CHECK( rns_link_db_link_snapshot_by_id(info.link_id, &link) );
+    CHECK( memcmp(link.remote_mac, PEER_A, 6) == 0 );
+
+    /* unicast-to-me RX may re-learn the MAC (legitimate peer MAC change) */
+    CHECK( rns_link_db_package_register(&info, RNS_PACKET_DIRECTION_RX,
+                                        PEER_B, 0, false, true) == RNS_RET_OK );
+    CHECK( rns_link_db_link_snapshot_by_id(info.link_id, &link) );
+    CHECK( memcmp(link.remote_mac, PEER_B, 6) == 0 );
+
+    /* 3) snapshot_by_index walks live links */
+    CHECK( rns_link_db_link_snapshot_by_index(0, &link) );
+    CHECK( !rns_link_db_link_snapshot_by_index(200, &link) );
+    CHECK( !rns_link_db_link_snapshot_by_index(0, NULL) );
+    CHECK( !rns_link_db_link_snapshot_by_id(NULL, &link) );
+
+    /* 4) fill the DB to 255 links: RX registrations start failing */
+    {
+        extern volatile uint32_t g_dbg_rns_rx_reg_fail;
+        uint32_t f0 = g_dbg_rns_rx_reg_fail;
+        int guard = 0;
+        while( rns_link_db_link_count_get() < 255u ){
+            uint8_t seed = (uint8_t)(0xF0 + (guard % 16));
+            uint16_t l = rns_pkt_build(big, seed, seed, 100,
+                                       RNS_PACKET_TYPE_DATA,
+                                       RNS_DESTINATION_TYPE_LINK);
+            big[2] ^= (uint8_t)guard;        /* unique dest hash per link */
+            big[3] ^= (uint8_t)(guard >> 8);
+            CHECK( rns_link_parser_parse(big, l, &info) == RNS_RET_OK );
+            CHECK( rns_link_db_package_register(&info, RNS_PACKET_DIRECTION_RX,
+                                                PEER_C, 0, false, true) == RNS_RET_OK );
+            CHECK( ++guard < 300 );
+        }
+        fill_payload(data, sizeof(data), 0x99);
+        halow_pkg_handler_rf_to_tcp(data, sizeof(data), PEER_C, MAC_ME, EVM_M10);
+        plen = rns_pkt_build(pkt, 0xF1, 0xF1, 100, RNS_PACKET_TYPE_DATA,
+                             RNS_DESTINATION_TYPE_LINK);
+        halow_pkg_handler_rf_to_tcp(pkt, plen, PEER_C, MAC_ME, EVM_M10);
+        CHECK( g_dbg_rns_rx_reg_fail > f0 );
+    }
+
+    /* sweep runs over the full table without touching fresh links */
+    rns_link_db_sweep_expired();
+    CHECK( rns_link_db_link_count_get() == 255 );
+}
+
+static void t_cov_legacy_bundle_deliver( void ){
+    halow_ack_config_t cfg;
+    uint8_t sub[2][64];
+    uint8_t bun[3 + 2*2 + 2*64];
+    uint16_t sl[2];
+    uint16_t n = 0;
+    slipdec_t dec;
+
+    cfg_base(&cfg);
+    fp_node_start(&cfg);
+    test_tcp_reset();
+
+    sl[0] = rns_pkt_build(sub[0], 0xE5, 0xE6, 40, RNS_PACKET_TYPE_DATA,
+                          RNS_DESTINATION_TYPE_LINK);
+    sl[1] = rns_pkt_build(sub[1], 0xE5, 0xE7, 40, RNS_PACKET_TYPE_DATA,
+                          RNS_DESTINATION_TYPE_LINK);
+    bun[n++] = 0xA5; bun[n++] = 0xAD; bun[n++] = 2;
+    for( int i = 0; i < 2; i++ ){
+        bun[n++] = (uint8_t)(sl[i] & 0xFF);
+        bun[n++] = (uint8_t)(sl[i] >> 8);
+        memcpy(&bun[n], sub[i], sl[i]);
+        n = (uint16_t)(n + sl[i]);
+    }
+    halow_pkg_handler_rf_to_tcp(bun, n, PEER_A, MAC_ME, EVM_M10);
+
+    CHECK( test_tcp_count() == 2 );
+    slipdec_init(&dec);
+    for( int i = 0; i < 2; i++ )
+        slipdec_feed(&dec, test_tcp_at(i)->buf, test_tcp_at(i)->len);
+    CHECK( dec.n == 2 );
+    CHECK( dec.len[0] == sl[0] && memcmp(dec.buf[0], sub[0], sl[0]) == 0 );
+    CHECK( dec.len[1] == sl[1] && memcmp(dec.buf[1], sub[1], sl[1]) == 0 );
+}
+
+
+/* Regression: an envelope peer fed plain frames (agg off / oversize) used to
+ * starve -- plain frames carry seq 0xFFFF and never match the env bitmap
+ * ACK. Env peers must always ride seq'd bundles. */
+static void t_env_peer_agg_off_still_acked( void ){
+    halow_ack_config_t cfg;
+    halow_ack_stats_t st;
+    halow_ack_peer_stats_t ps;
+    uint8_t f[300];
+
+    cfg_base(&cfg);
+    cfg.agg = 0;
+    cfg.window = 4;
+    node_start(&cfg);
+    env_peer_ready(PEER_D);
+
+    for( uint8_t i = 0; i < 6; i++ ){
+        fill_payload(f, sizeof(f), i);
+        CHECK( halow_ack_tx(f, sizeof(f), PEER_D) == 0 );
+        halow_ack_flush();
+        {
+            const test_tx_cap_t *b = test_tx_last();
+            CHECK( b->buf[0] == 0xA5 && b->buf[1] == 0x5A && b->buf[2] == 0x10 );
+            uint16_t seq = (uint16_t)((uint16_t)b->buf[3] | ((uint16_t)b->buf[4] << 8));
+            uint8_t ack[14];
+            (void)build_env_ack(ack, EVM_M10, (uint16_t)(seq - 63));
+            env_ack_bit(ack, 63);
+            rx_ack_frame(PEER_D, ack, 14);
+        }
+    }
+
+    halow_ack_stats_get(&st);
+    CHECK( st.acked == 6 );
+    CHECK( st.outstanding == 0 );
+    CHECK( st.heap_bytes == 0 );
+    CHECK( halow_ack_peer_stats_by_mac(PEER_D, &ps) && ps.dropped == 0 );
+}
+
+
+/* ============ coverage: decoder hold paths, type-2 LR, link states ============ */
+
+static void t_cov_gap_fill( void ){
+    halow_ack_config_t cfg;
+    static uint8_t pkt[3][520];
+    static uint8_t stream[1100];
+    uint16_t plen[3];
+    uint16_t consumed = 0;
+    rns_link_packet_info_t info;
+
+    cfg_base(&cfg);
+    cfg.agg = 0;
+    cfg.window = 1;
+    fp_node_start(&cfg);
+
+    /* learn the peer, then keep one frame in flight so the next THROTTLEs */
+    plen[0] = rns_pkt_build(pkt[0], 0xB5, 0xB5, 300, RNS_PACKET_TYPE_DATA, RNS_DESTINATION_TYPE_LINK);
+    CHECK( fp_feed(stream, slip_encode(stream, pkt[0], plen[0]), &consumed) == 0 );
+    fp_idle();
+    CHECK( test_tx_count() == 1 );
+    halow_pkg_handler_rf_to_tcp((uint8_t *)test_tx_at(0)->buf, test_tx_at(0)->len,
+                                PEER_A, MAC_ME, EVM_M10);
+
+    plen[1] = rns_pkt_build(pkt[1], 0xB5, 0xB6, 300, RNS_PACKET_TYPE_DATA, RNS_DESTINATION_TYPE_LINK);
+    {
+        uint16_t w = slip_encode(stream, pkt[1], plen[1]);
+        CHECK( fp_feed(stream, w, &consumed) == 0 );   /* frame 2 in flight */
+    }
+
+    /* frame 3 fills the window -> THROTTLE, frame held in the decoder */
+    plen[2] = rns_pkt_build(pkt[2], 0xB5, 0xB7, 300, RNS_PACKET_TYPE_DATA, RNS_DESTINATION_TYPE_LINK);
+    {
+        uint16_t w = slip_encode(stream, pkt[2], plen[2]);
+        CHECK( fp_feed(stream, w, &consumed) == HALOW_ACK_TX_THROTTLE );
+        CHECK( consumed == w );
+    }
+
+    /* explicit retry while still saturated: THROTTLE again */
+    CHECK( rns_stream_decoder_retry_held(&g_dec, NULL) == HALOW_ACK_TX_THROTTLE );
+
+    /* feeding NEW bytes retries the held frame first: THROTTLE, consumed 0 */
+    {
+        uint8_t one = 0x7E;
+        CHECK( fp_feed(&one, 1, &consumed) == HALOW_ACK_TX_THROTTLE );
+        CHECK( consumed == 0 );
+    }
+
+    /* free the window: the held frame goes through on retry, no re-feed */
+    ack_fid(PEER_A, (uint16_t)(fnv1a(pkt[1], plen[1]) & 0xFFFFu));
+    CHECK( rns_stream_decoder_retry_held(&g_dec, NULL) == 0 );
+    fp_idle();
+    fp_idle();
+    {
+        halow_ack_stats_t st;
+        halow_ack_stats_get(&st);
+        CHECK( st.dropped == 0 );
+        CHECK( st.tx_frames == 3 );
+    }
+
+    /* type-2 LINKREQUEST: sha256 link id over the type-2 hash body */
+    {
+        uint8_t lr[140];
+        uint16_t l = rns_lr_build(lr, 0xB8, 1280);
+        lr[0] |= 0x40;
+        memmove(&lr[35], &lr[19], (size_t)(l - 19));
+        memcpy(&lr[19], lr, 16);
+        lr[34] = 0;
+        CHECK( rns_link_parser_parse(lr, l, &info) == RNS_RET_OK );
+        CHECK( info.valid );
+        CHECK( info.context == RNS_CONTEXT_NONE );
+    }
+
+    /* link_db: NULL guard, PROOF state machine, LR state on TX */
+    {
+        rns_link_db_link_t link;
+        uint8_t p[140];
+        uint16_t l;
+        CHECK( rns_link_db_package_register(NULL, RNS_PACKET_DIRECTION_RX, NULL, 0, false, false)
+               == RNS_RET_NULLPTR );
+        /* PROOF packet on a fresh link -> PROOF_RECEIVED */
+        l = rns_pkt_build(p, 0xB9, 0xB9, 100, RNS_PACKET_TYPE_PROOF, RNS_DESTINATION_TYPE_SINGLE);
+        CHECK( rns_link_parser_parse(p, l, &info) == RNS_RET_OK );
+        CHECK( rns_link_db_package_register(&info, RNS_PACKET_DIRECTION_RX, PEER_A, 0, false, true) == RNS_RET_OK );
+        CHECK( rns_link_db_link_snapshot_by_id(info.link_id, &link) );
+        CHECK( link.state == RNS_LINK_STATE_PROOF_RECEIVED );
+        /* context LINKPROOF reaches the same state on another fresh link */
+        l = rns_pkt_build(p, 0xBA, 0xBA, 100, RNS_PACKET_TYPE_DATA, RNS_DESTINATION_TYPE_LINK);
+        p[18] = (uint8_t)RNS_CONTEXT_LINKPROOF;
+        CHECK( rns_link_parser_parse(p, l, &info) == RNS_RET_OK );
+        CHECK( rns_link_db_package_register(&info, RNS_PACKET_DIRECTION_RX, PEER_A, 0, false, true) == RNS_RET_OK );
+        CHECK( rns_link_db_link_snapshot_by_id(info.link_id, &link) );
+        CHECK( link.state == RNS_LINK_STATE_PROOF_RECEIVED );
+        /* LINK-dest data opens a fresh link */
+        l = rns_pkt_build(p, 0xBB, 0xBB, 100, RNS_PACKET_TYPE_DATA, RNS_DESTINATION_TYPE_LINK);
+        CHECK( rns_link_parser_parse(p, l, &info) == RNS_RET_OK );
+        CHECK( rns_link_db_package_register(&info, RNS_PACKET_DIRECTION_RX, PEER_A, 0, false, true) == RNS_RET_OK );
+        CHECK( rns_link_db_link_snapshot_by_id(info.link_id, &link) );
+        CHECK( link.state == RNS_LINK_STATE_OPEN );
+    }
+}
+
 int main( void ){
 #ifndef __csky__
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -2535,6 +3492,22 @@ int main( void ){
         {"fp_roundtrip_soak",           t_fp_roundtrip_soak},
         {"fp_rx_edge_bundles",          t_fp_rx_edge_bundles},
         {"fp_tcp_ring_full",            t_fp_tcp_ring_full},
+        {"vlink_zero_wait_invariant",    t_vlink_zero_wait_invariant},
+        {"vlink_lossy_roundtrip",        t_vlink_lossy_roundtrip},
+        {"vlink_lossy_deadline",         t_vlink_lossy_deadline},
+        {"vlink_latency_profile",        t_vlink_latency_profile},
+        {"cov_ack_misc",                 t_cov_ack_misc},
+        {"cov_ra_walk_and_stale",        t_cov_ra_walk_and_stale},
+        {"cov_slot_exhaust_untracked",   t_cov_slot_exhaust_untracked},
+        {"cov_ack_tx_fail",              t_cov_ack_tx_fail},
+        {"cov_env_seq_jump",             t_cov_env_seq_jump},
+        {"cov_type2_and_parse_fail",     t_cov_type2_and_parse_fail},
+        {"cov_utils_guards",             t_cov_utils_guards},
+        {"cov_stream_guards",            t_cov_stream_guards},
+        {"cov_gap_fill",                 t_cov_gap_fill},
+        {"cov_linkdb_fill_close_hijack", t_cov_linkdb_fill_close_hijack},
+        {"cov_legacy_bundle_deliver",    t_cov_legacy_bundle_deliver},
+        {"env_peer_agg_off_still_acked", t_env_peer_agg_off_still_acked},
     };
 
     printf("halow_ack host tests: %d scenarios\n", (int)(sizeof(tests) / sizeof(tests[0])));

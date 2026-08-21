@@ -296,4 +296,25 @@ heap-frame path); startup.s + qemu/test.ld place everything in D-SRAM 0x20000000
 The suite links the REAL pkg_handler/rns/sha256 chain: full-path tests feed TCP
 bytes (SLIP, escapes, split chunks) through stream_parser → link_db → bundle
 builder → captured halow_tx, and back via rf_to_tcp → captured tcp_server_send.
-206,754 checks green on host and emulated ck803.
+A virtual lossy RF channel (vchan: per-frame drop%, data AND ACK frames cross
+it, retransmits + dedup close the loop) covers 20-30% loss round-trips and 70%
+exhaustion. 207,822 checks green on host and emulated ck803; gcov line coverage
+95.6% over the six pipeline files (ack 97.7%, pkg 99.0%, stream 95.0%,
+parser 90.5%, utils 95.9%, link_db 85.6%; the rest is log-off/sweeper-task/
+malloc-fail glue). `make qemu-bench` runs the staged pipeline bench with
+per-stage wall timing (bench_time.py timestamps each UART line).
+
+No-wait proof: t_vlink_zero_wait_invariant asserts feed → bundle → air →
+receive → decode → TCP completes at the SAME virtual jiffy with zero os_sleep
+calls. Measured on QEMU ck803 (500-B packets): full TX chain 20.8 µs/pkt,
+full RX chain 12.8 µs, immediate-ACK rx 3.7 µs, empty tick 1.66 µs (0.017% CPU
+at 100 Hz). Hotspots if more CPU is ever needed: fnv1a runs ~3× per frame
+end-to-end (TX fid, RX dedup, ack path) and the payload is memcpy'd per layer.
+
+Env-peer ACK starvation (found by the lossy model, fixed 2026-08-21): after
+the 8-ack probe flips a peer to envelope compat, plain frames (seq 0xFFFF)
+can never match the env bitmap ACK — env peers now ALWAYS ride seq'd bundles
+(ack_tx_uc forces the bundle path; staging is sized to fit one oversize sub).
+Regression: t_env_peer_agg_off_still_acked. halow_ack_init also pre-ages
+g_last_data_tx_jiff past the busy window (fresh boot used to read as
+link-busy for the first 10 s).

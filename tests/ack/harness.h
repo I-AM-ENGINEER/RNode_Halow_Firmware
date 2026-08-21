@@ -5,7 +5,7 @@
 #include <stdbool.h>
 
 #define TEST_TX_CAP_LEN 4200
-#define TEST_TX_CAP_N   256
+#define TEST_TX_CAP_N   1024
 
 typedef struct {
     uint8_t buf[TEST_TX_CAP_LEN];
@@ -24,6 +24,11 @@ int  test_tx_count(void);
 const test_tx_cap_t *test_tx_at(int i);
 const test_tx_cap_t *test_tx_last(void);
 
+/* RF TX fault injection + no-wait audit */
+void     test_tx_fail_next(int n);     /* next N halow_tx/halow_tx_p fail (-5) */
+uint32_t test_sleep_calls(void);       /* os_sleep_ms/os_sleep invocations */
+uint64_t test_time_jiff(void);         /* current virtual jiffies */
+
 /* heap accounting + fault injection for os_malloc/os_free */
 void     test_malloc_reset(void);
 void     test_malloc_fail_next(int n);
@@ -37,6 +42,7 @@ uint32_t test_malloc_live_bytes(void);
 typedef struct {
     uint8_t buf[TEST_TCP_CAP_LEN];
     uint16_t len;
+    uint64_t at_jiff;   /* virtual time of the tcp_server_send call */
 } test_tcp_cap_t;
 
 void test_tcp_reset(void);

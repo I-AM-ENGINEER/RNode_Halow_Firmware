@@ -965,8 +965,10 @@ static int32_t tx_bundle_locked( ack_peer_t *p, const uint8_t *payload,
     }
 
     if( p->agg_idx == 0u ){
-        ack_buf_t *b = buf_alloc(ACK_BUF_STAGING, dest_mac,
-                                 staging_alloc_cap(eff_payload));
+        uint16_t cap = staging_alloc_cap(eff_payload);
+        uint16_t need = (uint16_t)(ACK_AGG_RESERVE + 2u + len);
+        if( need > cap ) cap = need;
+        ack_buf_t *b = buf_alloc(ACK_BUF_STAGING, dest_mac, cap);
         if( b == NULL ){
             ack_unlock();
             return HALOW_ACK_TX_THROTTLE;
@@ -1053,8 +1055,14 @@ static int32_t ack_tx_uc( const uint8_t *payload, uint16_t len, const uint8_t de
         return tx_plain_untracked(payload, len, dest_mac, pmcs);
     }
 
+    /* Envelope peers ack by bundle SEQ bitmap: a plain frame (seq 0xFFFF)
+     * can never match, so env peers always ride seq'd bundles -- even with
+     * agg disabled or a frame over the MCS-sized bundle budget. */
     uint16_t eff_payload = eff_agg_bytes(pmcs);
-    if( g_ack_cfg.agg != 0u && (uint32_t)len <= eff_payload ){
+    bool env_peer = ( p->compat == HALOW_COMPAT_ENVELOPE ) && ( g_ack_cfg.env != 0u );
+    if( ( ( g_ack_cfg.agg != 0u && (uint32_t)len <= eff_payload ) ||
+          ( env_peer && (uint32_t)len <= ACK_WIRE_MAX ) ) &&
+        len <= ACK_WIRE_MAX ){
         return tx_bundle_locked(p, payload, len, dest_mac, pmcs, eff_payload);
     }
     return tx_plain_locked(p, payload, len, dest_mac, pmcs);
@@ -1421,6 +1429,9 @@ void halow_ack_init( void ){
     g_heap_bytes = 0;
     g_window = g_ack_cfg.window;
     config_cache();
+    /* fresh boot is quiet: pre-age the last-TX stamp past the busy window
+     * (0 would read as "transmitted just now" for the first 10 s) */
+    g_last_data_tx_jiff = now_j() - g_busy_j;
 
     (void)os_mutex_init(&g_ack_mutex);
     os_mutex_unlock(&g_ack_mutex);

@@ -86,8 +86,11 @@ void os_free(void *pv){
     free(p);
 }
 
-void os_sleep_ms(uint32_t ms){ (void)ms; }
-void os_sleep(int sec){ (void)sec; }
+static uint32_t g_sleep_calls;
+void os_sleep_ms(uint32_t ms){ (void)ms; g_sleep_calls++; }
+void os_sleep(int sec){ (void)sec; g_sleep_calls++; }
+uint32_t test_sleep_calls(void){ return g_sleep_calls; }
+uint64_t test_time_jiff(void){ return g_jiff; }
 
 void halow_config_load(halow_config_t *cfg){ cfg->mcs = g_dflt_mcs; }
 
@@ -101,6 +104,9 @@ const test_tx_cap_t *test_tx_at(int i){
     return (i >= 0 && i < g_txn && i < TEST_TX_CAP_N) ? &g_tx[i] : NULL;
 }
 const test_tx_cap_t *test_tx_last(void){ return &g_tx_last; }
+
+static int g_tx_fail_next;
+void test_tx_fail_next(int n){ g_tx_fail_next = n; }
 
 static void tx_capture(const uint8_t *buf, uint16_t len, const uint8_t mac[6], uint8_t mcs){
     g_tx_last.len = len;
@@ -119,12 +125,20 @@ static void tx_capture(const uint8_t *buf, uint16_t len, const uint8_t mac[6], u
 }
 
 int32_t halow_tx(const uint8_t *buf, uint16_t len, const uint8_t dest_mac[6], uint8_t mcs){
+    if( g_tx_fail_next > 0 ){
+        g_tx_fail_next--;
+        return -5;
+    }
     tx_capture(buf, len, dest_mac, mcs);
     return 0;
 }
 
 int32_t halow_tx_p(const uint8_t *buf, uint16_t len, const uint8_t dest_mac[6],
                    uint8_t mcs, uint8_t bw){
+    if( g_tx_fail_next > 0 ){
+        g_tx_fail_next--;
+        return -5;
+    }
     (void)bw;
     tx_capture(buf, len, dest_mac, mcs);
     return 0;
@@ -164,6 +178,7 @@ int32_t tcp_server_send(const uint8_t *data, uint32_t len){
     if( g_tcpn < TEST_TCP_CAP_N ){
         memcpy(g_tcp[g_tcpn].buf, data, len);
         g_tcp[g_tcpn].len = (uint16_t)len;
+        g_tcp[g_tcpn].at_jiff = g_jiff;
     }
     g_tcpn++;
     return 0;

@@ -156,12 +156,13 @@ $(QBUILD)/bench.o: bench.c harness.h stubs/basic_include.h
 	@mkdir -p $(QBUILD)
 	$(CROSS) $(QFLAGS) -c $< -o $@
 
-$(QBUILD)/bench.elf: $(QBUILD)/startup.o $(QBUILD)/support.o $(QBUILD)/bench.o $(QBUILD)/harness.o $(QBUILD)/halow_ack.o
+$(QBUILD)/bench.elf: $(QBUILD)/startup.o $(QBUILD)/support.o $(QBUILD)/bench.o $(QBUILD)/harness.o $(QBUILD)/halow_ack.o $(QRNS_OBJS)
 	$(CROSS) -mcpu=ck803 -nostdlib -nostartfiles -T qemu/test.ld -Wl,--gc-sections \
 	    -o $@ $^ -lgcc
 
+# per-stage wall timing: the runner timestamps every UART line
 qemu-bench: clean $(QBUILD)/bench.elf
-	PATH="$(QEMU_DIR):$$PATH" timeout 600 $(QEMU_DIR)/cskysim.exe \
-	    -soc $(SOCCFG) -kernel $(QBUILD)/bench.elf -nographic
+	PATH="$(QEMU_DIR):$$PATH" timeout 900 $(QEMU_DIR)/cskysim.exe \
+	    -soc $(SOCCFG) -kernel $(QBUILD)/bench.elf -nographic | python bench_time.py
 
 .PHONY: qemu-bench
