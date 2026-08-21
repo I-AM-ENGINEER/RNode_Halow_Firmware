@@ -95,12 +95,18 @@ int putchar( int c ){
     return c;
 }
 
+/* memcpy/memset come from the TOOLCHAIN libc objects (memcpy_fast.o /
+ * memset_fast.o, extracted from csky-elfabiv2/lib/ck803/libc.a) for QEMU
+ * builds -DUSE_LIBC_MEMCPY, so bench numbers match production code.
+ * __memcpy_fast: word path only when (src|dst) % 4 == 0, else byte loop. */
+#ifndef USE_LIBC_MEMCPY
 void *memcpy( void *dst, const void *src, size_t n ){
     uint8_t *d = dst;
     const uint8_t *s = src;
     while( n-- ) *d++ = *s++;
     return dst;
 }
+#endif
 
 void *memmove( void *dst, const void *src, size_t n ){
     uint8_t *d = dst;
@@ -115,11 +121,13 @@ void *memmove( void *dst, const void *src, size_t n ){
     return dst;
 }
 
+#ifndef USE_LIBC_MEMCPY
 void *memset( void *dst, int c, size_t n ){
     uint8_t *d = dst;
     while( n-- ) *d++ = (uint8_t)c;
     return dst;
 }
+#endif
 
 int memcmp( const void *a, const void *b, size_t n ){
     const uint8_t *x = a, *y = b;

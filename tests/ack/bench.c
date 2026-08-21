@@ -88,6 +88,51 @@ static void ack_new_frames( int *acked_upto ){
 
 static rns_stream_decoder_t g_dec;
 
+/* ---- deterministic sim time: csky_timer @ 0x40011000 ----
+ * Under -icount the APB timer advances exactly 1 tick per executed
+ * instruction (calibrated: a 4-instruction loop yields 4 ticks/iter), so
+ * stage deltas are exact instruction counts. The SoC core clock is
+ * DEFAULT_SYS_CLK = 128 MHz (inc/sys_config.h): 128 ticks = 1 us at 1 CPI. */
+#define SIM_TIMER ((volatile uint32_t *)0x40011000u)
+static uint32_t g_tk0;
+static volatile uint32_t g_sink;
+
+/* --wrap=memcpy audit: exact copy-call counts per stage. The harness capture
+ * copies stand in for the firmware copies they replace (tx_capture ~ skb copy
+ * in halow_send_frame, test_tcp ~ tcp_server_send heap copy); lwIP-internal
+ * copies are outside this bench. */
+extern void *__real_memcpy(void *, const void *, size_t);
+uint32_t g_mc_calls, g_mc_bytes;
+void *__wrap_memcpy( void *d, const void *s, size_t n ){
+    g_mc_calls++;
+    g_mc_bytes += (uint32_t)n;
+    return __real_memcpy(d, s, n);
+}
+
+static void sim_time_init( void ){
+    SIM_TIMER[2] = 0u;              /* stop */
+    SIM_TIMER[0] = 0xFFFFFFFFu;     /* reload */
+    SIM_TIMER[2] = 7u;              /* EN | periodic | irq masked */
+    (void)SIM_TIMER[3];             /* EOI */
+}
+static uint32_t g_mc0, g_mb0;
+#define TK_BEGIN() do{ g_tk0 = SIM_TIMER[1]; g_mc0 = g_mc_calls; g_mb0 = g_mc_bytes; }while(0)
+static void tk_report( const char *name, uint32_t iters, uint32_t payload_bytes ){
+    uint32_t d = g_tk0 - SIM_TIMER[1];
+    uint32_t cyc_op = (iters != 0u && d >= iters) ? d / iters : 0u;
+    uint64_t us_x100 = ((uint64_t)cyc_op * 25ull) >> 5;    /* cyc/128 us, x100 */
+    printf("tks:%s cycles=%u cyc_op=%u us_op=%u.%02u",
+           name, d, cyc_op,
+           (unsigned)(us_x100 / 100ull), (unsigned)(us_x100 % 100ull));
+    if( payload_bytes != 0u && cyc_op != 0u ){
+        uint64_t kbps = ((uint64_t)payload_bytes * 8ull * 128000ull) / cyc_op;
+        printf(" kbps128=%u", (unsigned)kbps);
+    }
+    printf(" mc_op=%u mcb_op=%u\n",
+           (iters != 0u) ? (g_mc_calls - g_mc0) / iters : 0u,
+           (iters != 0u) ? (g_mc_bytes - g_mb0) / iters : 0u);
+}
+
 enum { PKT_N = 64, PLAIN_LEN = 500 };
 
 static uint8_t g_pkt[PKT_N][520];
@@ -117,37 +162,65 @@ int main( void ){
     rns_stream_decoder_init(&g_dec, bench_noop_cb);
     halow_ack_init();
     halow_ack_config_apply(&cfg);
+    sim_time_init();
 
     for( int i = 0; i < PKT_N; i++ ){
         g_plen[i] = pkt_build(g_pkt[i], 0x31, (uint8_t)i, PLAIN_LEN - 19);
         g_slen[i] = slip_encode(g_slip[i], g_pkt[i], g_plen[i]);
     }
 
+    /* ---- stage 0a: raw 500-B memcpy (the cost of ONE copy layer) ---- */
+    {
+        static uint8_t cdst[520];
+        printf("stage:memcpy500 iters=100000\n");
+        TK_BEGIN();
+        for( int k = 0; k < 100000; k++ ){
+            memcpy(cdst, g_pkt[k & (PKT_N - 1)], 500);
+            g_sink = cdst[k & 15];
+        }
+        tk_report("memcpy500", 100000u, 500u);
+    }
+
+    /* ---- stage 0b: fnv1a over 500 B (fid compute / peer-ACK cost) ---- */
+    printf("stage:fnv500 iters=51200\n");
+    TK_BEGIN();
+    for( int k = 0; k < 800; k++ )
+        for( int i = 0; i < PKT_N; i++ )
+            g_sink = fnv1a(g_pkt[i], 500);
+    tk_report("fnv500", 51200u, 0u);
+
     /* ---- stage 1: SLIP decode only ---- */
     printf("stage:slip iters=12800\n");
+    TK_BEGIN();
     for( int k = 0; k < 200; k++ )
         for( int i = 0; i < PKT_N; i++ ){
             uint16_t consumed = 0;
             (void)rns_stream_decoder_process(&g_dec, g_slip[i], g_slen[i], NULL, &consumed);
         }
+    tk_report("slip", 12800u, 500u);
 
     /* ---- stage 2: RNS header parse ---- */
     printf("stage:parse iters=25600\n");
+    TK_BEGIN();
     for( int k = 0; k < 400; k++ )
         for( int i = 0; i < PKT_N; i++ )
             (void)rns_link_parser_parse(g_pkt[i], g_plen[i], &info);
+    tk_report("parse", 25600u, 500u);
 
     /* ---- stage 3: sha256 link-id (LINKREQUEST parse) ---- */
     printf("stage:sha256_lr iters=6400\n");
+    TK_BEGIN();
     for( int k = 0; k < 100; k++ )
         for( int i = 0; i < PKT_N; i++ ){
             g_pkt[i][0] = (uint8_t)(RNS_DESTINATION_TYPE_SINGLE << 2) | RNS_PACKET_TYPE_LINKREQUEST;
             (void)rns_link_parser_parse(g_pkt[i], g_plen[i], &info);
             g_pkt[i][0] = (uint8_t)(RNS_DESTINATION_TYPE_LINK << 2) | RNS_PACKET_TYPE_DATA;
         }
+    tk_report("sha256_lr", 6400u, 500u);
 
     /* ---- stage 4: RX->TCP stream encode (SLIP + malloc/free) ---- */
     printf("stage:encode iters=6400\n");
+    TK_BEGIN();
     for( int k = 0; k < 100; k++ )
         for( int i = 0; i < PKT_N; i++ ){
             uint8_t *out = NULL;
@@ -155,6 +228,7 @@ int main( void ){
             (void)rns_stream_encode_alloc(g_pkt[i], g_plen[i], &out, &outlen);
             free(out);
         }
+    tk_report("encode", 6400u, 500u);
 
     /* ---- stage 5: full TX pipeline, plain 500-B frames
      * (TCP bytes -> SLIP -> RNS -> bundle/heap -> air -> ACK back) ---- */
@@ -171,6 +245,7 @@ int main( void ){
                                     PEER, MAC_ME, EVM_M10);
         test_tx_reset();
 
+        TK_BEGIN();
         for( int k = 0; k < 60; k++ ){
             for( int i = 1; i < PKT_N; i++ ){
                 uint32_t off = 0;
@@ -199,6 +274,7 @@ int main( void ){
             test_tx_reset();
             acked_upto = 0;
         }
+        tk_report("tx_plain", 3780u, 500u);
         {
             halow_ack_stats_t st;
             halow_ack_stats_get(&st);
@@ -213,6 +289,7 @@ int main( void ){
     printf("stage:rx_deliver iters=19200\n");
     {
         static uint8_t wire[TEST_TCP_CAP_LEN];
+        TK_BEGIN();
         for( int k = 0; k < 300; k++ ){
             for( int i = 0; i < PKT_N; i++ ){
                 uint16_t wl = pkt_build(wire, (uint8_t)(0x40 + (i & 7)),
@@ -224,26 +301,33 @@ int main( void ){
                 if( (i & 7) == 7 ) test_tcp_reset();
             }
         }
+        tk_report("rx_deliver", 19200u, 500u);
     }
 
     /* ---- stage 7: dedup-suppressed RX re-delivery ---- */
     printf("stage:rx_dedup iters=19200\n");
+    TK_BEGIN();
     for( int k = 0; k < 300; k++ )
         for( int i = 0; i < PKT_N; i++ )
             (void)halow_ack_on_rx(g_pkt[i], g_plen[i], PEER, MAC_ME, EVM_M10, &o, &ol);
+    tk_report("rx_dedup", 19200u, 500u);
 
     /* ---- stage 8: empty tick (baseline) ---- */
     printf("stage:tick iters=100000\n");
+    TK_BEGIN();
     for( int i = 0; i < 100000; i++ )
         halow_ack_tick();
+    tk_report("tick", 100000u, 0u);
 
     /* ---- stage 9: RX + immediate ACK TX (radio both ways) ---- */
     printf("stage:rx_ack iters=12800\n");
+    TK_BEGIN();
     for( int k = 0; k < 200; k++ )
         for( int i = 0; i < PKT_N; i++ ){
             fill_payload(r, sizeof(r), (uint8_t)(k + i));
             (void)halow_ack_on_rx(r, sizeof(r), PEER, MAC_ME, EVM_M10, &o, &ol);
         }
+    tk_report("rx_ack", 12800u, sizeof(r));
 
     {
         halow_ack_stats_t st;

@@ -88,6 +88,9 @@ SOCCFG   = $(QEMU_DIR)/soccfg/cskyv2/smartl_803_cfg.xml
 QFLAGS   = -mcpu=ck803 -std=c11 -O1 -g -Wall -Wno-unused-parameter \
            -fsigned-char -mno-required-printf -ffunction-sections -fdata-sections \
            -Istubs -I../../inc -I../../sdk/include
+# production memcpy/memset from the toolchain libc (word path when both
+# pointers are 4-aligned, byte loop otherwise) - see qemu/support.c
+LIBC_MEM_OBJS = qemu/memcpy_fast.o qemu/memset_fast.o
 
 qemu: clean $(QBUILD)/test_ack.elf $(QBUILD)/test_size.elf
 	PATH="$(QEMU_DIR):$$PATH" timeout 600 $(QEMU_DIR)/cskysim.exe \
@@ -138,17 +141,17 @@ $(QBUILD)/sha256.o: ../../sdk/lib/crypto/sha256.c
 
 $(QBUILD)/support.o: qemu/support.c
 	@mkdir -p $(QBUILD)
-	$(CROSS) $(QFLAGS) -c $< -o $@
+	$(CROSS) $(QFLAGS) -DUSE_LIBC_MEMCPY -c $< -o $@
 
 $(QBUILD)/startup.o: qemu/startup.s
 	@mkdir -p $(QBUILD)
 	$(CROSS) -mcpu=ck803 -c $< -o $@
 
-$(QBUILD)/test_ack.elf: $(QBUILD)/startup.o $(QBUILD)/support.o $(QBUILD)/main.o $(QBUILD)/harness.o $(QBUILD)/halow_ack.o $(QRNS_OBJS)
+$(QBUILD)/test_ack.elf: $(QBUILD)/startup.o $(QBUILD)/support.o $(LIBC_MEM_OBJS) $(QBUILD)/main.o $(QBUILD)/harness.o $(QBUILD)/halow_ack.o $(QRNS_OBJS)
 	$(CROSS) -mcpu=ck803 -nostdlib -nostartfiles -T qemu/test.ld -Wl,--gc-sections \
 	    -o $@ $^ -lgcc
 
-$(QBUILD)/test_size.elf: $(QBUILD)/startup.o $(QBUILD)/support.o $(QBUILD)/size_test.o $(QBUILD)/harness.o
+$(QBUILD)/test_size.elf: $(QBUILD)/startup.o $(QBUILD)/support.o $(LIBC_MEM_OBJS) $(QBUILD)/size_test.o $(QBUILD)/harness.o
 	$(CROSS) -mcpu=ck803 -nostdlib -nostartfiles -T qemu/test.ld -Wl,--gc-sections \
 	    -o $@ $^ -lgcc
 
@@ -156,13 +159,29 @@ $(QBUILD)/bench.o: bench.c harness.h stubs/basic_include.h
 	@mkdir -p $(QBUILD)
 	$(CROSS) $(QFLAGS) -c $< -o $@
 
-$(QBUILD)/bench.elf: $(QBUILD)/startup.o $(QBUILD)/support.o $(QBUILD)/bench.o $(QBUILD)/harness.o $(QBUILD)/halow_ack.o $(QRNS_OBJS)
+$(QBUILD)/bench.elf: $(QBUILD)/startup.o $(QBUILD)/support.o $(LIBC_MEM_OBJS) $(QBUILD)/bench.o $(QBUILD)/harness.o $(QBUILD)/halow_ack.o $(QRNS_OBJS)
+	$(CROSS) -mcpu=ck803 -nostdlib -nostartfiles -T qemu/test.ld -Wl,--gc-sections \
+	    -Wl,--wrap=memcpy \
+	    -o $@ $^ -lgcc
+
+# per-stage wall timing: the runner timestamps every UART line.
+# -icount: virtual time is instruction-locked -> the in-bench APB-timer
+# ticks (tks: lines) are exact instruction counts (1 tick = 1 instruction).
+qemu-bench: clean $(QBUILD)/bench.elf
+	PATH="$(QEMU_DIR):$$PATH" timeout 900 $(QEMU_DIR)/cskysim.exe \
+	    -soc $(SOCCFG) -kernel $(QBUILD)/bench.elf -nographic -icount shift=0 | python bench_time.py
+
+# instruction-counter calibration probe (coret vs APB timer, 1 tick = 1 instr)
+$(QBUILD)/timer_probe.o: qemu/timer_probe.c
+	@mkdir -p $(QBUILD)
+	$(CROSS) $(QFLAGS) -c $< -o $@
+
+$(QBUILD)/timer_probe.elf: $(QBUILD)/startup.o $(QBUILD)/support.o $(LIBC_MEM_OBJS) $(QBUILD)/timer_probe.o
 	$(CROSS) -mcpu=ck803 -nostdlib -nostartfiles -T qemu/test.ld -Wl,--gc-sections \
 	    -o $@ $^ -lgcc
 
-# per-stage wall timing: the runner timestamps every UART line
-qemu-bench: clean $(QBUILD)/bench.elf
-	PATH="$(QEMU_DIR):$$PATH" timeout 900 $(QEMU_DIR)/cskysim.exe \
-	    -soc $(SOCCFG) -kernel $(QBUILD)/bench.elf -nographic | python bench_time.py
+qemu-probe: $(QBUILD)/timer_probe.elf
+	PATH="$(QEMU_DIR):$$PATH" timeout 120 $(QEMU_DIR)/cskysim.exe \
+	    -soc $(SOCCFG) -kernel $(QBUILD)/timer_probe.elf -nographic -icount shift=0
 
-.PHONY: qemu-bench
+.PHONY: qemu-bench qemu-probe

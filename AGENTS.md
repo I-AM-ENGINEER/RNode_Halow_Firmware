@@ -306,10 +306,29 @@ per-stage wall timing (bench_time.py timestamps each UART line).
 
 No-wait proof: t_vlink_zero_wait_invariant asserts feed → bundle → air →
 receive → decode → TCP completes at the SAME virtual jiffy with zero os_sleep
-calls. Measured on QEMU ck803 (500-B packets): full TX chain 20.8 µs/pkt,
-full RX chain 12.8 µs, immediate-ACK rx 3.7 µs, empty tick 1.66 µs (0.017% CPU
-at 100 Hz). Hotspots if more CPU is ever needed: fnv1a runs ~3× per frame
-end-to-end (TX fid, RX dedup, ack path) and the payload is memcpy'd per layer.
+calls. `make qemu-bench` runs under `-icount shift=0` with the APB timer
+(0x40011000) as an instruction counter (calibrated: 1 tick = 1 executed
+instruction; qemu/timer_probe.c) and links the PRODUCTION toolchain
+memcpy/memset objects (libc.a memcpy_fast: word path only when (src|dst)%4==0,
+else byte loop) — stage `tks:` lines are exact, run-to-run identical
+instruction counts. 128 ticks = 1 µs at the SoC core clock (DEFAULT_SYS_CLK
+128 MHz), assuming 1 CPI (no SRAM stall model). Per 500-B packet:
+full TX chain 26,745 cycles (209 µs, 19.1 Mbit/s), full RX chain 21,041
+(164 µs, 24.3 Mbit/s), SLIP decode 11,163, SLIP encode+malloc 10,600,
+fnv1a 3,008, 500-B aligned memcpy 436, RNS parse 325, empty tick 469
+(0.0037% CPU at 100 Hz). RF ceiling at 1 MHz MCS7 is 7.8 Mbit/s, so CPU has
+~2.5× headroom; at 2 MHz channels (15.6 Mbit/s) the TX byte-FSMs become the
+limiter. Hotspots if more CPU is ever needed: the SLIP decode/encode
+per-byte state machines (~22 instr/byte, 42-50% of each direction) and fnv1a
+(~3× per frame end-to-end: TX fid, RX dedup, ack path) — NOT the memcpys.
+
+Copy-layer audit (measured with -Wl,--wrap=memcpy in bench.elf): TX moves a
+500-B packet through 6 memcpy calls / 1,616 B (SLIP-decode byte-loop into the
+decoder frame buffer + staging append halow_ack.c:985 [the intended one
+copy] + skb copy halow.c:886 + 2×16-B RNS header copies + 32-B fids init);
+RX through 4 calls / 571 B (SLIP-encode byte-loop + tcp_server.c:556 heap
+copy + netconn NETCONN_COPY inside lwIP + 2×16-B header copies). The RF→TCP
+bundle walk itself is zero-copy (pointers into the wire frame).
 
 Env-peer ACK starvation (found by the lossy model, fixed 2026-08-21): after
 the 8-ack probe flips a peer to envelope compat, plain frames (seq 0xFFFF)
