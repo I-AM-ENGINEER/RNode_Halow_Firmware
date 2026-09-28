@@ -50,10 +50,26 @@ jobs:
           tar -tvf "${NAME}.tar"
           sha256sum "${NAME}.tar" | tee -a "$GITHUB_STEP_SUMMARY"
 
+      - name: Raw OTA image + crc32 sidecar (github auto-update assets)
+        run: |
+          TAG="${{ inputs.version }}"
+          NAME="RNode-Halow-${TAG//./_}"
+          cp -v out/fw.bin "${NAME}.fw.bin"
+          # CRC-32 (IEEE, same polynomial as the firmware's ota_update check),
+          # lowercase hex text — the sidecar ota_update.c fetches as
+          # "<asset>.crc32" before flashing.
+          python3 -c "import binascii,sys; print('%08x' % (binascii.crc32(open(sys.argv[1],'rb').read()) & 0xffffffff))" \
+            "${NAME}.fw.bin" > "${NAME}.fw.bin.crc32"
+          cat "${NAME}.fw.bin.crc32"
+          ls -la "${NAME}.fw.bin"*
+
       - name: Publish prerelease (tag auto-created, placeholder body)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.version }}
           prerelease: true
           body: PLACEHOLDER
-          files: RNode-Halow-*.tar
+          files: |
+            RNode-Halow-*.tar
+            RNode-Halow-*.fw.bin
+            RNode-Halow-*.fw.bin.crc32
