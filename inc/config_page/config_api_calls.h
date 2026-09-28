@@ -35,6 +35,8 @@ int32_t web_api_rf_dbg_post( const cJSON *in, cJSON *out );
 
 int32_t web_api_online_ota_get( const cJSON *in, cJSON *out );
 int32_t web_api_online_ota_post( const cJSON *in, cJSON *out );
+int32_t web_api_ota_upd_check_post( const cJSON *in, cJSON *out );
+int32_t web_api_ota_upd_install_post( const cJSON *in, cJSON *out );
 
 int32_t web_api_stat_get( const cJSON *in, cJSON *out );
 int32_t web_api_all_get( const cJSON *in, cJSON *out );

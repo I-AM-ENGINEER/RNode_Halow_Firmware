@@ -627,6 +627,10 @@
         });
 
         document.getElementById('webota_file').addEventListener('change', updateWebOtaDisabled);
+        document.getElementById('fw_auto_save').addEventListener('click', saveFwAuto);
+        document.getElementById('fw_auto_check').addEventListener('click', checkFwAuto);
+        document.getElementById('fw_auto_install').addEventListener('click', installFwAuto);
+        
         document.getElementById('webota_flash').addEventListener('click', fwWebOtaFlash);
         document.getElementById('fw_reboot').addEventListener('click', rebootDevice);
         document.getElementById('fw_factory_reset').addEventListener('click', factoryResetDevice);
@@ -1501,6 +1505,11 @@
 
         setText('fw_current', devStat.ver);
 
+        const fwAuto = pick(state?.ota, state?.api_online_ota, state?.online_ota);
+        applyFwAuto(fwAuto);
+
+        
+
         const privacy = pick(state?.privacy, state?.api_privacy_cfg, state?.privacy_cfg);
         setSelect('privacy_mac_rotation', String(privacy.rotation ?? 0));
         setCheckbox('privacy_mac_broadcast', privacy.broadcast);
@@ -2062,6 +2071,112 @@
         document.body.removeChild(a);
     }
 
+    // ---- device-side automatic update (GitHub Releases, plain HTTP) ----
+
+    function formatFwAutoAt(ms) {
+        const n = Number(ms);
+        if (!Number.isFinite(n) || n <= 0) { return 'never'; }
+        const d = new Date(n);
+        return isNaN(d.getTime()) ? 'never' : d.toLocaleString();
+    }
+
+    function applyFwAuto(o) {
+        const ota = (o && typeof o === 'object') ? o : {};
+        setCheckbox('fw_auto_en', !!ota.en);
+        setSelect('fw_auto_period', String(ota.period_h ?? 24));
+        setInput('fw_auto_url', ota.url ?? '');
+        setText('fw_auto_cur', ota.cur ?? '--');
+        setText('fw_auto_tag', ota.avail ? `${ota.tag} (update available)` : (ota.tag || '--'));
+        setText('fw_auto_at', formatFwAutoAt(ota.at));
+
+        const msgs = [];
+        if (ota.busy) { msgs.push('Update in progress, do not power off the device...'); }
+        if (ota.err) { msgs.push(ota.err); }
+        setStatus('fw_auto_status', msgs.join(' '), !!ota.err);
+    }
+
+    async function pollFwAuto(tries) {
+        for (let i = 0; i < tries; i++) {
+            await new Promise(r => setTimeout(r, 2000));
+            try {
+                const res = await fetch('/api/online_ota', { cache: 'no-store' });
+                if (res.ok) {
+                    const o = await res.json();
+                    applyFwAuto(o);
+                    if (!o.busy) { return; }
+                }
+            } catch (err) {
+                console.error('pollFwAuto error', err);
+            }
+        }
+    }
+
+    async function saveFwAuto() {
+        const payload = {
+            en: document.getElementById('fw_auto_en').checked,
+            period_h: parseInt(document.getElementById('fw_auto_period').value, 10) || 24,
+            url: document.getElementById('fw_auto_url').value.trim()
+        };
+
+        try {
+            const res = await postJson('/api/online_ota', payload);
+            if (!res.ok) {
+                setStatus('fw_auto_status', 'Failed to save auto-update settings', true);
+                return;
+            }
+            applyFwAuto(await res.json());
+            setStatus('fw_auto_status', 'Auto-update settings saved', false);
+        } catch (err) {
+            console.error('saveFwAuto error', err);
+            setStatus('fw_auto_status', 'Failed to save auto-update settings', true);
+        }
+    }
+
+    async function checkFwAuto() {
+        const btn = document.getElementById('fw_auto_check');
+        btn.disabled = true;
+        try {
+            const res = await postJson('/api/ota_upd_check', {});
+            if (!res.ok) {
+                setStatus('fw_auto_status', 'Check request failed', true);
+                return;
+            }
+            setStatus('fw_auto_status', 'Checking for updates...', false);
+            await pollFwAuto(15);
+        } catch (err) {
+            console.error('checkFwAuto error', err);
+            setStatus('fw_auto_status', 'Check request failed', true);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    async function installFwAuto() {
+        if (!window.confirm(
+            'Download and flash the latest release now?\n' +
+            'Do not power off the device until it reboots.')) {
+            return;
+        }
+
+        const btn = document.getElementById('fw_auto_install');
+        btn.disabled = true;
+        try {
+            const res = await postJson('/api/ota_upd_install', {});
+            if (!res.ok) {
+                setStatus('fw_auto_status', 'Install request failed', true);
+                return;
+            }
+            setStatus('fw_auto_status', 'Install started, do not power off the device...', false);
+            await pollFwAuto(300);
+        } catch (err) {
+            console.error('installFwAuto error', err);
+            setStatus('fw_auto_status', 'Install request failed', true);
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    // ------------------------------------------------------------------
 
     async function rebootDevice() {
         clearStatus('fw_action_status');

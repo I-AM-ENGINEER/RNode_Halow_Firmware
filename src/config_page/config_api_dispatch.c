@@ -92,6 +92,10 @@ static const web_api_route_t s_api_routes[] = {
     { "ack_cfg",            web_api_ack_cfg_get,            web_api_ack_cfg_post        },
     { "telemetry_send",     NULL,                           web_api_telemetry_send_post },
 
+    { "online_ota",         web_api_online_ota_get,         web_api_online_ota_post     },
+    { "ota_upd_check",      NULL,                           web_api_ota_upd_check_post  },
+    { "ota_upd_install",    NULL,                           web_api_ota_upd_install_post },
+
     { "ota_wipe_lfs",       NULL,                           web_api_ota_wipe_lfs_post   },
     { "ota_file_begin",     NULL,                           web_api_ota_file_begin_post },
     { "ota_file_end",       NULL,                           web_api_ota_file_end_post   },

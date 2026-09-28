@@ -580,6 +580,49 @@
             </div>
 
             <div class="panel">
+                <h3>Automatic Update (on device)</h3>
+
+                <label class="toggle-label">
+                    <span>Enable automatic update check and install</span>
+                    <input type="checkbox" id="fw_auto_en">
+                </label>
+
+                <label>
+                    <span>Check interval</span>
+                    <select id="fw_auto_period">
+                        <option value="1">1 hour</option>
+                        <option value="6">6 hours</option>
+                        <option value="12">12 hours</option>
+                        <option value="24" selected>24 hours</option>
+                        <option value="72">3 days</option>
+                        <option value="168">7 days</option>
+                    </select>
+                </label>
+
+                <label>
+                    <span>Update source URL (plain HTTP)</span>
+                    <input type="text" id="fw_auto_url" spellcheck="false" placeholder="http://...">
+                </label>
+
+                <p class="field-hint">The firmware has no TLS stack, so this must be a plain-HTTP URL. It can return GitHub Releases JSON (e.g. a LAN reverse proxy for api.github.com) or a minimal manifest {"tag","url","size","crc32"}. When enabled, a newer release is downloaded to the device and flashed automatically, then the device reboots.</p>
+
+                <table class="stats-table nearby-summary-table">
+                    <tbody>
+                    <tr><th>Running version</th><td id="fw_auto_cur">--</td></tr>
+                    <tr><th>Latest release seen</th><td id="fw_auto_tag">--</td></tr>
+                    <tr><th>Last check</th><td id="fw_auto_at">--</td></tr>
+                    </tbody>
+                </table>
+
+                <div class="panel-actions panel-actions-wrap">
+                    <button type="button" id="fw_auto_save">Save</button>
+                    <button type="button" id="fw_auto_check" class="secondary">Check now</button>
+                    <button type="button" id="fw_auto_install" class="danger">Install now</button>
+                </div>
+                <div id="fw_auto_status" class="status-message" aria-live="polite"></div>
+            </div>
+
+                        <div class="panel">
                 <h3>Firmware Update</h3>
 
                 <div class="panel warning-panel" style="margin-bottom: 0.75rem;">

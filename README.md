@@ -21,6 +21,7 @@ The following is currently implemented:
 - Frequency and modulation parameter selection
 - TCP server
 - OTA firmware update (unencrypted)
+- Device-side automatic update checks against GitHub Releases (opt-in via web UI, plain-HTTP source URL)
 - Confirmed compatibility with RNS and its extensions — Meshchat, Sideband
 - LBT (Listen Before Talk)
 - Airtime limiting (currently broken)
@@ -72,6 +73,18 @@ By default, anyone can connect to the TCP port and send data directly over the a
 - `192.168.1.X/32` — allow only a single specific device
 
 The **Client** field shows who is currently connected to the socket; only one connection at a time is allowed. Refreshes only on page reload.
+
+#### Automatic Firmware Update
+
+The Firmware Update page has an **Automatic Update (on device)** panel: the device can periodically check GitHub Releases for a newer firmware, download and flash it, and reboot. Disabled by default; enabling it in the web UI is the opt-in. `Check now` only records availability, `Install now` always requires a confirmation click.
+
+Note: this firmware contains no TLS stack, so the update source URL must serve plain HTTP. GitHub itself is HTTPS-only, so point the URL at a small LAN reverse proxy (e.g. nginx/caddy in front of `api.github.com`) or any plain-HTTP mirror. The URL may return either the GitHub Releases JSON (`tag_name` + `assets[].browser_download_url`) or a minimal manifest:
+
+```json
+{"tag": "v2.4.0", "url": "http://192.168.1.10/fw.bin", "size": 786432, "crc32": "0x1234abcd"}
+```
+
+API: `GET/POST /api/online_ota` (status/config: `en`, `period_h`, `url`), `POST /api/ota_upd_check`, `POST /api/ota_upd_install`.
 
 ### Reticulum Configuration
 
@@ -186,6 +199,18 @@ PHY WiFi - MCS0
 192.168.1.X/32 - разрешить только одному устройству
 
 В поле client пишется кто подключен к данному сокету в текущий момент, подключение может быть только одно. Обновляется только при обновлении страницы
+
+#### Автоматическое обновление прошивки
+
+На странице Firmware Update есть панель **Automatic Update (on device)**: устройство может периодически проверять GitHub Releases, скачивать и прошивать новую версию и перезагружаться. По умолчанию выключено; включение в веб-интерфейсе и есть согласие на автоустановку. `Check now` только проверяет наличие обновления, `Install now` требует подтверждения.
+
+Важно: в прошивке нет TLS, поэтому URL источника должен отдавать обычный HTTP. GitHub работает только по HTTPS, поэтому указывайте URL локального обратного прокси (nginx/caddy перед `api.github.com`) или любого HTTP-зеркала. URL может отдавать как JSON GitHub Releases (`tag_name` + `assets[].browser_download_url`), так и минимальный манифест:
+
+```json
+{"tag": "v2.4.0", "url": "http://192.168.1.10/fw.bin", "size": 786432, "crc32": "0x1234abcd"}
+```
+
+API: `GET/POST /api/online_ota` (статус/настройки: `en`, `period_h`, `url`), `POST /api/ota_upd_check`, `POST /api/ota_upd_install`.
 
 
 ## Настройка Reticulum через конфиг

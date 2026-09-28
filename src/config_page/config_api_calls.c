@@ -30,6 +30,7 @@
 #include "telemetry.h"
 #include "hal/spi_nor.h"
 #include "ota.h"
+#include "ota_update.h"
 #include "nearby_detect.h"
 #include "mac_generator.h"
 #include "lib/logc/log.h"
@@ -1108,11 +1109,70 @@ int32_t web_api_cpu_dump_get( const cJSON *in, cJSON *out ){
 }
 
 int32_t web_api_online_ota_get( const cJSON *in, cJSON *out ){
-    return 0;
+    (void)in;
+
+    if (out == NULL) {
+        return WEB_API_RC_BAD_REQUEST;
+    }
+
+    ota_update_status_json(out);
+    return WEB_API_RC_OK;
 }
 
 int32_t web_api_online_ota_post( const cJSON *in, cJSON *out ){
-    return 0;
+    ota_update_config_t cfg;
+    bool b;
+    int  v;
+
+    if (in == NULL || !cJSON_IsObject(in) || out == NULL) {
+        log_warn("online_ota_post bad json");
+        return api_err(out, WEB_API_RC_BAD_REQUEST, "bad json");
+    }
+
+    ota_update_config_load(&cfg);
+
+    if (json_get_bool(in, "en", &b))      { cfg.enabled = b; }
+    if (json_get_int(in, "period_h", &v)) { if (v > 0) { cfg.period_h = (uint32_t)v; } }
+    (void)json_get_string(in, "url", cfg.url, sizeof(cfg.url));
+
+    ota_update_config_save(&cfg);
+
+    log_debug("online_ota updated en=%d period=%lu h",
+              cfg.enabled ? 1 : 0, (unsigned long)cfg.period_h);
+
+    return web_api_online_ota_get(NULL, out);
+}
+
+int32_t web_api_ota_upd_check_post( const cJSON *in, cJSON *out ){
+    (void)in;
+
+    if (out == NULL) {
+        return WEB_API_RC_BAD_REQUEST;
+    }
+
+    if (ota_fw_active() || ota_wota_active()) {
+        return api_err(out, WEB_API_RC_BAD_REQUEST, "ota busy");
+    }
+
+    log_debug("ota_upd_check");
+    ota_update_check_now();
+    return web_api_online_ota_get(NULL, out);
+}
+
+int32_t web_api_ota_upd_install_post( const cJSON *in, cJSON *out ){
+    (void)in;
+
+    if (out == NULL) {
+        return WEB_API_RC_BAD_REQUEST;
+    }
+
+    if (ota_fw_active() || ota_wota_active()) {
+        return api_err(out, WEB_API_RC_BAD_REQUEST, "ota busy");
+    }
+
+    log_debug("ota_upd_install");
+    ota_update_install_now();
+    return web_api_online_ota_get(NULL, out);
 }
 
 int32_t web_api_stat_get( const cJSON *in, cJSON *out ){
