@@ -63,10 +63,11 @@ jobs:
           cat "${NAME}.fw.bin.crc32"
           ls -la "${NAME}.fw.bin"*
 
-      - name: Publish full release (tag auto-created, placeholder body)
+      - name: Publish prerelease (tag auto-created, placeholder body)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ inputs.version }}
+          prerelease: true
           body: PLACEHOLDER
           files: |
             RNode-Halow-*.tar
