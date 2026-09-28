@@ -59,6 +59,13 @@
 
 #define OTA_UPDATE_FW_MIN_SIZE              (1024u)     /* sanity floor */
 
+/* Release quarantine: a freshly published release may hide critical bugs for
+ * a few days (after which it can be withdrawn). The automatic install path
+ * refuses releases younger than this; manual install is exempt. There is no
+ * wall clock in this firmware, so "now" is the Date: header of the GitHub
+ * HTTP response and the release age is now_epoch - published_at. */
+#define OTA_UPDATE_MIN_AGE_S                (3u * 24u * 3600u)
+
 /* Everything below runs on the single "otaupd" worker task, so these
  * function-static scratch buffers are safe (and keep the 4 kB task stack
  * small: the header buffer alone would eat a quarter of it). */
@@ -77,6 +84,8 @@ static char    s_last_err[OTA_UPDATE_ERR_MAX];
 static int64_t s_last_check_ms;
 static bool    s_avail;
 static bool    s_busy;
+static bool    s_hold;                  /* newer release, but quarantined */
+static int32_t s_age_h;                 /* release age in hours, -1 = unknown */
 
 /* ------------------------------------------------------------------ */
 /* config                                                              */
@@ -168,6 +177,8 @@ void ota_update_status_json( cJSON *out ){
     cJSON_AddStringToObject(out, "err", s_last_err);
     cJSON_AddBoolToObject(out, "avail", s_avail);
     cJSON_AddBoolToObject(out, "busy",  s_busy);
+    cJSON_AddBoolToObject(out, "hold",  s_hold);
+    cJSON_AddNumberToObject(out, "age_h", (double)s_age_h);
     cJSON_AddNumberToObject(out, "at", (double)s_last_check_ms);
 }
 
@@ -321,6 +332,7 @@ typedef struct {
     void           *body_arg;
     bool            want_len;               /* require a known body length */
     char            location[OTA_UPDATE_URL_MAX];  /* 3xx target, if any  */
+    char            date[64];               /* Date: header (IMF-fixdate)  */
     long            status;
 } http_req_t;
 
@@ -331,6 +343,84 @@ static bool hdr_prefix( const char *line, size_t len, const char *name ){
         return false;
     }
     return true;
+}
+
+/* days since 1970-01-01 from a proleptic-Gregorian y/m/d (Hinnant) */
+static int64_t days_from_civil( int64_t y, uint32_t m, uint32_t d ){
+    int64_t  era;
+    uint32_t yoe, doy, doe;
+
+    y -= (m <= 2u);
+    era    = ((y >= 0) ? y : (y - 399)) / 400;
+    yoe    = (uint32_t)(y - era * 400);
+    doy    = (153u * (m + ((m > 2u) ? -3u : 9u)) + 2u) / 5u + d - 1u;
+    doe    = yoe * 365u + yoe / 4u - yoe / 100u + doy;
+    return era * 146097 + (int64_t)doe - 719468;
+}
+
+static int64_t hms_to_epoch( int64_t days, uint32_t hh, uint32_t mm, uint32_t ss ){
+    return days * 86400 + (int64_t)hh * 3600 + (int64_t)mm * 60 + (int64_t)ss;
+}
+
+static uint32_t month_from_name( const char *s ){
+    static const char *const mon[12] = {
+        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
+    };
+    uint32_t i;
+
+    if (s == NULL) {
+        return 0;
+    }
+    for (i = 0; i < 12; i++) {
+        if (strncasecmp(s, mon[i], 3) == 0) {
+            return i + 1;
+        }
+    }
+    return 0;
+}
+
+/* IMF-fixdate: "Tue, 15 Nov 2024 08:12:31 GMT" -> unix epoch (0 on error) */
+static int64_t http_date_to_epoch( const char *s ){
+    char     mon_name[4] = {0, 0, 0, 0};
+    uint32_t day = 0, hh = 0, mm = 0, ss = 0;
+    uint32_t mon;
+    int      year = 0;
+
+    if (s == NULL) {
+        return 0;
+    }
+
+    if (sscanf(s, "%*3s, %u %3s %d %u:%u:%u",
+               &day, mon_name, &year, &hh, &mm, &ss) != 6) {
+        return 0;
+    }
+
+    mon = month_from_name(mon_name);
+    if ((mon == 0) || (day == 0) || (day > 31u) || (year < 1970)) {
+        return 0;
+    }
+
+    return hms_to_epoch(days_from_civil(year, mon, day), hh, mm, ss);
+}
+
+/* ISO-8601 UTC: "2024-11-15T08:12:31Z" -> unix epoch (0 on error) */
+static int64_t iso8601_to_epoch( const char *s ){
+    int     year = 0, mon = 0, day = 0;
+    uint32_t hh = 0, mm = 0, ss = 0;
+
+    if (s == NULL) {
+        return 0;
+    }
+    if (sscanf(s, "%d-%d-%dT%u:%u:%u", &year, &mon, &day, &hh, &mm, &ss) != 6) {
+        return 0;
+    }
+    if ((year < 1970) || (mon < 1) || (mon > 12) || (day < 1) || (day > 31)) {
+        return 0;
+    }
+
+    return hms_to_epoch(days_from_civil(year, (uint32_t)mon, (uint32_t)day),
+                        hh, mm, ss);
 }
 
 /* read + parse status line and headers, then stream the body.
@@ -427,6 +517,23 @@ static long http_exchange( struct netconn *conn, http_req_t *req ){
                         req->location[cp] = v[cp];
                     }
                     req->location[vn] = 0;
+                } else if (hdr_prefix(h, ll, "Date:")) {
+                    /* IMF-fixdate, e.g. "Tue, 15 Nov 2024 08:12:31 GMT" */
+                    const char *v = h + 5;
+                    size_t      vn;
+                    size_t      cp;
+
+                    while ((*v == ' ') || (*v == '\t')) {
+                        v++;
+                    }
+                    vn = strcspn(v, "\r\n");
+                    if (vn >= sizeof(req->date)) {
+                        vn = sizeof(req->date) - 1;
+                    }
+                    for (cp = 0; cp < vn; cp++) {
+                        req->date[cp] = v[cp];
+                    }
+                    req->date[vn] = 0;
                 }
             }
 
@@ -527,12 +634,16 @@ static long http_exchange( struct netconn *conn, http_req_t *req ){
 }
 
 static long http_get( const char *url, http_body_cb_t cb, void *cb_arg,
-                      bool want_len ){
+                      bool want_len, char *date_out, size_t date_sz ){
     http_url_t u;
     ip_addr_t  ip;
     char       host[96];
     int        depth;
     long       sc = -1;
+
+    if (date_out != NULL && date_sz > 0) {
+        date_out[0] = 0;
+    }
 
     if (http_parse_url(url, &u) != 0) {
         return -1;
@@ -593,6 +704,11 @@ static long http_get( const char *url, http_body_cb_t cb, void *cb_arg,
 
         sc = http_exchange(conn, &rq);
 
+        if ((date_out != NULL) && (date_sz > 0) && (rq.date[0] != 0)) {
+            strncpy(date_out, rq.date, date_sz - 1);
+            date_out[date_sz - 1] = 0;
+        }
+
         netconn_close(conn);
         netconn_delete(conn);
 
@@ -634,6 +750,9 @@ typedef struct {
     bool     have_size;
     uint32_t crc;
     bool     have_crc;
+    int64_t  published;                     /* unix epoch of publication */
+    bool     have_published;
+    bool     prerelease;                    /* GitHub prerelease/draft   */
 } release_info_t;
 
 static bool ci_ends_with( const char *s, const char *suffix ){
@@ -688,9 +807,27 @@ static int32_t release_parse( const char *body, release_info_t *ri ){
     if (cJSON_IsString(j)) {
         /* --- GitHub Releases API shape --- */
         cJSON *assets = cJSON_GetObjectItemCaseSensitive(root, "assets");
+        cJSON *j_pre  = cJSON_GetObjectItemCaseSensitive(root, "prerelease");
+        cJSON *j_drft = cJSON_GetObjectItemCaseSensitive(root, "draft");
+        cJSON *j_pub  = cJSON_GetObjectItemCaseSensitive(root, "published_at");
         cJSON *a;
         int    best = 0;
         char   best_name[96];
+
+        /* Releases only: never auto-install a prerelease or draft.
+         * (/releases/latest already excludes them, but the URL is
+         * configurable, so check explicitly.) */
+        if (cJSON_IsTrue(j_pre) || cJSON_IsTrue(j_drft)) {
+            strncpy(ri->tag, j->valuestring, sizeof(ri->tag) - 1);
+            ri->prerelease = true;
+            cJSON_Delete(root);
+            return -6;
+        }
+
+        if (cJSON_IsString(j_pub)) {
+            ri->published      = iso8601_to_epoch(j_pub->valuestring);
+            ri->have_published = (ri->published > 0);
+        }
 
         strncpy(ri->tag, j->valuestring, sizeof(ri->tag) - 1);
 
@@ -768,6 +905,8 @@ static int32_t release_parse( const char *body, release_info_t *ri ){
         cJSON *j_url  = cJSON_GetObjectItemCaseSensitive(root, "url");
         cJSON *j_size = cJSON_GetObjectItemCaseSensitive(root, "size");
         cJSON *j_crc  = cJSON_GetObjectItemCaseSensitive(root, "crc32");
+        cJSON *j_pub  = cJSON_GetObjectItemCaseSensitive(root, "published");
+        cJSON *j_pub2 = cJSON_GetObjectItemCaseSensitive(root, "published_at");
 
         if (cJSON_IsString(j_tag)) {
             strncpy(ri->tag, j_tag->valuestring, sizeof(ri->tag) - 1);
@@ -794,6 +933,17 @@ static int32_t release_parse( const char *body, release_info_t *ri ){
         } else if (cJSON_IsString(j_crc)) {
             ri->crc      = (uint32_t)strtoul(j_crc->valuestring, NULL, 0);
             ri->have_crc = true;
+        }
+        /* publication time for the quarantine: epoch number or ISO string */
+        if (cJSON_IsNumber(j_pub)) {
+            ri->published      = (int64_t)j_pub->valuedouble;
+            ri->have_published = (ri->published > 0);
+        } else if (cJSON_IsString(j_pub)) {
+            ri->published      = iso8601_to_epoch(j_pub->valuestring);
+            ri->have_published = (ri->published > 0);
+        } else if (cJSON_IsString(j_pub2)) {
+            ri->published      = iso8601_to_epoch(j_pub2->valuestring);
+            ri->have_published = (ri->published > 0);
         }
     }
 
@@ -841,18 +991,32 @@ static bool crc_sidecar_fetch( const char *url, uint32_t *out ){
     acc.buf = s_crc_text;
     acc.cap = OTA_UPDATE_CRC_TEXT_MAX;
 
-    sc = http_get(url, accum_sink, &acc, false);
+    sc = http_get(url, accum_sink, &acc, false, NULL, 0);
     if (sc != 200 || acc.len == 0 || acc.too_big) {
         return false;
     }
     s_crc_text[acc.len] = 0;
 
-    *out = (uint32_t)strtoul(s_crc_text, NULL, 0);
+    /* CI writes the sidecar as bare lowercase hex ("1a2b3c4d"); a "0x"
+     * prefix is tolerated. Always hex: an all-digit CRC like "12345678"
+     * must not be misread as decimal. */
+    {
+        const char *p = s_crc_text;
+
+        while ((*p == ' ') || (*p == '\t') || (*p == '\r') || (*p == '\n')) {
+            p++;
+        }
+        if ((p[0] == '0') && ((p[1] == 'x') || (p[1] == 'X'))) {
+            p += 2;
+        }
+        *out = (uint32_t)strtoul(p, NULL, 16);
+    }
     return (*out != 0);
 }
 
 /* fetch + parse the release manifest */
-static int32_t release_fetch( const char *url, release_info_t *ri ){
+static int32_t release_fetch( const char *url, release_info_t *ri,
+                              char *date_out, size_t date_sz ){
     accum_t acc;
     long    sc;
 
@@ -860,7 +1024,7 @@ static int32_t release_fetch( const char *url, release_info_t *ri ){
     acc.buf = s_manifest_buf;
     acc.cap = OTA_UPDATE_MANIFEST_MAX - 1;
 
-    sc = http_get(url, accum_sink, &acc, false);
+    sc = http_get(url, accum_sink, &acc, false, date_out, date_sz);
     if (sc < 0) {
         log_warn("upd: manifest fetch failed (%ld)", sc);
         return -1;
@@ -884,9 +1048,14 @@ static int32_t release_fetch( const char *url, release_info_t *ri ){
 /* check + install                                                     */
 /* ------------------------------------------------------------------ */
 
-/* check for a newer release; updates the shared status on success */
+/* check for a newer release; updates the shared status on success.
+ * "now" for the quarantine is the Date: header of the manifest response
+ * (there is no wall clock / SNTP in this firmware, get_time_ms() is
+ * uptime-only). */
 static int32_t update_check( release_info_t *ri ){
     ota_update_config_t cfg;
+    char                date[64];
+    int64_t             now_epoch;
     int32_t             rc;
 
     ota_update_config_load(&cfg);
@@ -894,7 +1063,16 @@ static int32_t update_check( release_info_t *ri ){
         strncpy(cfg.url, OTA_UPDATE_URL_DEFAULT, sizeof(cfg.url) - 1);
     }
 
-    rc = release_fetch(cfg.url, ri);
+    rc = release_fetch(cfg.url, ri, date, sizeof(date));
+    if (rc == -6) {
+        /* prerelease/draft: releases only, never offered for install */
+        log_info("upd: '%s' is a prerelease/draft - skipped", ri->tag);
+        status_set_err("");
+        s_avail = false;
+        s_hold  = false;
+        s_age_h = -1;
+        return 0;
+    }
     if (rc != 0) {
         status_set_err("manifest fetch/parse failed");
         return rc;
@@ -906,8 +1084,24 @@ static int32_t update_check( release_info_t *ri ){
     status_set_err("");
     s_avail = ver_is_newer(ri->tag);
 
-    log_info("upd: release '%s', running '" FW_VERSION "', newer=%d",
-             ri->tag, s_avail ? 1 : 0);
+    /* quarantine bookkeeping */
+    now_epoch = http_date_to_epoch(date);
+    if (s_avail && ri->have_published && (now_epoch > 0)) {
+        int64_t age = now_epoch - ri->published;
+
+        if (age < 0) {
+            age = 0;                        /* clock skew between servers */
+        }
+        s_age_h = (int32_t)(age / 3600);
+        s_hold  = (age < (int64_t)OTA_UPDATE_MIN_AGE_S);
+    } else {
+        /* age unknown: treat as quarantined, never auto-install blind */
+        s_age_h = -1;
+        s_hold  = true;
+    }
+
+    log_info("upd: release '%s', running '" FW_VERSION "', newer=%d hold=%d age_h=%ld",
+             ri->tag, s_avail ? 1 : 0, s_hold ? 1 : 0, (long)s_age_h);
 
     return 0;
 }
@@ -946,8 +1140,9 @@ static int fw_sink( void *arg, const uint8_t *data, uint32_t len ){
 }
 
 /* check + download + flash + reboot. Used by the periodic auto flow
- * (opt-in only) and by the explicit web "install now" trigger. */
-static void update_run_install( void ){
+ * (opt-in only, quarantine enforced) and by the explicit web "install
+ * now" trigger (manual = human action, quarantine exempt). */
+static void update_run_install( bool manual ){
     release_info_t ri;
     fw_sink_t      sink;
     uint32_t       expect_crc = 0;
@@ -964,10 +1159,41 @@ static void update_run_install( void ){
         return;
     }
 
+    if (ri.prerelease) {
+        log_info("upd: '%s' is a prerelease/draft - not installable", ri.tag);
+        status_set_err("prerelease/draft releases are not installable");
+        return;
+    }
+
     if (!s_avail) {
         log_info("upd: already up to date (%s)", ri.tag);
         status_set_err("already up to date");
         return;
+    }
+
+    /* mandatory quarantine for the automatic path: a fresh release may
+     * hide critical bugs and be withdrawn; manual install is exempt
+     * (explicit human action). */
+    if (!manual && s_hold) {
+        if (s_age_h >= 0) {
+            log_warn("upd: auto-install of '%s' skipped: quarantine (%ld h old, min %u h)",
+                     ri.tag, (long)s_age_h,
+                     (unsigned)(OTA_UPDATE_MIN_AGE_S / 3600u));
+            snprintf(s_last_err, sizeof(s_last_err),
+                     "auto-install held: %s is %ld h old (min %u h)",
+                     ri.tag, (long)s_age_h,
+                     (unsigned)(OTA_UPDATE_MIN_AGE_S / 3600u));
+        } else {
+            log_warn("upd: auto-install of '%s' skipped: publication time unknown",
+                     ri.tag);
+            snprintf(s_last_err, sizeof(s_last_err),
+                     "auto-install held: %s publication time unknown",
+                     ri.tag);
+        }
+        return;
+    }
+    if (manual && s_hold) {
+        log_info("upd: manual install of '%s': quarantine not applied", ri.tag);
     }
 
     if (strncmp(ri.url, "http://", 7) != 0) {
@@ -1004,7 +1230,7 @@ static void update_run_install( void ){
         return;
     }
 
-    sc = http_get(ri.url, fw_sink, &sink, true);
+    sc = http_get(ri.url, fw_sink, &sink, true, NULL, 0);
     if (sc != 200) {
         log_error("upd: image download failed status=%ld", sc);
         (void)ota_fw_end_expect(sink.crc);  /* disarm the OTA session */
@@ -1057,7 +1283,7 @@ static void ota_update_task( void *arg ){
         if (s_req_install) {
             s_req_install = false;
             s_busy        = true;
-            update_run_install();
+            update_run_install(true);       /* manual: quarantine exempt */
             s_busy    = false;
             elapsed_s = 0;
             continue;
@@ -1085,7 +1311,7 @@ static void ota_update_task( void *arg ){
         if (elapsed_s >= cfg.period_h * 3600u) {
             elapsed_s = 0;
             s_busy    = true;
-            update_run_install();           /* opt-in: auto apply + reboot */
+            update_run_install(false);      /* auto: quarantine enforced */
             s_busy = false;
         }
     }
@@ -1106,6 +1332,8 @@ void ota_update_init( void ){
     s_last_check_ms = 0;
     s_avail       = false;
     s_busy        = false;
+    s_hold        = false;
+    s_age_h       = -1;
     s_last_tag[0] = 0;
     s_last_err[0] = 0;
 
