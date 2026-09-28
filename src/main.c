@@ -40,6 +40,7 @@
 #include "config_page/config_api_calls.h"
 #include "net_ip.h"
 #include "ota.h"
+#include "ota_update.h"
 #include "statistics.h"
 #include "indication.h"
 #include "telemetry.h"
@@ -399,6 +400,8 @@ __init int main(void) {
     tcp_server_init(tcp_to_halow_send);
     log_debug("telemetry_init");
     telemetry_init();
+    log_debug("ota_update_init");
+    ota_update_init();
     log_debug("rns_stream_decoder_init");
     rns_stream_decoder_init(&tcp_rns_decoder, rns_tcp_rx_handler);
     //test_start();

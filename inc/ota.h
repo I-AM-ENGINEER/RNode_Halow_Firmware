@@ -19,6 +19,11 @@ void   ota_wota_session_abort( void );
 int32_t ota_fw_begin( uint32_t total_size, uint32_t expect_crc32 );
 int32_t ota_fw_write_chunk( uint32_t off, const uint8_t *data, uint16_t len );
 int32_t ota_fw_end( void );
+/* Same as ota_fw_end(), but the expected CRC is supplied by the caller
+ * instead of being fixed at ota_fw_begin() time (the GitHub update
+ * downloader only learns the CRC from the manifest/sidecar, possibly
+ * not at all). */
+int32_t ota_fw_end_expect( uint32_t expect_crc32 );
 bool    ota_fw_active( void );      /* true while a firmware-OTA session is open */
 
 #endif // __OTA_H__

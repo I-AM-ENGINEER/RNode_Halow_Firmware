@@ -234,6 +234,16 @@ int32_t ota_fw_end( void ){
     return 0;
 }
 
+int32_t ota_fw_end_expect( uint32_t expect_crc32 ){
+    if (!s_fw_ota.active) {
+        return -1;
+    }
+
+    s_fw_ota.expect_crc32 = expect_crc32;
+
+    return ota_fw_end();
+}
+
 extern int32_t __real_lwip_netif_hook_inputdata(struct netif* nif, uint8_t* data, uint32_t len);
 
 static int ota_cmd_firmware_data(struct netif* nif, uint8_t* data, uint32_t len){
