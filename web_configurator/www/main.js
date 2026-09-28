@@ -2092,6 +2092,15 @@
         const msgs = [];
         if (ota.busy) { msgs.push('Update in progress, do not power off the device...'); }
         if (ota.err) { msgs.push(ota.err); }
+        if (ota.hold && ota.avail) {
+            const n = Number(ota.age_h);
+            const age = (Number.isFinite(n) && n >= 0)
+                ? (n + ' h old')
+                : 'publication time unknown';
+            msgs.push('Newer release ' + (ota.tag || '') +
+                ' is within the 3-day quarantine (' + age +
+                '); auto-install is held. Use "Install now" to install it immediately.');
+        }
         setStatus('fw_auto_status', msgs.join(' '), !!ota.err);
     }
 
@@ -2317,8 +2326,17 @@
             const tarU8 = new Uint8Array(tarBuf);
 
             const allEntries = tarParse(tarU8);
-            const fwEntry = allEntries.find(e => e.name === 'fw.bin' || e.name === '/fw.bin');
-            const fileEntries = allEntries.filter(e => e.name !== 'fw.bin' && e.name !== '/fw.bin');
+            let fwEntry = allEntries.find(e => e.name === 'fw.bin' || e.name === '/fw.bin');
+            let fileEntries = allEntries.filter(e => e.name !== 'fw.bin' && e.name !== '/fw.bin');
+
+            if (allEntries.length === 0 && /\.bin$/i.test(tarFile.name)) {
+                // Raw release asset (e.g. RNode-Halow-v2_4_0.fw.bin):
+                // firmware only, no www/ update. The device-side CRC check
+                // uses the same bytes, so this works exactly like the
+                // fw.bin entry from the tar.
+                fwEntry = { name: 'fw.bin', data: tarU8 };
+                ok('Raw firmware image: ' + tarU8.length + ' bytes');
+            }
 
             if (!fwEntry && fileEntries.length === 0) {
                 throw new Error('No files in archive');
